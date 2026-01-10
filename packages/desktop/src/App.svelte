@@ -235,7 +235,7 @@
     </aside>
 
     <!-- Main Content -->
-    <section class="flex-1 flex flex-col min-w-0 h-full overflow-hidden p-4 {currentView === 'map' ? 'opacity-0 pointer-events-none' : ''}">
+    <section class="flex-1 flex flex-col min-w-0 h-full overflow-hidden {currentView === 'map' ? '' : 'p-4'}">
         {#if currentView === "library"}
             <!-- Toolbar -->
             <header class="flex justify-between items-center mb-4 shrink-0">
@@ -318,13 +318,10 @@
             {/if}
         {:else if currentView === "settings"}
             <Settings {dbPath} {thumbDir} {version} />
+        {:else if currentView === "map"}
+            <Map {photos} />
         {/if}
     </section>
-
-    <!-- Map is always mounted but hidden when not active, for background preloading -->
-    <div class="absolute inset-0 left-48 z-10 transition-none {currentView === 'map' ? 'opacity-100' : 'opacity-0 pointer-events-none'}">
-        <Map {photos} />
-    </div>
 </main>
 
 {#if previewPhoto}

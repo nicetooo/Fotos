@@ -10,31 +10,21 @@
     }>();
 
     let clearCacheLoading = $state(false);
-    let regenerateLoading = $state(false);
 
     async function handleClearCache() {
-        if (!thumbDir) return;
+        if (!thumbDir || !dbPath) return;
+
+        const confirmed = confirm("This will delete all imported photos and thumbnails. Map cache will be preserved.\n\nContinue?");
+        if (!confirmed) return;
+
         clearCacheLoading = true;
         try {
-            await invoke("clear_thumbnail_cache", { thumbDir });
+            await invoke("clear_app_data", { thumbDir, dbPath });
             await emit("reload-photos");
         } catch (e) {
-            alert("Failed to clear cache: " + e);
+            alert("Failed to clear data: " + e);
         } finally {
             clearCacheLoading = false;
-        }
-    }
-
-    async function handleRegenerate() {
-        if (!dbPath || !thumbDir) return;
-        regenerateLoading = true;
-        try {
-            await invoke("regenerate_thumbnails", { dbPath, thumbDir });
-            await emit("reload-photos");
-        } catch (e) {
-            alert("Failed to regenerate: " + e);
-        } finally {
-            regenerateLoading = false;
         }
     }
 
@@ -102,17 +92,6 @@
                     <i class="fa-solid fa-spinner fa-spin mr-1"></i>
                 {/if}
                 Clear Cache
-            </button>
-
-            <button
-                onclick={handleRegenerate}
-                disabled={regenerateLoading}
-                class="px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
-            >
-                {#if regenerateLoading}
-                    <i class="fa-solid fa-spinner fa-spin mr-1"></i>
-                {/if}
-                Regenerate
             </button>
         </div>
     </section>

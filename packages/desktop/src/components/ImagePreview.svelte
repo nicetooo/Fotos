@@ -9,16 +9,18 @@
     let container: HTMLDivElement | undefined = $state();
     let zoom = $state(1);
     let loaded = $state(false);
+    let error = $state(false);
     let naturalWidth = $state(0);
     let naturalHeight = $state(0);
     let containerWidth = $state(0);
     let containerHeight = $state(0);
 
-    // Reset zoom when src changes
+    // Reset state when src changes
     $effect(() => {
         src;
         zoom = 1;
         loaded = false;
+        error = false;
         if (container) {
             container.scrollLeft = 0;
             container.scrollTop = 0;
@@ -43,6 +45,12 @@
         naturalWidth = img.naturalWidth;
         naturalHeight = img.naturalHeight;
         loaded = true;
+        error = false;
+    }
+
+    function handleError() {
+        error = true;
+        loaded = false;
     }
 
     // Calculate base size that fits container while preserving aspect ratio
@@ -132,7 +140,13 @@
         class="flex items-center justify-center"
         style="min-width: {Math.max(containerWidth, zoomedWidth)}px; min-height: {Math.max(containerHeight, zoomedHeight)}px;"
     >
-        {#if !loaded}
+        {#if error}
+            <div class="flex flex-col items-center justify-center text-neutral-500 gap-3">
+                <i class="fa-solid fa-image-slash text-4xl"></i>
+                <p class="text-sm">Unable to load image</p>
+                <p class="text-xs text-neutral-600">File may have been moved or the drive disconnected</p>
+            </div>
+        {:else if !loaded}
             <div class="absolute inset-0 flex items-center justify-center">
                 <i class="fa-solid fa-spinner fa-spin text-neutral-500 text-2xl"></i>
             </div>
@@ -140,9 +154,10 @@
         <img
             src={convertFileSrc(src)}
             {alt}
-            class="{loaded ? '' : 'opacity-0'}"
+            class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
             style="width: {zoomedWidth}px; height: {zoomedHeight}px;"
             onload={handleLoad}
+            onerror={handleError}
             draggable="false"
         />
     </div>

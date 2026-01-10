@@ -102,11 +102,19 @@ async fn import_photos(
 }
 
 #[tauri::command]
-async fn clear_thumbnail_cache(thumb_dir: String) -> Result<(), String> {
+async fn clear_app_data(thumb_dir: String, db_path: String) -> Result<(), String> {
+    // Clear thumbnails
     if std::path::Path::new(&thumb_dir).exists() {
         std::fs::remove_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
     }
     std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
+
+    // Clear database
+    if std::path::Path::new(&db_path).exists() {
+        std::fs::remove_file(&db_path).map_err(|e| e.to_string())?;
+    }
+
+    // Note: map_tiles directory is preserved
     Ok(())
 }
 
@@ -213,7 +221,7 @@ pub fn run() {
             get_core_version,
             import_photos,
             list_photos,
-            clear_thumbnail_cache,
+            clear_app_data,
             regenerate_thumbnails,
             read_file_bytes,
             get_cached_tile,
