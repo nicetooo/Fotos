@@ -45,3 +45,26 @@ fn get_thumbnail_filename(path: &Path) -> Result<String, CoreError> {
     let hash = blake3::hash(path_str.as_bytes());
     Ok(format!("{}.jpg", hash.to_hex()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thumbnail_naming_is_deterministic() {
+        let path1 = Path::new("/a/b/c.jpg");
+        let path2 = Path::new("/a/b/c.jpg");
+        let path3 = Path::new("/x/y/z.jpg");
+
+        let name1 = get_thumbnail_filename(path1).unwrap();
+        let name2 = get_thumbnail_filename(path2).unwrap();
+        let name3 = get_thumbnail_filename(path3).unwrap();
+
+        // 1. Same path -> Same name
+        assert_eq!(name1, name2);
+        // 2. Different path -> Different name (Probability of collision is near zero)
+        assert_ne!(name1, name3);
+        // 3. Extension is always .jpg
+        assert!(name1.ends_with(".jpg"));
+    }
+}

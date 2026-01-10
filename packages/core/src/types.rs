@@ -1,15 +1,16 @@
+use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PhotoId(pub i64);
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportResult {
     pub success: u32,
     pub failure: u32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PhotoMetadata {
     pub make: Option<String>,
     pub model: Option<String>,
@@ -25,7 +26,7 @@ pub struct PhotoMetadata {
     pub orientation: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhotoInfo {
     pub id: PhotoId,
     pub path: PathBuf,

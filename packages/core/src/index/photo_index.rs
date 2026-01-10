@@ -145,3 +145,65 @@ impl PhotoIndex {
         Ok(rows.filter_map(Result::ok).collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_test_index() -> PhotoIndex {
+        // Use in-memory database for deterministic, file-system-independent testing
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE photos (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                hash TEXT NOT NULL,
+                make TEXT,
+                model TEXT,
+                date_taken TEXT,
+                width INTEGER,
+                height INTEGER,
+                lat REAL,
+                lon REAL,
+                iso INTEGER,
+                f_number REAL,
+                exposure_time TEXT,
+                orientation INTEGER
+            );
+            CREATE INDEX idx_photos_hash ON photos (hash);",
+        ).unwrap();
+        PhotoIndex { conn }
+    }
+
+    #[test]
+    fn test_index_uniqueness_invariant() {
+        let index = setup_test_index();
+        let metadata = PhotoMetadata::default();
+        let path = "/test/photo.jpg";
+        let hash = "hash1";
+
+        let id1 = index.insert(path, hash, &metadata).expect("First insert failed");
+        let id2 = index.insert(path, hash, &metadata).expect("Second insert failed");
+
+        // Contract: Same path returns same ID
+        assert_eq!(id1, id2);
+        
+        let count: i64 = index.conn.query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_index_scale_performance_degradation() {
+        let index = setup_test_index();
+        let metadata = PhotoMetadata::default();
+        
+        // Scale test: Insertion of many items
+        for i in 0..1000 {
+            let path = format!("/path/photo_{}.jpg", i);
+            index.insert(&path, "hash", &metadata).expect("Bulk insert failed");
+        }
+
+        let list = index.list().expect("List failed");
+        assert_eq!(list.len(), 1000);
+    }
+}

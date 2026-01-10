@@ -107,3 +107,34 @@ fn get_gps_coord(exif: &exif::Exif, tag: Tag, ref_tag: Tag) -> Option<f64> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+
+    #[test]
+    fn test_metadata_graceful_failure_invariant() {
+        let temp_dir = std::env::temp_dir().join("fotos_metadata_test");
+        if temp_dir.exists() { std::fs::remove_dir_all(&temp_dir).unwrap(); }
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let corrupt_path = temp_dir.join("corrupt.jpg");
+        let mut file = File::create(&corrupt_path).unwrap();
+        // Write garbage data that is NOT a valid image
+        file.write_all(b"not an image at all").unwrap();
+
+        // Contract: read_date_taken should return Ok(None) for non-image/corrupt files
+        let result = read_date_taken(&corrupt_path).expect("Should not fail IO");
+        assert_eq!(result, None);
+
+        // Contract: read_metadata should return basic object with 0 dimensions rather than Err
+        let meta = read_metadata(&corrupt_path).expect("Should not fail IO");
+        assert_eq!(meta.width, 0);
+        assert_eq!(meta.height, 0);
+        assert_eq!(meta.date_taken, None);
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+}
