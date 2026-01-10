@@ -434,9 +434,10 @@
 {#if previewPhoto}
     <!-- Photo Preview Overlay -->
     <div
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm animate-in fade-in duration-200"
+        class="fixed inset-0 z-50 flex bg-black/95 backdrop-blur-sm animate-in fade-in duration-200"
         onclick={closePreview}
     >
+        <!-- Close button -->
         <div class="absolute top-6 right-6 flex items-center gap-4 z-10">
             <button
                 onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
@@ -453,26 +454,109 @@
             </button>
         </div>
 
-        <div
-            class="relative max-w-[95vw] max-h-[95vh] rounded-lg overflow-hidden shadow-2xl"
-            onclick={(e) => e.stopPropagation()}
-        >
+        <!-- Image container -->
+        <div class="flex-1 flex items-center justify-center p-4" onclick={(e) => e.stopPropagation()}>
             <ThumbnailImage
                 path={previewPhoto.path}
                 alt="Full preview"
-                className="max-w-full max-h-[90vh] object-contain"
+                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
             />
+        </div>
 
-            <div
-                class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent text-white opacity-0 hover:opacity-100 transition-opacity"
-            >
-                <p class="font-mono text-sm truncate">
-                    {previewPhoto.path.split("/").pop()}
-                </p>
-                <p class="text-xs text-slate-400 mt-1">
-                    {previewPhoto.metadata.width} x {previewPhoto.metadata
-                        .height}
-                </p>
+        <!-- Info Panel -->
+        <div
+            class="w-80 bg-slate-900/90 backdrop-blur-xl border-l border-slate-700 p-6 overflow-y-auto"
+            onclick={(e) => e.stopPropagation()}
+        >
+            <h3 class="text-lg font-bold text-white mb-4 truncate" title={previewPhoto.path.split("/").pop()}>
+                {previewPhoto.path.split("/").pop()}
+            </h3>
+
+            <div class="space-y-4">
+                <!-- Date & Time -->
+                {#if previewPhoto.metadata.date_taken}
+                    <div class="flex items-start gap-3">
+                        <i class="fa-solid fa-calendar text-indigo-400 mt-1"></i>
+                        <div>
+                            <p class="text-xs text-slate-500 uppercase tracking-wider">Date Taken</p>
+                            <p class="text-white font-mono text-sm">{previewPhoto.metadata.date_taken}</p>
+                        </div>
+                    </div>
+                {/if}
+
+                <!-- Dimensions -->
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-expand text-indigo-400 mt-1"></i>
+                    <div>
+                        <p class="text-xs text-slate-500 uppercase tracking-wider">Dimensions</p>
+                        <p class="text-white text-sm">{previewPhoto.metadata.width} x {previewPhoto.metadata.height} px</p>
+                    </div>
+                </div>
+
+                <!-- Camera -->
+                {#if previewPhoto.metadata.make || previewPhoto.metadata.model}
+                    <div class="flex items-start gap-3">
+                        <i class="fa-solid fa-camera text-indigo-400 mt-1"></i>
+                        <div>
+                            <p class="text-xs text-slate-500 uppercase tracking-wider">Camera</p>
+                            <p class="text-white text-sm">
+                                {previewPhoto.metadata.make || ""} {previewPhoto.metadata.model || ""}
+                            </p>
+                        </div>
+                    </div>
+                {/if}
+
+                <!-- Exposure Settings -->
+                {#if previewPhoto.metadata.iso || previewPhoto.metadata.f_number || previewPhoto.metadata.exposure_time}
+                    <div class="flex items-start gap-3">
+                        <i class="fa-solid fa-sliders text-indigo-400 mt-1"></i>
+                        <div>
+                            <p class="text-xs text-slate-500 uppercase tracking-wider">Exposure</p>
+                            <div class="flex flex-wrap gap-2 mt-1">
+                                {#if previewPhoto.metadata.iso}
+                                    <span class="px-2 py-1 bg-slate-800 rounded text-xs text-white">ISO {previewPhoto.metadata.iso}</span>
+                                {/if}
+                                {#if previewPhoto.metadata.f_number}
+                                    <span class="px-2 py-1 bg-slate-800 rounded text-xs text-white">f/{previewPhoto.metadata.f_number.toFixed(1)}</span>
+                                {/if}
+                                {#if previewPhoto.metadata.exposure_time}
+                                    <span class="px-2 py-1 bg-slate-800 rounded text-xs text-white">{previewPhoto.metadata.exposure_time}</span>
+                                {/if}
+                            </div>
+                        </div>
+                    </div>
+                {/if}
+
+                <!-- GPS -->
+                {#if previewPhoto.metadata.lat && previewPhoto.metadata.lon}
+                    <div class="flex items-start gap-3">
+                        <i class="fa-solid fa-location-dot text-indigo-400 mt-1"></i>
+                        <div>
+                            <p class="text-xs text-slate-500 uppercase tracking-wider">Location</p>
+                            <p class="text-white text-sm font-mono">
+                                {previewPhoto.metadata.lat.toFixed(6)}, {previewPhoto.metadata.lon.toFixed(6)}
+                            </p>
+                        </div>
+                    </div>
+                {/if}
+
+                <!-- File Path -->
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-folder text-indigo-400 mt-1"></i>
+                    <div>
+                        <p class="text-xs text-slate-500 uppercase tracking-wider">Path</p>
+                        <p class="text-white text-xs font-mono break-all">{previewPhoto.path}</p>
+                    </div>
+                </div>
+
+                <!-- Hash -->
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-fingerprint text-indigo-400 mt-1"></i>
+                    <div>
+                        <p class="text-xs text-slate-500 uppercase tracking-wider">Hash</p>
+                        <p class="text-white text-xs font-mono">{previewPhoto.hash}</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

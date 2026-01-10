@@ -9,23 +9,42 @@ use exif::{In, Tag, Reader, Value};
 pub fn read_metadata(path: &Path) -> Result<PhotoMetadata, CoreError> {
     let file = File::open(path)?;
     let mut buf_reader = BufReader::new(file);
-    
+
     let mut metadata = PhotoMetadata::default();
 
-    // 1. Basic Dimensions (via head scanning)
-    if let Ok(reader) = image::ImageReader::open(path) {
-        if let Ok(dims) = reader.into_dimensions() {
-            metadata.width = dims.0;
-            metadata.height = dims.1;
-        }
-    }
-
-    // 2. EXIF Parsing
+    // EXIF Parsing (get dimensions from EXIF instead of decoding image header)
     let exif_reader = Reader::new();
     let exif = match exif_reader.read_from_container(&mut buf_reader) {
         Ok(exif) => exif,
         Err(_) => return Ok(metadata), // Return partial metadata if EXIF fails
     };
+
+    // Get dimensions from EXIF (much faster than image::ImageReader)
+    if let Some(field) = exif.get_field(Tag::PixelXDimension, In::PRIMARY) {
+        if let Some(w) = field.value.get_uint(0) {
+            metadata.width = w;
+        }
+    }
+    if let Some(field) = exif.get_field(Tag::PixelYDimension, In::PRIMARY) {
+        if let Some(h) = field.value.get_uint(0) {
+            metadata.height = h;
+        }
+    }
+    // Fallback to ImageWidth/ImageLength if PixelXDimension not available
+    if metadata.width == 0 {
+        if let Some(field) = exif.get_field(Tag::ImageWidth, In::PRIMARY) {
+            if let Some(w) = field.value.get_uint(0) {
+                metadata.width = w;
+            }
+        }
+    }
+    if metadata.height == 0 {
+        if let Some(field) = exif.get_field(Tag::ImageLength, In::PRIMARY) {
+            if let Some(h) = field.value.get_uint(0) {
+                metadata.height = h;
+            }
+        }
+    }
 
     // Device & Time
     if let Some(field) = exif.get_field(Tag::Make, In::PRIMARY) {

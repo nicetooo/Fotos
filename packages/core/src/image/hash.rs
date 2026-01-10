@@ -14,14 +14,12 @@ pub fn compute_hash(path: &Path) -> Result<String, CoreError> {
     // Try to use embedded thumbnail first (fast path)
     if let Ok(thumb_data) = try_extract_thumbnail_data(path) {
         if let Ok(img) = image::load_from_memory(&thumb_data) {
-            println!("[hash] using embedded thumbnail for hash");
             let hash = hasher.hash_image(&img);
             return Ok(hash.to_base64());
         }
     }
 
     // Fallback to full image decode (slow path)
-    println!("[hash] falling back to full image decode");
     let img = image::open(path).map_err(|_| CoreError::ImageDecode)?;
     let hash = hasher.hash_image(&img);
     Ok(hash.to_base64())
