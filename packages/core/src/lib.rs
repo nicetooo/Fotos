@@ -16,23 +16,22 @@ pub use image::{generate_thumbnail, compute_hash};
 pub use index::PhotoIndex;
 pub use metadata::{read_metadata, read_date_taken};
 
+uniffi::setup_scaffolding!();
+
+#[uniffi::export]
 pub fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
 /// Runs the complete import pipeline for a directory.
-/// 1. Scans for supported photos.
-/// 2. Extracts metadata (including dimensions).
-/// 3. Computes perceptual hash.
-/// 4. Generates a thumbnail on disk.
-/// 5. Inserts the photo into the index.
-/// Returns success and failure counts.
+#[uniffi::export]
 pub fn run_import_pipeline(
-    root: &std::path::Path,
-    index: &PhotoIndex,
-    config: &PhotoCoreConfig,
+    root: String,
+    index: std::sync::Arc<PhotoIndex>,
+    config: PhotoCoreConfig,
 ) -> Result<ImportResult, CoreError> {
-    let photos = scan_photos(root)?;
+    let root_path = std::path::Path::new(&root);
+    let photos = scan_photos(root_path)?;
     let mut result = ImportResult::default();
 
     for path in photos {
@@ -54,7 +53,7 @@ pub fn run_import_pipeline(
             }
         };
 
-        if generate_thumbnail(&path, config).is_err() {
+        if generate_thumbnail(&path, &config).is_err() {
             result.failure += 1;
             continue;
         }
@@ -66,7 +65,7 @@ pub fn run_import_pipeline(
                 continue;
             }
         };
-        match index.insert(path_str, &hash, &metadata) {
+        match index.insert(path_str.to_string(), hash.clone(), metadata.clone()) {
             Ok(_) => result.success += 1,
             Err(_) => {
                 result.failure += 1;
@@ -105,15 +104,15 @@ mod tests {
         File::create(&v2).unwrap();
         fs::write(&v2, b"more data").unwrap();
 
-        let index = PhotoIndex::open(temp_dir.join("test.db").as_path()).unwrap();
+        let index = PhotoIndex::open(temp_dir.join("test.db").to_string_lossy().to_string()).unwrap();
         let config = PhotoCoreConfig {
-            thumbnail_dir: thumb_dir.clone(),
-            thumbnail_size: 100,
+            thumbnail_dir: thumb_dir.to_string_lossy().to_string(),
+            thumbnail_size: 256,
         };
 
         // Note: The real read_metadata might fail because files aren't real images.
         // But the pipeline is error tolerant!
-        let result = run_import_pipeline(&src_dir, &index, &config).unwrap();
+        let result = run_import_pipeline(src_dir.to_string_lossy().to_string(), index, config).unwrap();
 
         // Since they aren't real images, success will be 0 and failure will be 2.
         // This confirms the pipeline DOES NOT STOP on errors.

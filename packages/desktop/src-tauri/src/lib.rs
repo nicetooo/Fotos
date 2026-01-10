@@ -18,18 +18,18 @@ fn import_photos(
     db_path: String,
     thumb_dir: String,
 ) -> Result<ImportResult, String> {
-    let index = PhotoIndex::open(PathBuf::from(db_path).as_path())
+    let index = PhotoIndex::open(db_path)
         .map_err(|e| e.to_string())?;
     
     let config = PhotoCoreConfig {
-        thumbnail_dir: PathBuf::from(thumb_dir),
+        thumbnail_dir: thumb_dir,
         thumbnail_size: 256,
     };
 
     fotos_core::run_import_pipeline(
-        PathBuf::from(root_path).as_path(),
-        &index,
-        &config
+        root_path,
+        index,
+        config
     ).map_err(|e| e.to_string())
 }
 

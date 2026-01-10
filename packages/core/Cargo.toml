@@ -17,3 +17,7 @@ kamadak-exif = "0.5"
 image_hasher = "3.0.0"
 blake3 = "1.5"
 serde = { version = "1.0", features = ["derive"] }
+uniffi = { version = "0.28", features = ["tokio"] }
+
+[build-dependencies]
+uniffi = { version = "0.28", features = ["build"] }

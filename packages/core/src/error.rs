@@ -1,19 +1,25 @@
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
+    Io(String),
     #[error("Image decode error")]
     ImageDecode,
-
-    #[error("Metadata parse error")]
-    Metadata,
-
     #[error("Database error: {0}")]
-    Database(#[from] rusqlite::Error),
-
+    Database(String),
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+}
+
+impl From<std::io::Error> for CoreError {
+    fn from(err: std::io::Error) -> Self {
+        CoreError::Io(err.to_string())
+    }
+}
+
+impl From<rusqlite::Error> for CoreError {
+    fn from(err: rusqlite::Error) -> Self {
+        CoreError::Database(err.to_string())
+    }
 }

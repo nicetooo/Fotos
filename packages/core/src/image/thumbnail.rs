@@ -8,7 +8,8 @@ pub fn generate_thumbnail(
 ) -> Result<PathBuf, CoreError> {
     // 1. Generate a deterministic filename
     let filename = get_thumbnail_filename(input)?;
-    let output_path = config.thumbnail_dir.join(filename);
+    let thumb_dir = std::path::Path::new(&config.thumbnail_dir);
+    let output_path = thumb_dir.join(filename);
 
     // 2. Performance: Basic disk-level cache check
     if output_path.exists() {
@@ -16,8 +17,8 @@ pub fn generate_thumbnail(
     }
 
     // 3. Ensure the thumbnail directory exists
-    if !config.thumbnail_dir.exists() {
-        std::fs::create_dir_all(&config.thumbnail_dir)?;
+    if !thumb_dir.exists() {
+        std::fs::create_dir_all(thumb_dir)?;
     }
 
     // 4. Decode and generate

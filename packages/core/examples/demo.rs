@@ -22,14 +22,14 @@ fn main() {
     fs::write(&img_path, b"this is not a real image but the pipeline will try to process it").unwrap();
     println!("Created mock file: {:?}", img_path);
 
-    let index = PhotoIndex::open(&db_path).expect("Failed to open index");
+    let index = PhotoIndex::open(db_path.to_string_lossy().to_string()).expect("Failed to open index");
     let config = PhotoCoreConfig {
-        thumbnail_dir: thumb_dir,
+        thumbnail_dir: thumb_dir.to_string_lossy().to_string(),
         thumbnail_size: 256,
     };
 
     println!("Starting import pipeline...");
-    let result = run_import_pipeline(&src_dir, &index, &config).expect("Pipeline failed");
+    let result = run_import_pipeline(src_dir.to_string_lossy().to_string(), index.clone(), config).expect("Pipeline failed");
 
     println!("Import Results:");
     println!("  Success: {}", result.success);

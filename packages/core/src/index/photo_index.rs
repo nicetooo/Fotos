@@ -3,13 +3,18 @@ use std::path::Path;
 
 use crate::{error::CoreError, types::{PhotoId, PhotoInfo, PhotoMetadata}};
 
+use std::sync::Mutex;
+
+#[derive(uniffi::Object)]
 pub struct PhotoIndex {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
+#[uniffi::export]
 impl PhotoIndex {
-    pub fn open(db_path: &Path) -> Result<Self, CoreError> {
-        let conn = Connection::open(db_path)?;
+    #[uniffi::constructor]
+    pub fn open(db_path: String) -> Result<std::sync::Arc<Self>, CoreError> {
+        let conn = Connection::open(std::path::Path::new(&db_path))?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS photos (
                 id INTEGER PRIMARY KEY,
@@ -29,20 +34,22 @@ impl PhotoIndex {
             );
             CREATE INDEX IF NOT EXISTS idx_photos_hash ON photos (hash);",
         )?;
-        Ok(Self { conn })
+        Ok(std::sync::Arc::new(Self { conn: Mutex::new(conn) }))
     }
 
-    pub fn insert(&self, path: &str, hash: &str, metadata: &PhotoMetadata) -> Result<PhotoId, CoreError> {
+    pub fn insert(&self, path: String, hash: String, metadata: PhotoMetadata) -> Result<PhotoId, CoreError> {
+        let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
+        
         // 1. Check if path already exists
-        let mut stmt = self.conn.prepare("SELECT id FROM photos WHERE path = ?1")?;
+        let mut stmt = conn.prepare("SELECT id FROM photos WHERE path = ?1")?;
         let mut rows = stmt.query_map(params![path], |row| row.get::<_, i64>(0))?;
         
         if let Some(existing_id) = rows.next() {
-            return Ok(PhotoId(existing_id?));
+            return Ok(PhotoId { id: existing_id? });
         }
 
         // 2. Insert new record
-        self.conn.execute(
+        conn.execute(
             "INSERT INTO photos (
                 path, hash, make, model, date_taken, width, height, 
                 lat, lon, iso, f_number, exposure_time, orientation
@@ -65,11 +72,12 @@ impl PhotoIndex {
             ],
         )?;
 
-        Ok(PhotoId(self.conn.last_insert_rowid()))
+        Ok(PhotoId { id: conn.last_insert_rowid() })
     }
 
-    pub fn get_by_path(&self, path: &str) -> Result<Option<PhotoInfo>, CoreError> {
-        let mut stmt = self.conn.prepare(
+    pub fn get_by_path(&self, path: String) -> Result<Option<PhotoInfo>, CoreError> {
+        let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare(
             "SELECT 
                 id, path, hash, make, model, date_taken, width, height,
                 lat, lon, iso, f_number, exposure_time, orientation 
@@ -78,8 +86,8 @@ impl PhotoIndex {
         
         let mut rows = stmt.query_map(params![path], |row| {
             Ok(PhotoInfo {
-                id: PhotoId(row.get(0)?),
-                path: std::path::PathBuf::from(row.get::<_, String>(1)?),
+                id: PhotoId { id: row.get(0)? },
+                path: row.get(1)?,
                 hash: row.get(2)?,
                 metadata: PhotoMetadata {
                     make: row.get(3)?,
@@ -114,7 +122,8 @@ impl PhotoIndex {
     /// - Avoid calling this frequently on the full database if UI virtualization is not used.
     /// - Future versions may introduce `LIMIT/OFFSET` paging or an iterator API.
     pub fn list(&self) -> Result<Vec<PhotoInfo>, CoreError> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare(
             "SELECT 
                 id, path, hash, make, model, date_taken, width, height,
                 lat, lon, iso, f_number, exposure_time, orientation 
@@ -123,8 +132,8 @@ impl PhotoIndex {
 
         let rows = stmt.query_map([], |row| {
             Ok(PhotoInfo {
-                id: PhotoId(row.get(0)?),
-                path: std::path::PathBuf::from(row.get::<_, String>(1)?),
+                id: PhotoId { id: row.get(0)? },
+                path: row.get(1)?,
                 hash: row.get(2)?,
                 metadata: PhotoMetadata {
                     make: row.get(3)?,
@@ -150,7 +159,7 @@ impl PhotoIndex {
 mod tests {
     use super::*;
 
-    fn setup_test_index() -> PhotoIndex {
+    fn setup_test_index() -> std::sync::Arc<PhotoIndex> {
         // Use in-memory database for deterministic, file-system-independent testing
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -172,23 +181,24 @@ mod tests {
             );
             CREATE INDEX idx_photos_hash ON photos (hash);",
         ).unwrap();
-        PhotoIndex { conn }
+        std::sync::Arc::new(PhotoIndex { conn: Mutex::new(conn) })
     }
 
     #[test]
     fn test_index_uniqueness_invariant() {
         let index = setup_test_index();
         let metadata = PhotoMetadata::default();
-        let path = "/test/photo.jpg";
-        let hash = "hash1";
+        let path = "/test/photo.jpg".to_string();
+        let hash = "hash1".to_string();
 
-        let id1 = index.insert(path, hash, &metadata).expect("First insert failed");
-        let id2 = index.insert(path, hash, &metadata).expect("Second insert failed");
+        let id1 = index.insert(path.clone(), hash.clone(), metadata.clone()).expect("First insert failed");
+        let id2 = index.insert(path, hash, metadata).expect("Second insert failed");
 
         // Contract: Same path returns same ID
         assert_eq!(id1, id2);
         
-        let count: i64 = index.conn.query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0)).unwrap();
+        let conn = index.conn.lock().unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 1);
     }
 
@@ -200,7 +210,7 @@ mod tests {
         // Scale test: Insertion of many items
         for i in 0..1000 {
             let path = format!("/path/photo_{}.jpg", i);
-            index.insert(&path, "hash", &metadata).expect("Bulk insert failed");
+            index.insert(path, "hash".to_string(), metadata.clone()).expect("Bulk insert failed");
         }
 
         let list = index.list().expect("List failed");

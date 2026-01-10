@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct PhotoCoreConfig {
-    pub thumbnail_dir: PathBuf,
+    pub thumbnail_dir: String,
     pub thumbnail_size: u32,
 }
