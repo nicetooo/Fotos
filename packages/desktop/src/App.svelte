@@ -1,13 +1,13 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+    import { invoke } from "@tauri-apps/api/core";
     import { open } from "@tauri-apps/plugin-dialog";
     import { revealItemInDir } from "@tauri-apps/plugin-opener";
     import { appDataDir, join } from "@tauri-apps/api/path";
     import { listen } from "@tauri-apps/api/event";
     import Settings from "./components/Settings.svelte";
-    import ThumbnailImage from "./components/ThumbnailImage.svelte";
     import VirtualPhotoGrid from "./components/VirtualPhotoGrid.svelte";
+    import ImagePreview from "./components/ImagePreview.svelte";
     import Map from "./components/Map.svelte";
     import type { PhotoInfo } from "./types";
 
@@ -30,10 +30,8 @@
     let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
     let sortOrder = $state<"asc" | "desc">("desc");
 
-    // Zoom states
-    let thumbSize = $state(200); // Grid thumbnail size
-    let previewZoom = $state(1);
-    let previewPan = $state({ x: 0, y: 0 });
+    // Grid thumbnail size (pinch to zoom)
+    let thumbSize = $state(200);
 
     let sortedPhotos = $derived.by(() => {
         const photosCopy = [...photos];
@@ -135,14 +133,10 @@
 
     function openPreview(photo: PhotoInfo) {
         previewPhoto = photo;
-        previewZoom = 1;
-        previewPan = { x: 0, y: 0 };
     }
 
     function closePreview() {
         previewPhoto = null;
-        previewZoom = 1;
-        previewPan = { x: 0, y: 0 };
     }
 
     function handleGridWheel(e: WheelEvent) {
@@ -151,35 +145,6 @@
             const delta = e.deltaY > 0 ? -20 : 20;
             thumbSize = Math.max(100, Math.min(400, thumbSize + delta));
         }
-    }
-
-    let previewContainer: HTMLDivElement | undefined = $state();
-
-    function handlePreviewWheel(e: WheelEvent) {
-        if (!(e.ctrlKey || e.metaKey)) return;
-        e.preventDefault();
-
-        const container = previewContainer;
-        if (!container) return;
-
-        const oldZoom = previewZoom;
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        const newZoom = Math.max(1, oldZoom + delta);
-        if (newZoom === oldZoom) return;
-
-        const scale = newZoom / oldZoom;
-
-        // Current center point in content coordinates
-        const oldCenterX = container.scrollLeft + container.clientWidth / 2;
-        const oldCenterY = container.scrollTop + container.clientHeight / 2;
-
-        previewZoom = newZoom;
-
-        // After zoom, scroll to keep the same center
-        requestAnimationFrame(() => {
-            container.scrollLeft = oldCenterX * scale - container.clientWidth / 2;
-            container.scrollTop = oldCenterY * scale - container.clientHeight / 2;
-        });
     }
 
     function navigatePreview(direction: "prev" | "next") {
@@ -194,12 +159,10 @@
             newIndex = currentIndex < sortedPhotos.length - 1 ? currentIndex + 1 : 0;
         }
         previewPhoto = sortedPhotos[newIndex];
-        previewZoom = 1;
-        previewPan = { x: 0, y: 0 };
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        // Preview navigation
+        // Preview navigation (zoom handled by ImagePreview component)
         if (previewPhoto) {
             switch (e.key) {
                 case "Escape":
@@ -210,16 +173,6 @@
                     break;
                 case "ArrowRight":
                     navigatePreview("next");
-                    break;
-                case "0":
-                    previewZoom = 1;
-                    break;
-                case "=":
-                case "+":
-                    previewZoom = previewZoom + 0.25;
-                    break;
-                case "-":
-                    previewZoom = Math.max(1, previewZoom - 0.25);
                     break;
             }
             return;
@@ -334,8 +287,6 @@
                         {uniqueTs}
                         {thumbSize}
                         onPhotoClick={openPreview}
-                        onShowInFinder={handleShowInFinder}
-                        formatDate={(d) => d || ""}
                     />
                 {:else if !isScanning}
                     <div class="h-full flex flex-col items-center justify-center text-neutral-500">
@@ -421,31 +372,14 @@
         </button>
 
         <!-- Image area -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-            bind:this={previewContainer}
-            class="absolute top-12 left-0 right-64 bottom-0 overflow-auto"
+            class="absolute top-12 left-0 right-64 bottom-0"
             onclick={(e) => e.stopPropagation()}
-            onwheel={handlePreviewWheel}
         >
-            <div
-                class="min-w-full min-h-full flex items-center justify-center"
-                style="width: {previewZoom * 100}%; height: {previewZoom * 100}%;"
-            >
-                {#key previewPhoto.path}
-                    <img
-                        src={convertFileSrc(previewPhoto.path)}
-                        alt="Preview"
-                        class="max-w-full max-h-full object-contain"
-                    />
-                {/key}
-            </div>
+            {#key previewPhoto.path}
+                <ImagePreview src={previewPhoto.path} alt={previewPhoto.path.split("/").pop() || "Preview"} />
+            {/key}
         </div>
-        {#if previewZoom !== 1}
-            <div class="absolute bottom-4 right-72 px-2 py-1 rounded bg-black/60 text-xs text-neutral-300 z-30">
-                {Math.round(previewZoom * 100)}%
-            </div>
-        {/if}
 
         <!-- Info Panel -->
         <div

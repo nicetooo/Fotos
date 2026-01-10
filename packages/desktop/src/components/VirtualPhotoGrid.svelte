@@ -3,14 +3,12 @@
     import ThumbnailImage from "./ThumbnailImage.svelte";
     import type { PhotoInfo } from "../types";
 
-    let { photos, uniqueTs, thumbSize = 200, onPhotoClick, onShowInFinder, formatDate } =
+    let { photos, uniqueTs, thumbSize = 200, onPhotoClick } =
         $props<{
             photos: PhotoInfo[];
             uniqueTs: number;
             thumbSize?: number;
             onPhotoClick: (photo: PhotoInfo) => void;
-            onShowInFinder: (path: string, e: MouseEvent) => void;
-            formatDate: (dateStr?: string) => string;
         }>();
 
     let scrollElement: HTMLDivElement | undefined = $state();
