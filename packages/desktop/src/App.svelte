@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { invoke } from "@tauri-apps/api/core";
+    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
     import { open } from "@tauri-apps/plugin-dialog";
     import { revealItemInDir } from "@tauri-apps/plugin-opener";
     import { appDataDir, join } from "@tauri-apps/api/path";
@@ -135,7 +135,51 @@
     function closePreview() {
         previewPhoto = null;
     }
+
+    function navigatePreview(direction: "prev" | "next") {
+        if (!previewPhoto) return;
+        const currentIndex = sortedPhotos.findIndex(p => p.path === previewPhoto!.path);
+        if (currentIndex === -1) return;
+
+        let newIndex: number;
+        if (direction === "prev") {
+            newIndex = currentIndex > 0 ? currentIndex - 1 : sortedPhotos.length - 1;
+        } else {
+            newIndex = currentIndex < sortedPhotos.length - 1 ? currentIndex + 1 : 0;
+        }
+        previewPhoto = sortedPhotos[newIndex];
+    }
+
+    function handleKeydown(e: KeyboardEvent) {
+        // Preview navigation
+        if (previewPhoto) {
+            switch (e.key) {
+                case "Escape":
+                    closePreview();
+                    break;
+                case "ArrowLeft":
+                    navigatePreview("prev");
+                    break;
+                case "ArrowRight":
+                    navigatePreview("next");
+                    break;
+            }
+            return;
+        }
+
+        // Global shortcuts
+        switch (e.key) {
+            case "i":
+                if (e.metaKey || e.ctrlKey) {
+                    e.preventDefault();
+                    handleScan();
+                }
+                break;
+        }
+    }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <main class="fixed inset-0 flex bg-neutral-900 text-neutral-200 overflow-hidden">
     <!-- Sidebar -->
@@ -270,15 +314,19 @@
 </main>
 
 {#if previewPhoto}
+    {@const currentIndex = sortedPhotos.findIndex(p => p.path === previewPhoto.path)}
     <div
-        class="fixed inset-0 z-50 flex bg-black/90"
+        class="fixed inset-0 z-50 bg-black/95"
         onclick={closePreview}
     >
         <!-- Top bar -->
-        <div class="absolute top-0 left-0 right-0 h-12 flex items-center justify-between px-4 bg-black/50 z-10">
-            <span class="text-sm text-neutral-400 truncate max-w-md">
-                {previewPhoto.path.split("/").pop()}
-            </span>
+        <div class="absolute top-0 left-0 right-64 h-12 flex items-center justify-between px-4 z-20">
+            <div class="flex items-center gap-3">
+                <span class="text-xs text-neutral-500">{currentIndex + 1} / {sortedPhotos.length}</span>
+                <span class="text-sm text-neutral-400 truncate">
+                    {previewPhoto.path.split("/").pop()}
+                </span>
+            </div>
             <div class="flex items-center gap-2">
                 <button
                     onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
@@ -296,18 +344,39 @@
             </div>
         </div>
 
-        <!-- Image -->
-        <div class="flex-1 flex items-center justify-center pt-12" onclick={(e) => e.stopPropagation()}>
-            <ThumbnailImage
-                path={previewPhoto.path}
-                alt="Preview"
-                className="max-w-full max-h-full object-contain"
-            />
+        <!-- Navigation buttons -->
+        <button
+            onclick={(e) => { e.stopPropagation(); navigatePreview("prev"); }}
+            class="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white z-20"
+            title="Previous (←)"
+        >
+            <i class="fa-solid fa-chevron-left"></i>
+        </button>
+        <button
+            onclick={(e) => { e.stopPropagation(); navigatePreview("next"); }}
+            class="absolute right-72 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white z-20"
+            title="Next (→)"
+        >
+            <i class="fa-solid fa-chevron-right"></i>
+        </button>
+
+        <!-- Image area -->
+        <div
+            class="absolute top-12 left-0 right-64 bottom-0 flex items-center justify-center p-4"
+            onclick={(e) => e.stopPropagation()}
+        >
+            {#key previewPhoto.path}
+                <img
+                    src={convertFileSrc(previewPhoto.path)}
+                    alt="Preview"
+                    class="max-w-full max-h-full object-contain"
+                />
+            {/key}
         </div>
 
         <!-- Info Panel -->
         <div
-            class="w-64 bg-neutral-900 border-l border-neutral-800 pt-12 px-4 py-4 overflow-y-auto text-sm"
+            class="absolute top-0 right-0 bottom-0 w-64 bg-neutral-900 border-l border-neutral-800 pt-12 px-4 py-4 overflow-y-auto text-sm"
             onclick={(e) => e.stopPropagation()}
         >
             <div class="space-y-3">
@@ -353,11 +422,6 @@
                 <div>
                     <p class="text-neutral-500 text-xs">Path</p>
                     <p class="text-neutral-200 text-xs font-mono break-all">{previewPhoto.path}</p>
-                </div>
-
-                <div>
-                    <p class="text-neutral-500 text-xs">Hash</p>
-                    <p class="text-neutral-200 text-xs font-mono">{previewPhoto.hash}</p>
                 </div>
             </div>
         </div>

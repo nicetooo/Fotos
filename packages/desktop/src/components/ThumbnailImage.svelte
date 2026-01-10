@@ -7,12 +7,14 @@
         className,
         refreshKey,
         lazy = false,
+        contain = false,
     } = $props<{
         path: string | undefined;
         alt: string;
         className?: string;
         refreshKey?: any;
         lazy?: boolean;
+        contain?: boolean;
     }>();
 
     let src = $state("");
@@ -28,13 +30,11 @@
             loading = false;
             return;
         }
-        // Use asset protocol - no IPC, direct file access
         src = convertFileSrc(path);
         loading = true;
         error = false;
     }
 
-    // Setup intersection observer for lazy loading
     $effect(() => {
         if (lazy && containerElement) {
             observer = new IntersectionObserver(
@@ -46,28 +46,18 @@
                         }
                     });
                 },
-                {
-                    rootMargin: "200px",
-                },
+                { rootMargin: "200px" },
             );
-
             observer.observe(containerElement);
-
-            return () => {
-                observer?.disconnect();
-            };
+            return () => observer?.disconnect();
         }
     });
 
-    // React to path changes, refresh, or intersection
     $effect(() => {
         path;
         refreshKey;
-
         if (lazy) {
-            if (isIntersecting) {
-                updateSrc();
-            }
+            if (isIntersecting) updateSrc();
         } else {
             updateSrc();
         }
@@ -91,7 +81,22 @@
     >
         <i class="fa-solid fa-image text-xl"></i>
     </div>
+{:else if contain}
+    <!-- For preview: show full image with object-contain -->
+    <div bind:this={containerElement} class="{className} flex items-center justify-center">
+        {#if loading}
+            <i class="fa-solid fa-spinner fa-spin text-neutral-600 text-2xl"></i>
+        {/if}
+        <img
+            {src}
+            {alt}
+            class="max-w-full max-h-full object-contain {loading ? 'hidden' : ''}"
+            onload={handleLoad}
+            onerror={handleError}
+        />
+    </div>
 {:else}
+    <!-- For grid: fill container with object-cover -->
     <div bind:this={containerElement} class="{className} relative bg-neutral-800">
         {#if loading}
             <div class="absolute inset-0 flex items-center justify-center">
