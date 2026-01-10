@@ -7,6 +7,7 @@
     import { listen } from "@tauri-apps/api/event";
     import Settings from "./components/Settings.svelte";
     import ThumbnailImage from "./components/ThumbnailImage.svelte";
+    import Map from "./components/Map.svelte";
 
     interface PhotoId {
         id: number;
@@ -15,6 +16,13 @@
         width: number;
         height: number;
         date_taken?: string;
+        iso?: number;
+        f_number?: number;
+        exposure_time?: string;
+        make?: string;
+        model?: string;
+        lat?: number;
+        lon?: number;
     }
     interface PhotoInfo {
         id: PhotoId;
@@ -142,14 +150,37 @@
     function closePreview() {
         previewPhoto = null;
     }
+
+    function formatDate(dateStr?: string): string {
+        if (!dateStr) return "";
+        try {
+            // EXIF date format is usually "YYYY:MM:DD HH:MM:SS"
+            // If it's standard ISO, Date parse works. If it's EXIF, we might need manual parsing or just display.
+            // Let's try simple display first, or replace : with - for the date part.
+            // Many parsers handle it, but to be safe:
+            const standardized = dateStr.replace(
+                /^(\d{4}):(\d{2}):(\d{2})/,
+                "$1-$2-$3",
+            );
+            const date = new Date(standardized);
+            if (isNaN(date.getTime())) return dateStr;
+            return date.toLocaleDateString(undefined, {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+            });
+        } catch {
+            return dateStr;
+        }
+    }
 </script>
 
 <main
-    class="flex h-screen w-full bg-[#0f172a] text-slate-200 overflow-hidden font-sans"
+    class="fixed inset-0 flex bg-[#0f172a] text-slate-200 overflow-hidden font-sans"
 >
     <!-- Sidebar -->
     <aside
-        class="w-64 border-r border-slate-800 bg-[#0f172a]/50 backdrop-blur-xl flex flex-col p-6 gap-8"
+        class="w-64 shrink-0 border-r border-slate-800 bg-[#0f172a]/50 backdrop-blur-xl flex flex-col p-6 gap-8 h-full overflow-y-auto"
     >
         <div class="flex items-center gap-3 px-2">
             <div
@@ -174,16 +205,16 @@
                 <span class="font-medium">Library</span>
             </button>
             <button
-                onclick={() => (currentView = "activities")}
+                onclick={() => (currentView = "map")}
                 class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group {currentView ===
-                'activities'
+                'map'
                     ? 'bg-white/10 text-white'
                     : 'text-slate-400 hover:bg-white/5 hover:text-white'}"
             >
                 <i
-                    class="fa-solid fa-arrows-rotate group-hover:rotate-180 transition-transform duration-500"
+                    class="fa-solid fa-map-location-dot group-hover:scale-110 transition-transform"
                 ></i>
-                <span class="font-medium">Activities</span>
+                <span class="font-medium">Map</span>
             </button>
             <button
                 onclick={() => (currentView = "settings")}
@@ -215,7 +246,12 @@
     </aside>
 
     <!-- Main Content -->
-    <section class="flex-1 flex flex-col p-8 overflow-hidden relative">
+    <section
+        class="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative {currentView ===
+        'map'
+            ? 'p-0'
+            : 'p-8'}"
+    >
         {#if currentView === "library"}
             <!-- Header -->
             <header class="flex justify-between items-end mb-8 shrink-0">
@@ -269,7 +305,7 @@
                                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                                 />
                                 <div
-                                    class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-between"
+                                    class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-between"
                                 >
                                     <div class="flex justify-end">
                                         <button
@@ -278,27 +314,69 @@
                                                     photo.path,
                                                     e,
                                                 )}
-                                            class="p-2 rounded-full bg-black/40 hover:bg-black/60 text-white/80 hover:text-white transition-colors backdrop-blur-sm"
+                                            class="p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white/80 hover:text-white transition-colors backdrop-blur-sm"
                                             title="Show in Finder"
                                         >
                                             <i
-                                                class="fa-solid fa-folder-open text-xs"
+                                                class="fa-solid fa-folder-open text-[10px]"
                                             ></i>
                                         </button>
                                     </div>
 
-                                    <div>
+                                    <div class="flex flex-col gap-0.5">
                                         <p
-                                            class="text-[10px] text-slate-300 truncate font-mono"
+                                            class="text-[10px] text-white font-bold truncate"
                                         >
                                             {photo.path.split("/").pop()}
                                         </p>
-                                        <p
-                                            class="text-[9px] text-indigo-400 font-bold"
+
+                                        <div
+                                            class="flex items-center gap-2 text-[9px] text-slate-300 font-mono opacity-90"
                                         >
-                                            {photo.metadata.width}x{photo
-                                                .metadata.height}
-                                        </p>
+                                            <span>
+                                                {photo.metadata.width}x{photo
+                                                    .metadata.height}
+                                            </span>
+                                            <span class="uppercase">
+                                                {photo.path.split(".").pop()}
+                                            </span>
+                                        </div>
+
+                                        {#if photo.metadata.date_taken}
+                                            <div
+                                                class="flex items-center gap-1 text-[9px] text-indigo-300"
+                                            >
+                                                <i
+                                                    class="fa-regular fa-calendar text-[8px]"
+                                                ></i>
+                                                <span
+                                                    >{formatDate(
+                                                        photo.metadata
+                                                            .date_taken,
+                                                    )}</span
+                                                >
+                                            </div>
+                                        {/if}
+
+                                        {#if photo.metadata.iso || photo.metadata.f_number}
+                                            <div
+                                                class="flex items-center gap-2 text-[8px] text-slate-400 mt-0.5"
+                                            >
+                                                {#if photo.metadata.iso}
+                                                    <span
+                                                        class="bg-slate-700/50 px-1 rounded"
+                                                        >ISO {photo.metadata
+                                                            .iso}</span
+                                                    >
+                                                {/if}
+                                                {#if photo.metadata.f_number}
+                                                    <span
+                                                        >ƒ/{photo.metadata
+                                                            .f_number}</span
+                                                    >
+                                                {/if}
+                                            </div>
+                                        {/if}
                                     </div>
                                 </div>
                             </div>
@@ -376,23 +454,8 @@
             {/if}
         {:else if currentView === "settings"}
             <Settings {dbPath} {thumbDir} {version} />
-        {:else}
-            <!-- Activities Placeholder -->
-            <div
-                class="h-full flex flex-col items-center justify-center p-12 text-center animate-in fade-in zoom-in-95"
-            >
-                <div
-                    class="w-20 h-20 rounded-full bg-slate-800/50 flex items-center justify-center mb-6 text-slate-600"
-                >
-                    <i class="fa-solid fa-person-digging text-4xl"></i>
-                </div>
-                <h3 class="text-xl font-bold text-slate-300 mb-2">
-                    Work in Progress
-                </h3>
-                <p class="text-slate-500">
-                    Activities dashboard is coming soon.
-                </p>
-            </div>
+        {:else if currentView === "map"}
+            <Map {photos} />
         {/if}
     </section>
 </main>
