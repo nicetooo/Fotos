@@ -7,33 +7,9 @@
     import { listen } from "@tauri-apps/api/event";
     import Settings from "./components/Settings.svelte";
     import ThumbnailImage from "./components/ThumbnailImage.svelte";
+    import VirtualPhotoGrid from "./components/VirtualPhotoGrid.svelte";
     import Map from "./components/Map.svelte";
-
-    interface PhotoId {
-        id: number;
-    }
-    interface PhotoMetadata {
-        width: number;
-        height: number;
-        date_taken?: string;
-        iso?: number;
-        f_number?: number;
-        exposure_time?: string;
-        make?: string;
-        model?: string;
-        lat?: number;
-        lon?: number;
-    }
-    interface PhotoInfo {
-        id: PhotoId;
-        path: string;
-        hash: string;
-        metadata: PhotoMetadata;
-        thumb_path?: string;
-        file_size: number;
-        created_at?: number;
-        modified_at?: number;
-    }
+    import type { PhotoInfo } from "./types";
 
     let version = $state("Loading...");
     let currentView = $state("library");
@@ -368,100 +344,15 @@
             {/if}
 
             <!-- Photo Grid -->
-            <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+            <div class="flex-1 overflow-hidden flex flex-col">
                 {#if photos.length > 0}
-                    <div
-                        class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
-                    >
-                        {#each sortedPhotos as photo (photo.id.id)}
-                            <div
-                                class="aspect-square rounded-2xl bg-slate-800 overflow-hidden group relative border border-slate-700/50 hover:border-indigo-500/50 transition-all shadow-lg cursor-pointer"
-                                onclick={() => openPreview(photo)}
-                            >
-                                <ThumbnailImage
-                                    path={photo.thumb_path || photo.path}
-                                    refreshKey={uniqueTs}
-                                    alt="Photo thumbnail"
-                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                                />
-                                <div
-                                    class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-between"
-                                >
-                                    <div class="flex justify-end">
-                                        <button
-                                            onclick={(e) =>
-                                                handleShowInFinder(
-                                                    photo.path,
-                                                    e,
-                                                )}
-                                            class="p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white/80 hover:text-white transition-colors backdrop-blur-sm"
-                                            title="Show in Finder"
-                                        >
-                                            <i
-                                                class="fa-solid fa-folder-open text-[10px]"
-                                            ></i>
-                                        </button>
-                                    </div>
-
-                                    <div class="flex flex-col gap-0.5">
-                                        <p
-                                            class="text-[10px] text-white font-bold truncate"
-                                        >
-                                            {photo.path.split("/").pop()}
-                                        </p>
-
-                                        <div
-                                            class="flex items-center gap-2 text-[9px] text-slate-300 font-mono opacity-90"
-                                        >
-                                            <span>
-                                                {photo.metadata.width}x{photo
-                                                    .metadata.height}
-                                            </span>
-                                            <span class="uppercase">
-                                                {photo.path.split(".").pop()}
-                                            </span>
-                                        </div>
-
-                                        {#if photo.metadata.date_taken}
-                                            <div
-                                                class="flex items-center gap-1 text-[9px] text-indigo-300"
-                                            >
-                                                <i
-                                                    class="fa-regular fa-calendar text-[8px]"
-                                                ></i>
-                                                <span
-                                                    >{formatDate(
-                                                        photo.metadata
-                                                            .date_taken,
-                                                    )}</span
-                                                >
-                                            </div>
-                                        {/if}
-
-                                        {#if photo.metadata.iso || photo.metadata.f_number}
-                                            <div
-                                                class="flex items-center gap-2 text-[8px] text-slate-400 mt-0.5"
-                                            >
-                                                {#if photo.metadata.iso}
-                                                    <span
-                                                        class="bg-slate-700/50 px-1 rounded"
-                                                        >ISO {photo.metadata
-                                                            .iso}</span
-                                                    >
-                                                {/if}
-                                                {#if photo.metadata.f_number}
-                                                    <span
-                                                        >ƒ/{photo.metadata
-                                                            .f_number}</span
-                                                    >
-                                                {/if}
-                                            </div>
-                                        {/if}
-                                    </div>
-                                </div>
-                            </div>
-                        {/each}
-                    </div>
+                    <VirtualPhotoGrid
+                        photos={sortedPhotos}
+                        {uniqueTs}
+                        onPhotoClick={openPreview}
+                        onShowInFinder={handleShowInFinder}
+                        {formatDate}
+                    />
                 {:else if !isScanning}
                     <div
                         class="h-full flex flex-col items-center justify-center p-12 text-center"
