@@ -1,6 +1,6 @@
 use image_hasher::{HasherConfig, HashAlg};
 use std::path::Path;
-use std::io::{BufReader, Read, Seek};
+use std::io::{BufReader, Read, Seek, Cursor};
 use crate::error::CoreError;
 
 /// Compute perceptual hash of an image.
@@ -76,12 +76,17 @@ fn is_tiff_based(path: &Path) -> bool {
 
 /// Extract embedded JPEG thumbnail data from EXIF.
 /// Handles both JPEG and TIFF-based (RAW) files.
+/// Optimized: reads first 256KB into memory to avoid slow disk seeks on external drives.
 fn try_extract_thumbnail_data(path: &Path) -> Result<Vec<u8>, CoreError> {
+    // Read first 256KB into memory for fast EXIF parsing
     let file = std::fs::File::open(path).map_err(|_| CoreError::Io("open failed".into()))?;
-    let mut reader = BufReader::new(file);
+    let mut buf_reader = BufReader::with_capacity(256 * 1024, file);
+    let mut header_buf = vec![0u8; 256 * 1024];
+    let bytes_read = buf_reader.read(&mut header_buf).unwrap_or(0);
+    header_buf.truncate(bytes_read);
 
     let exif_reader = exif::Reader::new();
-    let exif = exif_reader.read_from_container(&mut reader)
+    let exif = exif_reader.read_from_container(&mut Cursor::new(&header_buf))
         .map_err(|_| CoreError::Io("no exif".into()))?;
 
     let thumbnail_field = exif.get_field(exif::Tag::JPEGInterchangeFormat, exif::In::THUMBNAIL)
@@ -103,7 +108,14 @@ fn try_extract_thumbnail_data(path: &Path) -> Result<Vec<u8>, CoreError> {
         find_jpeg_tiff_header_offset(path)? + tiff_offset as u64
     };
 
-    // Read thumbnail data
+    // Check if thumbnail is within our buffer
+    let end_offset = absolute_offset as usize + length;
+    if end_offset <= header_buf.len() {
+        // Fast path: thumbnail is in buffer
+        return Ok(header_buf[absolute_offset as usize..end_offset].to_vec());
+    }
+
+    // Slow path: need to read from file
     let file = std::fs::File::open(path).map_err(|_| CoreError::Io("open failed".into()))?;
     let mut reader = BufReader::new(file);
 

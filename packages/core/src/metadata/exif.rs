@@ -1,22 +1,36 @@
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read, Cursor};
 use std::path::Path;
 use crate::error::CoreError;
 use crate::types::PhotoMetadata;
 use exif::{In, Tag, Reader, Value};
 
 /// Reads comprehensive EXIF metadata from a photo.
+/// Optimized: reads first 256KB into memory to avoid slow disk seeks on external drives.
 pub fn read_metadata(path: &Path) -> Result<PhotoMetadata, CoreError> {
-    let file = File::open(path)?;
-    let mut buf_reader = BufReader::new(file);
-
     let mut metadata = PhotoMetadata::default();
 
-    // EXIF Parsing (get dimensions from EXIF instead of decoding image header)
+    // Read first 256KB into memory - enough for EXIF header in most cases
+    // This avoids slow random seeks on external drives
+    let file = File::open(path)?;
+    let mut buf_reader = BufReader::with_capacity(256 * 1024, file);
+    let mut header_buf = vec![0u8; 256 * 1024];
+    let bytes_read = buf_reader.read(&mut header_buf).unwrap_or(0);
+    header_buf.truncate(bytes_read);
+
+    // Parse EXIF from memory buffer
     let exif_reader = Reader::new();
-    let exif = match exif_reader.read_from_container(&mut buf_reader) {
+    let exif = match exif_reader.read_from_container(&mut Cursor::new(&header_buf)) {
         Ok(exif) => exif,
-        Err(_) => return Ok(metadata), // Return partial metadata if EXIF fails
+        Err(_) => {
+            // If parsing from buffer fails, try reading the whole file (fallback)
+            let file = File::open(path)?;
+            let mut reader = BufReader::new(file);
+            match exif_reader.read_from_container(&mut reader) {
+                Ok(exif) => exif,
+                Err(_) => return Ok(metadata),
+            }
+        }
     };
 
     // Get dimensions from EXIF (much faster than image::ImageReader)

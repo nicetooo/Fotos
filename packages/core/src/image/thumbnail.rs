@@ -60,7 +60,11 @@ fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Resu
     if let Ok(embedded_thumb) = thumb_result {
         // Apply orientation correction to embedded thumbnail
         let corrected_thumb = if let Some(orient) = orientation {
-            apply_orientation_correction(&embedded_thumb, orient)?
+            if orient > 1 {
+                apply_orientation_correction(&embedded_thumb, orient)?
+            } else {
+                embedded_thumb
+            }
         } else {
             embedded_thumb
         };
@@ -196,14 +200,19 @@ pub fn extract_raw_preview(path: &Path) -> Result<Vec<u8>, ThumbnailError> {
 
 /// Reads EXIF orientation tag from an image file.
 /// Tries multiple IFDs (PRIMARY and THUMBNAIL) to find the tag.
+/// Optimized: reads first 256KB into memory to avoid slow disk seeks.
 fn read_exif_orientation(source: &Path) -> Option<u32> {
-    use std::io::BufReader;
-    
+    use std::io::{BufReader, Read, Cursor};
+
+    // Read first 256KB - NEF files may have orientation tag further in
     let file = std::fs::File::open(source).ok()?;
-    let mut reader = BufReader::new(file);
-    
+    let mut buf_reader = BufReader::with_capacity(256 * 1024, file);
+    let mut header_buf = vec![0u8; 256 * 1024];
+    let bytes_read = buf_reader.read(&mut header_buf).ok()?;
+    header_buf.truncate(bytes_read);
+
     let exif_reader = exif::Reader::new();
-    let exif = exif_reader.read_from_container(&mut reader).ok()?;
+    let exif = exif_reader.read_from_container(&mut Cursor::new(&header_buf)).ok()?;
 
     // Check PRIMARY IFD first, then THUMBNAIL IFD
     for ifd in &[exif::In::PRIMARY, exif::In::THUMBNAIL] {
@@ -213,7 +222,7 @@ fn read_exif_orientation(source: &Path) -> Option<u32> {
             }
         }
     }
-    
+
     None
 }
 
@@ -274,15 +283,20 @@ fn is_tiff_based(source: &Path) -> bool {
 
 /// Attempts to extract and resize embedded EXIF thumbnail.
 /// Returns the JPEG bytes if successful, or an error if not available or too small.
+/// Optimized: reads first 256KB into memory to avoid slow disk seeks.
 fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8>, ThumbnailError> {
-    use std::io::BufReader;
+    use std::io::{BufReader, Read, Cursor};
 
+    // Read first 256KB into memory for fast EXIF parsing
     let file = std::fs::File::open(source)
         .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-    let mut reader = BufReader::new(file);
+    let mut buf_reader = BufReader::with_capacity(256 * 1024, file);
+    let mut header_buf = vec![0u8; 256 * 1024];
+    let bytes_read = buf_reader.read(&mut header_buf).unwrap_or(0);
+    header_buf.truncate(bytes_read);
 
     let exif_reader = exif::Reader::new();
-    let exif = exif_reader.read_from_container(&mut reader)
+    let exif = exif_reader.read_from_container(&mut Cursor::new(&header_buf))
         .map_err(|e| ThumbnailError::DecodeError(format!("No EXIF: {}", e)))?;
 
     // Try multiple IFDs to find embedded thumbnail
@@ -317,11 +331,6 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
             let length = length_field.value.get_uint(0)
                 .ok_or_else(|| ThumbnailError::DecodeError("Invalid thumbnail length".to_string()))? as usize;
 
-            let file = std::fs::File::open(source)
-                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            let mut reader = BufReader::new(file);
-            use std::io::{Seek, Read};
-
             // Calculate absolute offset based on file type
             let absolute_offset = if is_tiff_based(source) {
                 // TIFF-based (RAW): offset is relative to file start
@@ -331,13 +340,26 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
                 find_jpeg_tiff_header_offset(source)? + tiff_offset as u64
             };
 
-            // Seek to thumbnail data
-            reader.seek(std::io::SeekFrom::Start(absolute_offset))
-                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            // Try to extract from buffer first (fast path)
+            let end_offset = absolute_offset as usize + length;
+            let thumb_data = if end_offset <= header_buf.len() {
+                // Fast path: thumbnail data is in our memory buffer
+                header_buf[absolute_offset as usize..end_offset].to_vec()
+            } else {
+                // Slow path: need to read from file
+                use std::io::{Seek, Read};
+                let file = std::fs::File::open(source)
+                    .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                let mut reader = BufReader::new(file);
 
-            let mut thumb_data = vec![0u8; length];
-            reader.read_exact(&mut thumb_data)
-                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                reader.seek(std::io::SeekFrom::Start(absolute_offset))
+                    .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+
+                let mut data = vec![0u8; length];
+                reader.read_exact(&mut data)
+                    .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                data
+            };
 
             // Decode the embedded thumbnail to check its size
             let thumb_img = image::load_from_memory(&thumb_data)
@@ -367,6 +389,8 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
 /// This is a fallback when standard EXIF thumbnail tags are not found.
 fn try_extract_raw_preview(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8>, ThumbnailError> {
     use std::io::{BufReader, Read, Seek, SeekFrom};
+
+    println!("[SLOW PATH] Scanning RAW file for embedded JPEG: {:?}", source);
 
     let file = std::fs::File::open(source)
         .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;

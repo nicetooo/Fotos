@@ -81,32 +81,10 @@ async fn import_photos(
         
         // Use a block to ensure we can handle errors per-file
         let file_result = (|| -> Result<(), String> {
-            println!("[Import] Processing: {}", path_str);
-
-            let metadata = fotos_core::read_metadata(&path).map_err(|e| {
-                println!("[Import] Metadata error for {}: {}", path_str, e);
-                e.to_string()
-            })?;
-            println!("[Import] Metadata OK");
-
-            let hash = fotos_core::compute_hash(&path).map_err(|e| {
-                println!("[Import] Hash error for {}: {}", path_str, e);
-                e.to_string()
-            })?;
-            println!("[Import] Hash OK: {}", hash);
-
-            fotos_core::generate_thumbnail(&path, &config).map_err(|e| {
-                println!("[Import] Thumbnail error for {}: {}", path_str, e);
-                e.to_string()
-            })?;
-            println!("[Import] Thumbnail OK");
-
-            index.insert(path_str.clone(), hash, metadata).map_err(|e| {
-                println!("[Import] DB insert error for {}: {}", path_str, e);
-                e.to_string()
-            })?;
-            println!("[Import] DB insert OK");
-
+            let metadata = fotos_core::read_metadata(&path).map_err(|e| e.to_string())?;
+            let hash = fotos_core::compute_hash(&path).map_err(|e| e.to_string())?;
+            fotos_core::generate_thumbnail(&path, &config).map_err(|e| e.to_string())?;
+            index.insert(path_str.clone(), hash.clone(), metadata).map_err(|e| e.to_string())?;
             Ok(())
         })();
 
