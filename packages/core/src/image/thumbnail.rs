@@ -104,7 +104,8 @@ fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Resu
     Ok(())
 }
 
-/// Reads EXIF orientation tag from an image file
+/// Reads EXIF orientation tag from an image file.
+/// Tries multiple IFDs (PRIMARY and THUMBNAIL) to find the tag.
 fn read_exif_orientation(source: &Path) -> Option<u32> {
     use std::io::BufReader;
     
@@ -112,15 +113,30 @@ fn read_exif_orientation(source: &Path) -> Option<u32> {
     let mut reader = BufReader::new(file);
     
     let exif_reader = exif::Reader::new();
-    let exif = exif_reader.read_from_container(&mut reader).ok()?;
+    let exif = match exif_reader.read_from_container(&mut reader) {
+        Ok(e) => e,
+        Err(e) => {
+            println!("[thumbnail] exif read failed for {:?}: {}", source, e);
+            return None;
+        }
+    };
     
-    let orientation_field = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY)?;
-    orientation_field.value.get_uint(0)
+    // Check PRIMARY IFD first, then THUMBNAIL IFD
+    for ifd in &[exif::In::PRIMARY, exif::In::THUMBNAIL] {
+        if let Some(field) = exif.get_field(exif::Tag::Orientation, *ifd) {
+            if let Some(val) = field.value.get_uint(0) {
+                println!("[thumbnail] Found orientation {} in {:?}", val, ifd);
+                return Some(val);
+            }
+        }
+    }
+    
+    None
 }
 
-/// Applies EXIF orientation correction to image bytes
+/// Applies EXIF orientation correction to image bytes.
 fn apply_orientation_correction(image_bytes: &[u8], orientation: u32) -> Result<Vec<u8>, ThumbnailError> {
-    if orientation == 1 {
+    if orientation <= 1 {
         // No correction needed
         return Ok(image_bytes.to_vec());
     }
@@ -137,16 +153,17 @@ fn apply_orientation_correction(image_bytes: &[u8], orientation: u32) -> Result<
     Ok(output)
 }
 
-/// Applies EXIF orientation transformation to a DynamicImage
+/// Applies EXIF orientation transformation to a DynamicImage.
+/// See: https://magnushoff.com/articles/jpeg-orientation/
 fn apply_orientation_to_image(img: image::DynamicImage, orientation: u32) -> image::DynamicImage {
     match orientation {
         1 => img, // Normal
         2 => img.fliph(), // Flip horizontal
         3 => img.rotate180(), // Rotate 180
         4 => img.flipv(), // Flip vertical
-        5 => img.rotate90().fliph(), // Rotate 90 CW and flip horizontal
+        5 => img.rotate90().fliph(), // Transpose (flip across UL-to-LR axis)
         6 => img.rotate90(), // Rotate 90 CW
-        7 => img.rotate270().fliph(), // Rotate 270 CW and flip horizontal
+        7 => img.rotate270().fliph(), // Transverse (flip across LL-to-UR axis)
         8 => img.rotate270(), // Rotate 270 CW
         _ => img, // Unknown orientation, keep as-is
     }
