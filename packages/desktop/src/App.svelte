@@ -30,6 +30,11 @@
     let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
     let sortOrder = $state<"asc" | "desc">("desc");
 
+    // Zoom states
+    let thumbSize = $state(200); // Grid thumbnail size
+    let previewZoom = $state(1);
+    let previewPan = $state({ x: 0, y: 0 });
+
     let sortedPhotos = $derived.by(() => {
         const photosCopy = [...photos];
         photosCopy.sort((a, b) => {
@@ -130,10 +135,51 @@
 
     function openPreview(photo: PhotoInfo) {
         previewPhoto = photo;
+        previewZoom = 1;
+        previewPan = { x: 0, y: 0 };
     }
 
     function closePreview() {
         previewPhoto = null;
+        previewZoom = 1;
+        previewPan = { x: 0, y: 0 };
+    }
+
+    function handleGridWheel(e: WheelEvent) {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -20 : 20;
+            thumbSize = Math.max(100, Math.min(400, thumbSize + delta));
+        }
+    }
+
+    let previewContainer: HTMLDivElement | undefined = $state();
+
+    function handlePreviewWheel(e: WheelEvent) {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+
+        const container = previewContainer;
+        if (!container) return;
+
+        const oldZoom = previewZoom;
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        const newZoom = Math.max(1, oldZoom + delta);
+        if (newZoom === oldZoom) return;
+
+        const scale = newZoom / oldZoom;
+
+        // Current center point in content coordinates
+        const oldCenterX = container.scrollLeft + container.clientWidth / 2;
+        const oldCenterY = container.scrollTop + container.clientHeight / 2;
+
+        previewZoom = newZoom;
+
+        // After zoom, scroll to keep the same center
+        requestAnimationFrame(() => {
+            container.scrollLeft = oldCenterX * scale - container.clientWidth / 2;
+            container.scrollTop = oldCenterY * scale - container.clientHeight / 2;
+        });
     }
 
     function navigatePreview(direction: "prev" | "next") {
@@ -148,6 +194,8 @@
             newIndex = currentIndex < sortedPhotos.length - 1 ? currentIndex + 1 : 0;
         }
         previewPhoto = sortedPhotos[newIndex];
+        previewZoom = 1;
+        previewPan = { x: 0, y: 0 };
     }
 
     function handleKeydown(e: KeyboardEvent) {
@@ -162,6 +210,16 @@
                     break;
                 case "ArrowRight":
                     navigatePreview("next");
+                    break;
+                case "0":
+                    previewZoom = 1;
+                    break;
+                case "=":
+                case "+":
+                    previewZoom = previewZoom + 0.25;
+                    break;
+                case "-":
+                    previewZoom = Math.max(1, previewZoom - 0.25);
                     break;
             }
             return;
@@ -268,11 +326,13 @@
             {/if}
 
             <!-- Photo Grid -->
-            <div class="flex-1 min-h-0 flex flex-col">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="flex-1 min-h-0 flex flex-col" onwheel={handleGridWheel}>
                 {#if photos.length > 0}
                     <VirtualPhotoGrid
                         photos={sortedPhotos}
                         {uniqueTs}
+                        {thumbSize}
                         onPhotoClick={openPreview}
                         onShowInFinder={handleShowInFinder}
                         formatDate={(d) => d || ""}
@@ -361,18 +421,31 @@
         </button>
 
         <!-- Image area -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-            class="absolute top-12 left-0 right-64 bottom-0 flex items-center justify-center p-4"
+            bind:this={previewContainer}
+            class="absolute top-12 left-0 right-64 bottom-0 overflow-auto"
             onclick={(e) => e.stopPropagation()}
+            onwheel={handlePreviewWheel}
         >
-            {#key previewPhoto.path}
-                <img
-                    src={convertFileSrc(previewPhoto.path)}
-                    alt="Preview"
-                    class="max-w-full max-h-full object-contain"
-                />
-            {/key}
+            <div
+                class="min-w-full min-h-full flex items-center justify-center"
+                style="width: {previewZoom * 100}%; height: {previewZoom * 100}%;"
+            >
+                {#key previewPhoto.path}
+                    <img
+                        src={convertFileSrc(previewPhoto.path)}
+                        alt="Preview"
+                        class="max-w-full max-h-full object-contain"
+                    />
+                {/key}
+            </div>
         </div>
+        {#if previewZoom !== 1}
+            <div class="absolute bottom-4 right-72 px-2 py-1 rounded bg-black/60 text-xs text-neutral-300 z-30">
+                {Math.round(previewZoom * 100)}%
+            </div>
+        {/if}
 
         <!-- Info Panel -->
         <div
