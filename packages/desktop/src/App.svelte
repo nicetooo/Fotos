@@ -224,7 +224,7 @@
             {/if}
 
             <!-- Photo Grid -->
-            <div class="flex-1 overflow-hidden">
+            <div class="flex-1 min-h-0 flex flex-col">
                 {#if photos.length > 0}
                     <VirtualPhotoGrid
                         photos={sortedPhotos}

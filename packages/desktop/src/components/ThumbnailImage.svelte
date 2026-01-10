@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { invoke } from "@tauri-apps/api/core";
-    import { onDestroy } from "svelte";
+    import { convertFileSrc } from "@tauri-apps/api/core";
 
     let {
         path,
@@ -17,35 +16,22 @@
     }>();
 
     let src = $state("");
-    let loading = $state(false);
+    let loading = $state(true);
     let error = $state(false);
-    let objectUrl: string | null = null;
     let containerElement: HTMLDivElement | undefined = $state();
     let isIntersecting = $state(false);
     let observer: IntersectionObserver | undefined;
 
-    async function load() {
+    function updateSrc() {
         if (!path) {
             src = "";
+            loading = false;
             return;
         }
-
+        // Use asset protocol - no IPC, direct file access
+        src = convertFileSrc(path);
         loading = true;
         error = false;
-        try {
-            const bytes = await invoke<number[]>("read_file_bytes", { path });
-            const blob = new Blob([new Uint8Array(bytes)]);
-            if (objectUrl) {
-                URL.revokeObjectURL(objectUrl);
-            }
-            objectUrl = URL.createObjectURL(blob);
-            src = objectUrl;
-        } catch (e) {
-            console.error("Failed to load thumbnail:", path, e);
-            error = true;
-        } finally {
-            loading = false;
-        }
     }
 
     // Setup intersection observer for lazy loading
@@ -61,7 +47,7 @@
                     });
                 },
                 {
-                    rootMargin: "200px", // Start loading 200px before entering viewport
+                    rootMargin: "200px",
                 },
             );
 
@@ -75,44 +61,49 @@
 
     // React to path changes, refresh, or intersection
     $effect(() => {
-        path; // dependency
-        refreshKey; // dependency
+        path;
+        refreshKey;
 
         if (lazy) {
-            // Only load when intersecting
             if (isIntersecting) {
-                load();
+                updateSrc();
             }
         } else {
-            // Load immediately if not lazy
-            load();
+            updateSrc();
         }
     });
 
-    onDestroy(() => {
-        if (objectUrl) {
-            URL.revokeObjectURL(objectUrl);
-        }
-        observer?.disconnect();
-    });
+    function handleLoad() {
+        loading = false;
+        error = false;
+    }
+
+    function handleError() {
+        loading = false;
+        error = true;
+    }
 </script>
 
 {#if error || !path}
     <div
         bind:this={containerElement}
-        class={className +
-            " flex items-center justify-center bg-slate-800 text-slate-600"}
+        class="{className} flex items-center justify-center bg-neutral-800 text-neutral-600"
     >
-        <i class="fa-solid fa-image-slash text-2xl"></i>
-    </div>
-{:else if loading && !src}
-    <div
-        bind:this={containerElement}
-        class={className +
-            " flex items-center justify-center bg-slate-800 animate-pulse"}
-    >
-        <i class="fa-solid fa-circle-notch fa-spin text-slate-600"></i>
+        <i class="fa-solid fa-image text-xl"></i>
     </div>
 {:else}
-    <img bind:this={containerElement} {src} {alt} class={className} />
+    <div bind:this={containerElement} class="{className} relative bg-neutral-800">
+        {#if loading}
+            <div class="absolute inset-0 flex items-center justify-center">
+                <i class="fa-solid fa-spinner fa-spin text-neutral-600"></i>
+            </div>
+        {/if}
+        <img
+            {src}
+            {alt}
+            class="w-full h-full object-cover {loading ? 'opacity-0' : 'opacity-100'}"
+            onload={handleLoad}
+            onerror={handleError}
+        />
+    </div>
 {/if}
