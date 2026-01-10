@@ -34,4 +34,7 @@ pub struct PhotoInfo {
     pub hash: String,
     pub metadata: PhotoMetadata,
     pub thumb_path: Option<String>,
+    pub file_size: u64,
+    pub created_at: Option<i64>, // Unix timestamp
+    pub modified_at: Option<i64>, // Unix timestamp
 }

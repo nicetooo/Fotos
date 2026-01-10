@@ -103,6 +103,9 @@ impl PhotoIndex {
                     orientation: row.get::<_, i64>(13)? as u32,
                 },
                 thumb_path: None,
+                file_size: 0,
+                created_at: None,
+                modified_at: None,
             })
         })?;
 
@@ -150,6 +153,9 @@ impl PhotoIndex {
                     orientation: row.get::<_, i64>(13)? as u32,
                 },
                 thumb_path: None,
+                file_size: 0,
+                created_at: None,
+                modified_at: None,
             })
         })?;
 

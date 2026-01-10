@@ -30,6 +30,9 @@
         hash: string;
         metadata: PhotoMetadata;
         thumb_path?: string;
+        file_size: number;
+        created_at?: number;
+        modified_at?: number;
     }
 
     let version = $state("Loading...");
@@ -48,6 +51,47 @@
     let thumbDir = $state("");
     let uniqueTs = $state(Date.now());
     let previewPhoto = $state<PhotoInfo | null>(null);
+    let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
+    let sortOrder = $state<"asc" | "desc">("desc");
+
+    // Computed sorted photos
+    let sortedPhotos = $derived.by(() => {
+        const photosCopy = [...photos];
+
+        photosCopy.sort((a, b) => {
+            let comparison = 0;
+
+            switch (sortBy) {
+                case "name":
+                    const nameA = a.path.split("/").pop() || "";
+                    const nameB = b.path.split("/").pop() || "";
+                    comparison = nameA.localeCompare(nameB);
+                    break;
+
+                case "date":
+                    const dateA = a.metadata.date_taken || "";
+                    const dateB = b.metadata.date_taken || "";
+                    comparison = dateA.localeCompare(dateB);
+                    break;
+
+                case "size":
+                    const sizeA = a.metadata.width * a.metadata.height;
+                    const sizeB = b.metadata.width * b.metadata.height;
+                    comparison = sizeA - sizeB;
+                    break;
+
+                case "dimensions":
+                    const pixelsA = a.metadata.width * a.metadata.height;
+                    const pixelsB = b.metadata.width * b.metadata.height;
+                    comparison = pixelsA - pixelsB;
+                    break;
+            }
+
+            return sortOrder === "asc" ? comparison : -comparison;
+        });
+
+        return photosCopy;
+    });
 
     onMount(async () => {
         try {
@@ -264,18 +308,54 @@
                     </p>
                 </div>
 
-                <button
-                    onclick={handleScan}
-                    disabled={isScanning}
-                    class="flex items-center gap-3 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-not-allowed group"
-                >
-                    <i
-                        class="fa-solid fa-folder-open text-lg {isScanning
-                            ? 'animate-pulse'
-                            : 'group-hover:-rotate-12 transition-transform'}"
-                    ></i>
-                    <span>{isScanning ? "Scanning..." : "Import Photos"}</span>
-                </button>
+                <div class="flex items-center gap-3">
+                    <!-- Sort Controls -->
+                    <div
+                        class="flex items-center gap-2 bg-slate-800/50 rounded-xl p-2 border border-slate-700"
+                    >
+                        <select
+                            bind:value={sortBy}
+                            class="bg-transparent text-white text-sm px-3 py-1.5 rounded-lg border border-slate-600 hover:border-slate-500 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                        >
+                            <option value="date">Date Taken</option>
+                            <option value="name">File Name</option>
+                            <option value="dimensions">Resolution</option>
+                        </select>
+
+                        <button
+                            onclick={() =>
+                                (sortOrder =
+                                    sortOrder === "asc" ? "desc" : "asc")}
+                            class="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                            title={sortOrder === "asc"
+                                ? "Ascending"
+                                : "Descending"}
+                        >
+                            <i
+                                class="fa-solid {sortOrder === 'asc'
+                                    ? 'fa-arrow-up-short-wide'
+                                    : 'fa-arrow-down-wide-short'}"
+                            ></i>
+                        </button>
+                    </div>
+
+                    <button
+                        onclick={handleScan}
+                        disabled={isScanning}
+                        class="flex items-center gap-3 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-not-allowed group"
+                    >
+                        <i
+                            class="fa-solid fa-folder-open text-lg {isScanning
+                                ? 'animate-pulse'
+                                : 'group-hover:-rotate-12 transition-transform'}"
+                        ></i>
+                        <span
+                            >{isScanning
+                                ? "Scanning..."
+                                : "Import Photos"}</span
+                        >
+                    </button>
+                </div>
             </header>
 
             {#if error}
@@ -293,7 +373,7 @@
                     <div
                         class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
                     >
-                        {#each photos as photo (photo.id.id)}
+                        {#each sortedPhotos as photo (photo.id.id)}
                             <div
                                 class="aspect-square rounded-2xl bg-slate-800 overflow-hidden group relative border border-slate-700/50 hover:border-indigo-500/50 transition-all shadow-lg cursor-pointer"
                                 onclick={() => openPreview(photo)}

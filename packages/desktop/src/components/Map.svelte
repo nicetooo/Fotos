@@ -122,6 +122,20 @@
             (p: any) => p.metadata.lat && p.metadata.lon,
         );
 
+        console.log(
+            `Total photos: ${photos.length}, Geotagged: ${geotagged.length}`,
+        );
+        if (geotagged.length > 0) {
+            console.log(
+                "Geotagged photos:",
+                geotagged.map((p) => ({
+                    name: p.path.split("/").pop(),
+                    lat: p.metadata.lat,
+                    lon: p.metadata.lon,
+                })),
+            );
+        }
+
         if (geotagged.length === 0) return;
 
         const bounds = new L.LatLngBounds([]);

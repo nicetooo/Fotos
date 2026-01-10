@@ -46,21 +46,88 @@ fn fnv1a_64(bytes: &[u8], start: u64) -> u64 {
 
 /// Internal core function to generate a thumbnail from source to dest.
 /// 
-/// This function is IO-heavy but stateless regarding cache logic.
-/// It strictly performs: Read -> Decode -> Resize -> Write.
+/// Performance optimization strategy:
+/// 1. Try to extract embedded EXIF thumbnail (fastest, ~1-5ms)
+/// 2. Fall back to full image decode + resize (slower, ~50-500ms for large files)
 fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Result<(), ThumbnailError> {
+    // Step 1: Try to use embedded thumbnail from EXIF
+    if let Ok(embedded_thumb) = try_extract_embedded_thumbnail(source, spec) {
+        // Save the embedded thumbnail directly
+        std::fs::write(dest, embedded_thumb)
+            .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+        return Ok(());
+    }
+    
+    // Step 2: Fall back to full decode + resize
     let img = image::open(source).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
     
     // thumbnail() is faster than resize() because it downsamples during load if supported,
     // or uses nearest neighbor optimization for large downscales.
     let thumb = img.thumbnail(spec.width, spec.height);
     
-    // Force JPEG format when saving, as the file extension might be .tmp or similar
-    // causing implicit format deduction to fail.
+    // Force JPEG format when saving
     thumb.write_to(&mut std::fs::File::create(dest).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?, image::ImageFormat::Jpeg)
          .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
     
     Ok(())
+}
+
+/// Attempts to extract and resize embedded EXIF thumbnail.
+/// Returns the JPEG bytes if successful, or an error if not available or too small.
+fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8>, ThumbnailError> {
+    use std::io::BufReader;
+    
+    let file = std::fs::File::open(source)
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    let mut reader = BufReader::new(file);
+    
+    let exif_reader = exif::Reader::new();
+    let exif = exif_reader.read_from_container(&mut reader)
+        .map_err(|e| ThumbnailError::DecodeError(format!("No EXIF: {}", e)))?;
+    
+    // Check if there's a thumbnail
+    if let Some(thumbnail_field) = exif.get_field(exif::Tag::JPEGInterchangeFormat, exif::In::PRIMARY) {
+        if let Some(length_field) = exif.get_field(exif::Tag::JPEGInterchangeFormatLength, exif::In::PRIMARY) {
+            // Extract offset and length
+            let offset = thumbnail_field.value.get_uint(0)
+                .ok_or_else(|| ThumbnailError::DecodeError("Invalid thumbnail offset".to_string()))? as usize;
+            let length = length_field.value.get_uint(0)
+                .ok_or_else(|| ThumbnailError::DecodeError("Invalid thumbnail length".to_string()))? as usize;
+            
+            // Read the embedded JPEG thumbnail
+            let file = std::fs::File::open(source)
+                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            let mut reader = BufReader::new(file);
+            use std::io::{Seek, Read};
+            reader.seek(std::io::SeekFrom::Start(offset as u64))
+                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            
+            let mut thumb_data = vec![0u8; length];
+            reader.read_exact(&mut thumb_data)
+                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            
+            // Decode the embedded thumbnail to check its size
+            let thumb_img = image::load_from_memory(&thumb_data)
+                .map_err(|e| ThumbnailError::DecodeError(format!("Embedded thumb decode failed: {}", e)))?;
+            
+            // If embedded thumbnail is already smaller than or equal to target size, use it directly
+            if thumb_img.width() <= spec.width && thumb_img.height() <= spec.height {
+                return Ok(thumb_data);
+            }
+            
+            // If embedded thumbnail is larger but not too large (e.g., < 4x target), resize it
+            // This is still faster than decoding the full image
+            if thumb_img.width() <= spec.width * 4 && thumb_img.height() <= spec.height * 4 {
+                let resized = thumb_img.thumbnail(spec.width, spec.height);
+                let mut output = Vec::new();
+                resized.write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Jpeg)
+                    .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+                return Ok(output);
+            }
+        }
+    }
+    
+    Err(ThumbnailError::DecodeError("No suitable embedded thumbnail".to_string()))
 }
 
 /// Generates a stable, platform-independent key for a thumbnail configuration.
