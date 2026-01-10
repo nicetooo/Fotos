@@ -1,0 +1,13 @@
+{
+  "name": "fotos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-platform photo management software",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
