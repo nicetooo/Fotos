@@ -33,4 +33,5 @@ pub struct PhotoInfo {
     pub path: String, // String is more portable for FFI
     pub hash: String,
     pub metadata: PhotoMetadata,
+    pub thumb_path: Option<String>,
 }

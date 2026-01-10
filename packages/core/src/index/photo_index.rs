@@ -102,6 +102,7 @@ impl PhotoIndex {
                     exposure_time: row.get(12)?,
                     orientation: row.get::<_, i64>(13)? as u32,
                 },
+                thumb_path: None,
             })
         })?;
 
@@ -148,6 +149,7 @@ impl PhotoIndex {
                     exposure_time: row.get(12)?,
                     orientation: row.get::<_, i64>(13)? as u32,
                 },
+                thumb_path: None,
             })
         })?;
 

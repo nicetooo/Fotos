@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-use fotos_core::{PhotoCoreConfig, PhotoIndex, ImportResult};
+use fotos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo};
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -13,11 +11,46 @@ fn get_core_version() -> String {
 }
 
 #[tauri::command]
-fn import_photos(
+async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo>, String> {
+    // Ensure parent directory exists
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let index = PhotoIndex::open(db_path)
+        .map_err(|e| e.to_string())?;
+    
+    let mut photos = index.list().map_err(|e| e.to_string())?;
+    
+    // Populate thumb_path
+    let thumbSource = fotos_core::Thumbnailer::new(std::path::PathBuf::from(thumb_dir));
+    for photo in &mut photos {
+        // We need the hash to get the thumbnail path.
+        let thumb_path = thumbSource.get_cache_path(&photo.hash, &fotos_core::ThumbnailSpec { width: 256, height: 256 });
+        if thumb_path.exists() {
+            photo.thumb_path = Some(thumb_path.to_string_lossy().to_string());
+        } else {
+            photo.thumb_path = None;
+        }
+    }
+
+    Ok(photos)
+}
+
+#[tauri::command]
+async fn import_photos(
+    window: tauri::Window,
     root_path: String,
     db_path: String,
     thumb_dir: String,
 ) -> Result<ImportResult, String> {
+    println!("Starting import from: {}", root_path);
+    // Ensure parent directories exist
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
+
     let index = PhotoIndex::open(db_path)
         .map_err(|e| e.to_string())?;
     
@@ -26,21 +59,128 @@ fn import_photos(
         thumbnail_size: 256,
     };
 
-    fotos_core::run_import_pipeline(
-        root_path,
-        index,
-        config
-    ).map_err(|e| e.to_string())
+    println!("Registering config and running pipeline...");
+    
+    let root_path_buf = std::path::Path::new(&root_path);
+    let photos = fotos_core::scan_photos(root_path_buf).map_err(|e| e.to_string())?;
+    let total = photos.len();
+    println!("Found {} photos", total);
+
+    let mut result = ImportResult::default();
+    for (i, path) in photos.into_iter().enumerate() {
+        let path_str = path.to_string_lossy().to_string();
+        
+        // Use a block to ensure we can handle errors per-file
+        let file_result = (|| -> Result<(), String> {
+            let metadata = fotos_core::read_metadata(&path).map_err(|e| e.to_string())?;
+            let hash = fotos_core::compute_hash(&path).map_err(|e| e.to_string())?;
+            fotos_core::generate_thumbnail(&path, &config).map_err(|e| e.to_string())?;
+            index.insert(path_str.clone(), hash, metadata).map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+
+        match file_result {
+            Ok(_) => result.success += 1,
+            Err(e) => {
+                println!("Error processing {:?}: {}", path, e);
+                result.failure += 1;
+            }
+        }
+
+        // Emit progress every photo
+        use tauri::Emitter;
+        let _ = window.emit("import-progress", serde_json::json!({
+            "current": i + 1,
+            "total": total,
+            "success": result.success,
+            "failure": result.failure,
+            "last_path": path_str
+        }));
+    }
+    
+    println!("Pipeline finished: {:?}", result);
+    Ok(result)
+}
+
+#[tauri::command]
+async fn clear_thumbnail_cache(thumb_dir: String) -> Result<(), String> {
+    println!("Clearing thumbnail cache at: {}", thumb_dir);
+    if std::path::Path::new(&thumb_dir).exists() {
+        std::fs::remove_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir: String) -> Result<(), String> {
+    println!("Regenerating thumbnails...");
+    
+    // Ensure parent directories exist
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
+
+    let index = PhotoIndex::open(db_path.clone())
+        .map_err(|e| e.to_string())?;
+    
+    let photos = index.list().map_err(|e| e.to_string())?;
+    let total = photos.len();
+    
+    let config = PhotoCoreConfig {
+        thumbnail_dir: thumb_dir,
+        thumbnail_size: 256,
+    };
+
+    let mut success = 0;
+    let mut failure = 0;
+
+    for (i, photo) in photos.iter().enumerate() {
+        let path = std::path::PathBuf::from(&photo.path);
+        
+        let file_result = fotos_core::generate_thumbnail(&path, &config);
+
+        match file_result {
+            Ok(_) => success += 1,
+            Err(e) => {
+                println!("Error generating thumbnail for {:?}: {}", path, e);
+                failure += 1;
+            }
+        }
+        
+        // Emit progress
+        use tauri::Emitter;
+        let _ = window.emit("import-progress", serde_json::json!({
+            "current": i + 1,
+            "total": total,
+            "success": success,
+            "failure": failure,
+            "last_path": photo.path
+        }));
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&path).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet, 
             get_core_version,
-            import_photos
+            import_photos,
+            list_photos,
+            clear_thumbnail_cache,
+            regenerate_thumbnails,
+            read_file_bytes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

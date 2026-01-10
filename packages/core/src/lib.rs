@@ -12,7 +12,7 @@ pub use error::CoreError;
 pub use types::{PhotoId, PhotoInfo, PhotoMetadata, ImportResult};
 
 pub use fs::scan_photos;
-pub use image::{generate_thumbnail, compute_hash};
+pub use image::{Thumbnailer, ThumbnailSpec, ThumbnailError, compute_hash};
 pub use index::PhotoIndex;
 pub use metadata::{read_metadata, read_date_taken};
 
@@ -32,9 +32,13 @@ pub fn run_import_pipeline(
 ) -> Result<ImportResult, CoreError> {
     let root_path = std::path::Path::new(&root);
     let photos = scan_photos(root_path)?;
+    println!("Found {} photos to process", photos.len());
     let mut result = ImportResult::default();
 
-    for path in photos {
+    for (i, path) in photos.iter().enumerate() {
+        if i % 10 == 0 {
+            println!("Processing [{}/{}] ...", i, photos.len());
+        }
         // Individual file processing failures increment failure count but don't stop the pipeline
         
         let metadata = match read_metadata(&path) {
@@ -75,6 +79,13 @@ pub fn run_import_pipeline(
     }
 
     Ok(result)
+}
+
+/// Convenience function to generate a thumbnail using the core config
+pub fn generate_thumbnail(path: &std::path::Path, config: &PhotoCoreConfig) -> Result<std::path::PathBuf, CoreError> {
+    let thumbnailer = Thumbnailer::new(std::path::PathBuf::from(&config.thumbnail_dir));
+    let spec = ThumbnailSpec { width: config.thumbnail_size, height: config.thumbnail_size };
+    thumbnailer.generate(path, &spec).map_err(|e| CoreError::Io(e.to_string()))
 }
 
 #[cfg(test)]
