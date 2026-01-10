@@ -179,10 +179,14 @@
             bounds.extend([lat, lon]);
         }
 
-        // Only fit bounds on initial load, not during timeline scrubbing
+        // On initial load, fit all markers in view
         if (!initialBoundsFit && photosToShow.length > 0) {
             map.fitBounds(bounds, { padding: [50, 50] });
             initialBoundsFit = true;
+        } else if (photosToShow.length > 0) {
+            // During timeline scrubbing, pan to center of visible photos
+            const center = bounds.getCenter();
+            map.panTo(center, { animate: true, duration: 0.3 });
         }
     }
 

@@ -108,6 +108,26 @@
         dragStartPosition = sliderPosition;
     }
 
+    function handleTrackClick(e: MouseEvent) {
+        if (selectedDuration === 0) return;
+        if (!sliderTrack) return;
+
+        const rect = sliderTrack.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickPercent = (clickX / rect.width) * 100;
+
+        // Move window center to click position
+        const widthPct = windowWidthPercent();
+        const halfWidth = widthPct / 2;
+        const maxLeftPercent = 100 - widthPct;
+
+        // Calculate where the window left edge should be
+        const targetLeft = Math.max(0, Math.min(clickPercent - halfWidth, maxLeftPercent));
+
+        // Convert to sliderPosition
+        sliderPosition = maxLeftPercent > 0 ? (targetLeft / maxLeftPercent) * 100 : 0;
+    }
+
     function handleMouseMove(e: MouseEvent) {
         if (!isDragging || !sliderTrack) return;
 
@@ -223,10 +243,11 @@
         aria-valuemax={100}
         aria-valuenow={sliderPosition}
         tabindex="0"
-        class="relative h-8 bg-slate-800 rounded-lg overflow-hidden"
+        class="relative h-8 bg-slate-800 rounded-lg overflow-hidden cursor-pointer"
+        onclick={handleTrackClick}
     >
         <!-- Background ticks for time scale -->
-        <div class="absolute inset-0 flex items-end">
+        <div class="absolute inset-0 flex items-end pointer-events-none">
             {#each Array(20) as _, i}
                 <div
                     class="flex-1 border-l border-slate-700/50 h-2"
@@ -236,7 +257,7 @@
         </div>
 
         <!-- Photo density visualization (pre-computed) -->
-        <div class="absolute inset-0 flex items-end px-0.5 gap-px">
+        <div class="absolute inset-0 flex items-end px-0.5 gap-px pointer-events-none">
             {#each densityBins() as count, i}
                 <div
                     class="flex-1 bg-blue-500/30 rounded-t"
