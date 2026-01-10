@@ -1,166 +1,28 @@
+@import "@fortawesome/fontawesome-free/css/all.min.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  --bg-primary: #0a0a0c;
-  --bg-secondary: #16161a;
-  --bg-tertiary: #1f1f23;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --border: #2d2d33;
-  --glass: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: var(--text-primary);
-  background-color: var(--bg-primary);
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #0f172a;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
-  overflow: hidden;
-}
-
-.app-container {
   display: flex;
-  height: 100vh;
-  width: 100vw;
-}
-
-/* Sidebar */
-.sidebar {
-  width: 240px;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  padding: 24px 12px;
-}
-
-.sidebar-header {
-  padding: 0 12px 24px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.logo-text {
-  font-size: 20px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #60a5fa, #3b82f6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  margin-bottom: 4px;
-}
-
-.nav-item:hover {
-  background: var(--glass);
-  color: var(--text-primary);
-}
-
-.nav-item.active {
-  background: rgba(59, 130, 246, 0.1);
-  color: var(--accent);
-}
-
-/* Main Content */
-.main-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-primary);
-}
-
-.top-bar {
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 32px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(10, 10, 12, 0.8);
-  backdrop-filter: blur(12px);
-}
-
-.search-container {
-  position: relative;
-  width: 300px;
-}
-
-.search-input {
-  width: 100%;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 8px 16px 8px 40px;
-  color: var(--text-primary);
-  outline: none;
-  font-size: 14px;
-  transition: border-color 0.2s;
-}
-
-.search-input:focus {
-  border-color: var(--accent);
-}
-
-.search-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-}
-
-/* Photo Grid */
-.photo-grid {
-  flex: 1;
-  padding: 32px;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.photo-card {
-  aspect-ratio: 1;
-  border-radius: 12px;
-  overflow: hidden;
-  position: relative;
-  background: var(--bg-tertiary);
-  cursor: pointer;
-  transition: transform 0.3s ease;
-}
-
-.photo-card:hover {
-  transform: scale(1.02);
-}
-
-.photo-placeholder {
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(45deg, var(--bg-tertiary), var(--bg-secondary));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.version-badge {
-  background: var(--bg-tertiary);
-  padding: 4px 12px;
-  border-radius: 99px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
 }
