@@ -1,5 +1,3 @@
-use thiserror::Error;
-
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
     #[error("IO error: {0}")]

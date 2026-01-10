@@ -66,7 +66,13 @@ async fn import_photos(
     };
 
     let root_path_buf = std::path::Path::new(&root_path);
-    let photos = fotos_core::scan_photos(root_path_buf).map_err(|e| e.to_string())?;
+
+    // Support both single file and directory import
+    let photos = if root_path_buf.is_file() {
+        vec![root_path_buf.to_path_buf()]
+    } else {
+        fotos_core::scan_photos(root_path_buf).map_err(|e| e.to_string())?
+    };
     let total = photos.len();
 
     let mut result = ImportResult::default();
@@ -75,16 +81,44 @@ async fn import_photos(
         
         // Use a block to ensure we can handle errors per-file
         let file_result = (|| -> Result<(), String> {
-            let metadata = fotos_core::read_metadata(&path).map_err(|e| e.to_string())?;
-            let hash = fotos_core::compute_hash(&path).map_err(|e| e.to_string())?;
-            fotos_core::generate_thumbnail(&path, &config).map_err(|e| e.to_string())?;
-            index.insert(path_str.clone(), hash, metadata).map_err(|e| e.to_string())?;
+            println!("[Import] Processing: {}", path_str);
+
+            let metadata = fotos_core::read_metadata(&path).map_err(|e| {
+                println!("[Import] Metadata error for {}: {}", path_str, e);
+                e.to_string()
+            })?;
+            println!("[Import] Metadata OK");
+
+            let hash = fotos_core::compute_hash(&path).map_err(|e| {
+                println!("[Import] Hash error for {}: {}", path_str, e);
+                e.to_string()
+            })?;
+            println!("[Import] Hash OK: {}", hash);
+
+            fotos_core::generate_thumbnail(&path, &config).map_err(|e| {
+                println!("[Import] Thumbnail error for {}: {}", path_str, e);
+                e.to_string()
+            })?;
+            println!("[Import] Thumbnail OK");
+
+            index.insert(path_str.clone(), hash, metadata).map_err(|e| {
+                println!("[Import] DB insert error for {}: {}", path_str, e);
+                e.to_string()
+            })?;
+            println!("[Import] DB insert OK");
+
             Ok(())
         })();
 
         match file_result {
-            Ok(_) => result.success += 1,
-            Err(_) => result.failure += 1,
+            Ok(_) => {
+                println!("[Import] SUCCESS: {}", path_str);
+                result.success += 1;
+            },
+            Err(e) => {
+                println!("[Import] FAILED: {} - {}", path_str, e);
+                result.failure += 1;
+            },
         }
 
         // Emit progress every photo
@@ -171,6 +205,38 @@ async fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
+async fn get_raw_preview(path: String, cache_dir: String) -> Result<String, String> {
+    let source_path = std::path::Path::new(&path);
+
+    // Create a unique cache filename based on the source path
+    let file_name = source_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("preview");
+    let hash = fotos_core::compute_hash(source_path).map_err(|e| e.to_string())?;
+    let preview_path = std::path::PathBuf::from(&cache_dir)
+        .join("raw_previews")
+        .join(format!("{}_{}.jpg", file_name, &hash[..16]));
+
+    // Return cached preview if it exists
+    if preview_path.exists() {
+        return Ok(preview_path.to_string_lossy().to_string());
+    }
+
+    // Extract and cache the preview
+    let preview_bytes = fotos_core::extract_raw_preview(source_path).map_err(|e| e.to_string())?;
+
+    // Ensure directory exists
+    if let Some(parent) = preview_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    // Write to cache
+    std::fs::write(&preview_path, &preview_bytes).map_err(|e| e.to_string())?;
+
+    Ok(preview_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 async fn get_cached_tile(cache_dir: String, z: u32, x: u32, y: u32) -> Result<Option<String>, String> {
     let tile_path = std::path::PathBuf::from(&cache_dir)
         .join(z.to_string())
@@ -224,6 +290,7 @@ pub fn run() {
             clear_app_data,
             regenerate_thumbnails,
             read_file_bytes,
+            get_raw_preview,
             get_cached_tile,
             download_tile
         ])

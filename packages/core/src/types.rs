@@ -1,5 +1,4 @@
 use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, uniffi::Record)]
 pub struct PhotoId {

@@ -39,7 +39,10 @@ fn is_supported_image(path: &Path) -> bool {
             .and_then(|s| s.to_str())
             .map(|s| s.to_lowercase())
             .as_deref(),
-        Some("jpg" | "jpeg" | "png" | "webp")
+        Some("jpg" | "jpeg" | "png" | "webp" |
+             // RAW formats
+             "cr2" | "cr3" | "nef" | "nrw" | "arw" | "srf" | "sr2" |
+             "dng" | "raf" | "orf" | "rw2" | "pef" | "raw")
     )
 }
 

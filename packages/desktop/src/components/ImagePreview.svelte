@@ -1,5 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from "@tauri-apps/api/core";
+    import { invoke } from "@tauri-apps/api/core";
+    import { appDataDir } from "@tauri-apps/api/path";
 
     let { src, alt = "Preview" } = $props<{
         src: string;
@@ -14,10 +16,30 @@
     let naturalHeight = $state(0);
     let containerWidth = $state(0);
     let containerHeight = $state(0);
+    let rawPreviewPath = $state<string | null>(null);
+    let loadedSrc = $state<string>("");
+    let loading = $state(false);
+
+    // Check if file is a RAW format
+    const RAW_EXTENSIONS = ["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"];
+    function isRawFile(path: string): boolean {
+        const ext = path.split(".").pop()?.toLowerCase() || "";
+        return RAW_EXTENSIONS.includes(ext);
+    }
+
+    // Get the image source URL
+    let imageSrc = $derived.by(() => {
+        if (isRawFile(src)) {
+            return rawPreviewPath ? convertFileSrc(rawPreviewPath) : "";
+        }
+        return convertFileSrc(src);
+    });
 
     // Reset state when src changes
     $effect(() => {
-        src;
+        const currentSrc = src;
+
+        // Reset zoom and scroll
         zoom = 1;
         loaded = false;
         error = false;
@@ -25,7 +47,39 @@
             container.scrollLeft = 0;
             container.scrollTop = 0;
         }
+
+        // Clear old RAW preview path if src changed
+        if (loadedSrc !== currentSrc) {
+            rawPreviewPath = null;
+        }
+
+        // Load RAW preview if needed
+        if (isRawFile(currentSrc) && loadedSrc !== currentSrc && !loading) {
+            loading = true;
+            loadRawPreview(currentSrc);
+        }
     });
+
+    async function loadRawPreview(path: string) {
+        console.log("[RAW] Loading preview for:", path);
+        try {
+            const cacheDir = await appDataDir();
+            const previewPath = await invoke<string>("get_raw_preview", { path, cacheDir });
+            console.log("[RAW] Preview cached at:", previewPath);
+            // Only set if this is still the current src
+            if (path === src) {
+                rawPreviewPath = previewPath;
+                loadedSrc = path;
+            }
+        } catch (e) {
+            console.error("[RAW] Failed to load RAW preview:", e);
+            if (path === src) {
+                error = true;
+            }
+        } finally {
+            loading = false;
+        }
+    }
 
     // Observe container size
     $effect(() => {
@@ -140,19 +194,20 @@
         class="flex items-center justify-center"
         style="min-width: {Math.max(containerWidth, zoomedWidth)}px; min-height: {Math.max(containerHeight, zoomedHeight)}px;"
     >
-        {#if error}
+        {#if error && !loading}
             <div class="flex flex-col items-center justify-center text-neutral-500 gap-3">
                 <i class="fa-solid fa-image-slash text-4xl"></i>
                 <p class="text-sm">Unable to load image</p>
                 <p class="text-xs text-neutral-600">File may have been moved or the drive disconnected</p>
             </div>
-        {:else if !loaded}
+        {:else if !loaded || loading}
             <div class="absolute inset-0 flex items-center justify-center">
                 <i class="fa-solid fa-spinner fa-spin text-neutral-500 text-2xl"></i>
             </div>
         {/if}
+        {#if imageSrc}
         <img
-            src={convertFileSrc(src)}
+            src={imageSrc}
             {alt}
             class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
             style="width: {zoomedWidth}px; height: {zoomedHeight}px;"
@@ -160,6 +215,7 @@
             onerror={handleError}
             draggable="false"
         />
+        {/if}
     </div>
 </div>
 

@@ -1,9 +1,8 @@
 use rusqlite::{Connection, params};
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::{error::CoreError, types::{PhotoId, PhotoInfo, PhotoMetadata}};
-
-use std::sync::Mutex;
 
 #[derive(uniffi::Object)]
 pub struct PhotoIndex {
@@ -14,7 +13,7 @@ pub struct PhotoIndex {
 impl PhotoIndex {
     #[uniffi::constructor]
     pub fn open(db_path: String) -> Result<std::sync::Arc<Self>, CoreError> {
-        let conn = Connection::open(std::path::Path::new(&db_path))?;
+        let conn = Connection::open(Path::new(&db_path))?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS photos (
                 id INTEGER PRIMARY KEY,

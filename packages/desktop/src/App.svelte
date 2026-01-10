@@ -29,6 +29,7 @@
     let previewPhoto = $state<PhotoInfo | null>(null);
     let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
     let sortOrder = $state<"asc" | "desc">("desc");
+    let importMenuOpen = $state(false);
 
     // Grid thumbnail size (pinch to zoom)
     let thumbSize = $state(200);
@@ -99,9 +100,16 @@
         }
     }
 
-    async function handleScan() {
+    async function handleScan(mode: "folder" | "file" = "folder") {
         try {
-            const selected = await open({ directory: true, multiple: false });
+            const selected = await open({
+                directory: mode === "folder",
+                multiple: false,
+                filters: mode === "file" ? [{
+                    name: "Images",
+                    extensions: ["jpg", "jpeg", "png", "webp", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"]
+                }] : undefined
+            });
             if (!selected) return;
             const rootPath = Array.isArray(selected) ? selected[0] : selected;
 
@@ -183,7 +191,7 @@
             case "i":
                 if (e.metaKey || e.ctrlKey) {
                     e.preventDefault();
-                    handleScan();
+                    handleScan("folder");
                 }
                 break;
         }
@@ -261,14 +269,42 @@
                         <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
                     </button>
 
-                    <button
-                        onclick={handleScan}
-                        disabled={isScanning}
-                        class="flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-50"
-                    >
-                        <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-xs"></i>
-                        <span>{isScanning ? "Importing..." : "Import"}</span>
-                    </button>
+                    <div class="relative">
+                        <button
+                            onclick={() => importMenuOpen = !importMenuOpen}
+                            disabled={isScanning}
+                            class="flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-50"
+                        >
+                            <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-xs"></i>
+                            <span>{isScanning ? "Importing..." : "Import"}</span>
+                            <i class="fa-solid fa-caret-down text-xs text-neutral-500"></i>
+                        </button>
+                        {#if importMenuOpen}
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div
+                                class="fixed inset-0 z-40"
+                                onclick={() => importMenuOpen = false}
+                            ></div>
+                            <div class="absolute right-0 top-full mt-1 py-1 bg-neutral-800 border border-neutral-700 rounded shadow-lg z-50 min-w-[140px]">
+                                <button
+                                    onclick={() => { importMenuOpen = false; handleScan("folder"); }}
+                                    disabled={isScanning}
+                                    class="w-full px-3 py-1.5 text-left text-sm text-neutral-300 hover:bg-neutral-700 flex items-center gap-2"
+                                >
+                                    <i class="fa-solid fa-folder text-xs"></i>
+                                    Folder
+                                </button>
+                                <button
+                                    onclick={() => { importMenuOpen = false; handleScan("file"); }}
+                                    disabled={isScanning}
+                                    class="w-full px-3 py-1.5 text-left text-sm text-neutral-300 hover:bg-neutral-700 flex items-center gap-2"
+                                >
+                                    <i class="fa-solid fa-file-image text-xs"></i>
+                                    Single File
+                                </button>
+                            </div>
+                        {/if}
+                    </div>
                 </div>
             </header>
 

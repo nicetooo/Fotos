@@ -12,7 +12,7 @@ pub use error::CoreError;
 pub use types::{PhotoId, PhotoInfo, PhotoMetadata, ImportResult};
 
 pub use fs::scan_photos;
-pub use image::{Thumbnailer, ThumbnailSpec, ThumbnailError, compute_hash};
+pub use image::{Thumbnailer, ThumbnailSpec, ThumbnailError, compute_hash, extract_raw_preview};
 pub use index::PhotoIndex;
 pub use metadata::{read_metadata, read_date_taken};
 

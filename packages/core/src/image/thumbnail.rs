@@ -53,41 +53,145 @@ fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Resu
     // Read EXIF orientation first
     let orientation = read_exif_orientation(source);
 
-    // Step 1: Try to use embedded thumbnail from EXIF
     // Step 1: Try to use embedded thumbnail from EXIF (fast path)
-    if let Ok(embedded_thumb) = try_extract_embedded_thumbnail(source, spec) {
+    // This is required for RAW files since image crate can't decode them
+    let thumb_result = try_extract_embedded_thumbnail(source, spec);
+
+    if let Ok(embedded_thumb) = thumb_result {
         // Apply orientation correction to embedded thumbnail
-            let corrected_thumb = if let Some(orient) = orientation {
-                apply_orientation_correction(&embedded_thumb, orient)?
-            } else {
-                embedded_thumb
-            };
-            
-            // Save the corrected thumbnail
+        let corrected_thumb = if let Some(orient) = orientation {
+            apply_orientation_correction(&embedded_thumb, orient)?
+        } else {
+            embedded_thumb
+        };
+
+        // Save the corrected thumbnail
         std::fs::write(dest, corrected_thumb)
             .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
         return Ok(());
     }
 
-    // Step 2: Fall back to full decode + resize (slow path)
+    // Check if this is a RAW file - if embedded thumbnail failed, we can't proceed
+    if is_raw_file(source) {
+        return Err(ThumbnailError::DecodeError(format!(
+            "RAW file has no extractable embedded thumbnail: {:?}",
+            thumb_result.err()
+        )));
+    }
+
+    // Step 2: Fall back to full decode + resize (slow path) - only for standard formats
     let img = image::open(source).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-    
+
     // Apply EXIF orientation correction
     let corrected_img = if let Some(orient) = orientation {
         apply_orientation_to_image(img, orient)
     } else {
         img
     };
-    
+
     // thumbnail() is faster than resize() because it downsamples during load if supported,
     // or uses nearest neighbor optimization for large downscales.
     let thumb = corrected_img.thumbnail(spec.width, spec.height);
-    
+
     // Force JPEG format when saving
     thumb.write_to(&mut std::fs::File::create(dest).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?, image::ImageFormat::Jpeg)
          .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
-    
+
     Ok(())
+}
+
+/// Check if file is a RAW format based on extension
+pub fn is_raw_file(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_lowercase())
+            .as_deref(),
+        Some("cr2" | "cr3" | "nef" | "nrw" | "arw" | "srf" | "sr2" |
+             "dng" | "raf" | "orf" | "rw2" | "pef" | "raw")
+    )
+}
+
+/// Extract the embedded JPEG preview from a RAW file.
+/// Returns the full-resolution preview JPEG bytes with orientation correction applied.
+/// Optimized: stops scanning once a large enough preview (>500KB) is found.
+pub fn extract_raw_preview(path: &Path) -> Result<Vec<u8>, ThumbnailError> {
+    use std::io::{BufReader, Read, Seek, SeekFrom};
+
+    if !is_raw_file(path) {
+        return Err(ThumbnailError::DecodeError("Not a RAW file".to_string()));
+    }
+
+    let orientation = read_exif_orientation(path);
+
+    let file = std::fs::File::open(path)
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    let file_size = file.metadata()
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?.len();
+    let mut reader = BufReader::with_capacity(64 * 1024, file); // 64KB buffer for faster reading
+
+    let scan_start = 8u64;
+    let mut best_preview: Option<Vec<u8>> = None;
+    let mut best_size = 0u64;
+
+    // Threshold: once we find a JPEG > 500KB, it's almost certainly the main preview
+    const GOOD_ENOUGH_SIZE: u64 = 500_000;
+
+    reader.seek(SeekFrom::Start(scan_start))
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+
+    let mut pos = scan_start;
+    let mut buf = [0u8; 32768]; // 32KB chunks for faster scanning
+
+    'scan: while pos < file_size - 3 {
+        let bytes_read = reader.read(&mut buf)
+            .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        for i in 0..bytes_read.saturating_sub(2) {
+            if buf[i] == 0xFF && buf[i + 1] == 0xD8 && buf[i + 2] == 0xFF {
+                let jpeg_start = pos + i as u64;
+
+                if let Ok(jpeg_data) = extract_jpeg_from_offset(path, jpeg_start, file_size) {
+                    let jpeg_size = jpeg_data.len() as u64;
+
+                    // Keep the largest JPEG found (minimum 50KB to filter out tiny thumbnails)
+                    if jpeg_size > best_size && jpeg_size > 50_000 {
+                        best_size = jpeg_size;
+                        best_preview = Some(jpeg_data);
+
+                        // If we found a large enough preview, stop scanning immediately
+                        if jpeg_size >= GOOD_ENOUGH_SIZE {
+                            break 'scan;
+                        }
+                    }
+                }
+            }
+        }
+
+        pos += (bytes_read - 2) as u64;
+        reader.seek(SeekFrom::Start(pos))
+            .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    }
+
+    if let Some(preview_data) = best_preview {
+        // Validate the JPEG only once at the end
+        if image::load_from_memory(&preview_data).is_err() {
+            return Err(ThumbnailError::DecodeError("Invalid JPEG preview data".to_string()));
+        }
+
+        // Apply orientation correction
+        if let Some(orient) = orientation {
+            if orient > 1 {
+                return apply_orientation_correction(&preview_data, orient);
+            }
+        }
+        return Ok(preview_data);
+    }
+
+    Err(ThumbnailError::DecodeError("No embedded JPEG preview found".to_string()))
 }
 
 /// Reads EXIF orientation tag from an image file.
@@ -148,6 +252,26 @@ fn apply_orientation_to_image(img: image::DynamicImage, orientation: u32) -> ima
     }
 }
 
+/// Detects if file is JPEG or TIFF-based (RAW) by checking magic bytes.
+/// Returns true for TIFF-based files, false for JPEG.
+fn is_tiff_based(source: &Path) -> bool {
+    use std::io::Read;
+
+    let mut file = match std::fs::File::open(source) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let mut magic = [0u8; 2];
+    if file.read_exact(&mut magic).is_err() {
+        return false;
+    }
+
+    // TIFF: starts with II (little-endian) or MM (big-endian)
+    // JPEG: starts with 0xFF 0xD8
+    magic == [0x49, 0x49] || magic == [0x4D, 0x4D]
+}
+
 /// Attempts to extract and resize embedded EXIF thumbnail.
 /// Returns the JPEG bytes if successful, or an error if not available or too small.
 fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8>, ThumbnailError> {
@@ -161,9 +285,29 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
     let exif = exif_reader.read_from_container(&mut reader)
         .map_err(|e| ThumbnailError::DecodeError(format!("No EXIF: {}", e)))?;
 
-    // Check if there's a thumbnail - EXIF thumbnails are stored in the THUMBNAIL IFD, not PRIMARY
-    let thumbnail_field = exif.get_field(exif::Tag::JPEGInterchangeFormat, exif::In::THUMBNAIL);
-    let length_field = exif.get_field(exif::Tag::JPEGInterchangeFormatLength, exif::In::THUMBNAIL);
+    // Try multiple IFDs to find embedded thumbnail
+    // THUMBNAIL IFD (IFD1) is standard, but some RAW files use PRIMARY IFD (IFD0)
+    let ifds = [exif::In::THUMBNAIL, exif::In::PRIMARY];
+
+    let mut thumbnail_field = None;
+    let mut length_field = None;
+
+    for ifd in &ifds {
+        let tf = exif.get_field(exif::Tag::JPEGInterchangeFormat, *ifd);
+        let lf = exif.get_field(exif::Tag::JPEGInterchangeFormatLength, *ifd);
+        if tf.is_some() && lf.is_some() {
+            thumbnail_field = tf;
+            length_field = lf;
+            break;
+        }
+    }
+
+    // For RAW files, also try to find embedded JPEG by scanning for JPEG header
+    if thumbnail_field.is_none() && is_raw_file(source) {
+        if let Ok(preview) = try_extract_raw_preview(source, spec) {
+            return Ok(preview);
+        }
+    }
 
     if let Some(thumbnail_field) = thumbnail_field {
         if let Some(length_field) = length_field {
@@ -173,54 +317,19 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
             let length = length_field.value.get_uint(0)
                 .ok_or_else(|| ThumbnailError::DecodeError("Invalid thumbnail length".to_string()))? as usize;
 
-            // For JPEG files, we need to find the EXIF APP1 segment and calculate absolute offset
-            // JPEG structure: SOI (2) + APP1 marker (2) + length (2) + "Exif\0\0" (6) + TIFF header
-            // The offset in EXIF is relative to TIFF header start
             let file = std::fs::File::open(source)
                 .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
             let mut reader = BufReader::new(file);
             use std::io::{Seek, Read};
 
-            // Find APP1 (EXIF) segment position
-            let mut buf = [0u8; 2];
-            reader.read_exact(&mut buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            if buf != [0xFF, 0xD8] {
-                return Err(ThumbnailError::DecodeError("Not a JPEG file".to_string()));
-            }
-
-            // Scan for APP1 marker (0xFFE1)
-            let mut app1_data_start: Option<u64> = None;
-            loop {
-                reader.read_exact(&mut buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-                if buf[0] != 0xFF {
-                    return Err(ThumbnailError::DecodeError("Invalid JPEG marker".to_string()));
-                }
-                if buf[1] == 0xE1 {
-                    // APP1 found, read length
-                    let mut len_buf = [0u8; 2];
-                    reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-                    // Check for "Exif\0\0"
-                    let mut exif_id = [0u8; 6];
-                    reader.read_exact(&mut exif_id).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-                    if &exif_id == b"Exif\0\0" {
-                        // TIFF header starts here
-                        app1_data_start = Some(reader.stream_position().map_err(|e| ThumbnailError::DecodeError(e.to_string()))?);
-                        break;
-                    }
-                } else if buf[1] == 0xD9 || buf[1] == 0xDA {
-                    // EOI or SOS - no EXIF found
-                    break;
-                } else if buf[1] >= 0xE0 && buf[1] <= 0xEF || buf[1] == 0xFE {
-                    // Other APP or COM segment, skip it
-                    let mut len_buf = [0u8; 2];
-                    reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-                    let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
-                    reader.seek(std::io::SeekFrom::Current(seg_len)).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-                }
-            }
-
-            let tiff_header_pos = app1_data_start.ok_or_else(|| ThumbnailError::DecodeError("EXIF APP1 not found".to_string()))?;
-            let absolute_offset = tiff_header_pos + tiff_offset as u64;
+            // Calculate absolute offset based on file type
+            let absolute_offset = if is_tiff_based(source) {
+                // TIFF-based (RAW): offset is relative to file start
+                tiff_offset as u64
+            } else {
+                // JPEG: offset is relative to TIFF header in APP1 segment
+                find_jpeg_tiff_header_offset(source)? + tiff_offset as u64
+            };
 
             // Seek to thumbnail data
             reader.seek(std::io::SeekFrom::Start(absolute_offset))
@@ -233,12 +342,12 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
             // Decode the embedded thumbnail to check its size
             let thumb_img = image::load_from_memory(&thumb_data)
                 .map_err(|e| ThumbnailError::DecodeError(format!("Embedded thumb decode failed: {}", e)))?;
-            
+
             // If embedded thumbnail is already smaller than or equal to target size, use it directly
             if thumb_img.width() <= spec.width && thumb_img.height() <= spec.height {
                 return Ok(thumb_data);
             }
-            
+
             // If embedded thumbnail is larger but not too large (e.g., < 4x target), resize it
             // This is still faster than decoding the full image
             if thumb_img.width() <= spec.width * 4 && thumb_img.height() <= spec.height * 4 {
@@ -250,8 +359,160 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
             }
         }
     }
-    
+
     Err(ThumbnailError::DecodeError("No suitable embedded thumbnail".to_string()))
+}
+
+/// Try to extract embedded JPEG preview from RAW file by scanning for JPEG markers.
+/// This is a fallback when standard EXIF thumbnail tags are not found.
+fn try_extract_raw_preview(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8>, ThumbnailError> {
+    use std::io::{BufReader, Read, Seek, SeekFrom};
+
+    let file = std::fs::File::open(source)
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    let file_size = file.metadata()
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?.len();
+    let mut reader = BufReader::new(file);
+
+    // Skip initial bytes (TIFF header area) and scan for JPEG start marker
+    // NEF files typically have the preview starting after several KB
+    let scan_start = 8u64; // Skip TIFF header
+    let mut best_preview: Option<Vec<u8>> = None;
+    let mut best_size = 0u64;
+
+    reader.seek(SeekFrom::Start(scan_start))
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+
+    let mut pos = scan_start;
+    let mut buf = [0u8; 4096];
+
+    // Scan for JPEG start markers (0xFF 0xD8 0xFF)
+    while pos < file_size - 3 {
+        let bytes_read = reader.read(&mut buf)
+            .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        for i in 0..bytes_read.saturating_sub(2) {
+            if buf[i] == 0xFF && buf[i + 1] == 0xD8 && buf[i + 2] == 0xFF {
+                let jpeg_start = pos + i as u64;
+
+                // Try to find JPEG end marker and extract
+                if let Ok(jpeg_data) = extract_jpeg_from_offset(source, jpeg_start, file_size) {
+                    let jpeg_size = jpeg_data.len() as u64;
+
+                    // Keep the largest preview (usually the full-resolution one)
+                    if jpeg_size > best_size && jpeg_size > 10000 {
+                        // Verify it's a valid JPEG by trying to decode it
+                        if image::load_from_memory(&jpeg_data).is_ok() {
+                            best_size = jpeg_size;
+                            best_preview = Some(jpeg_data);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Move position, overlapping a bit to catch markers at boundaries
+        pos += (bytes_read - 2) as u64;
+        reader.seek(SeekFrom::Start(pos))
+            .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    }
+
+    if let Some(preview_data) = best_preview {
+        // Resize if needed
+        let img = image::load_from_memory(&preview_data)
+            .map_err(|e| ThumbnailError::DecodeError(format!("Preview decode failed: {}", e)))?;
+
+        if img.width() <= spec.width && img.height() <= spec.height {
+            return Ok(preview_data);
+        }
+
+        let resized = img.thumbnail(spec.width, spec.height);
+        let mut output = Vec::new();
+        resized.write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Jpeg)
+            .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+        return Ok(output);
+    }
+
+    Err(ThumbnailError::DecodeError("No embedded JPEG preview found".to_string()))
+}
+
+/// Extract JPEG data from a specific offset in a file.
+fn extract_jpeg_from_offset(source: &Path, start: u64, file_size: u64) -> Result<Vec<u8>, ThumbnailError> {
+    use std::io::{BufReader, Read, Seek, SeekFrom};
+
+    let file = std::fs::File::open(source)
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    let mut reader = BufReader::new(file);
+
+    reader.seek(SeekFrom::Start(start))
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+
+    // Read up to 20MB max for a preview image
+    let max_size = std::cmp::min(20 * 1024 * 1024, (file_size - start) as usize);
+    let mut data = vec![0u8; max_size];
+    let bytes_read = reader.read(&mut data)
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    data.truncate(bytes_read);
+
+    // Find JPEG end marker (0xFF 0xD9)
+    for i in 2..data.len() {
+        if data[i - 1] == 0xFF && data[i] == 0xD9 {
+            data.truncate(i + 1);
+            return Ok(data);
+        }
+    }
+
+    // If no end marker found, try anyway (might work for some formats)
+    Err(ThumbnailError::DecodeError("JPEG end marker not found".to_string()))
+}
+
+/// Find the TIFF header position in a JPEG file by scanning for EXIF APP1 segment.
+fn find_jpeg_tiff_header_offset(source: &Path) -> Result<u64, ThumbnailError> {
+    use std::io::{BufReader, Read, Seek};
+
+    let file = std::fs::File::open(source)
+        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    let mut reader = BufReader::new(file);
+
+    let mut buf = [0u8; 2];
+    reader.read_exact(&mut buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    if buf != [0xFF, 0xD8] {
+        return Err(ThumbnailError::DecodeError("Not a JPEG file".to_string()));
+    }
+
+    // Scan for APP1 marker (0xFFE1)
+    loop {
+        reader.read_exact(&mut buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+        if buf[0] != 0xFF {
+            return Err(ThumbnailError::DecodeError("Invalid JPEG marker".to_string()));
+        }
+        if buf[1] == 0xE1 {
+            // APP1 found, read length
+            let mut len_buf = [0u8; 2];
+            reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            // Check for "Exif\0\0"
+            let mut exif_id = [0u8; 6];
+            reader.read_exact(&mut exif_id).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            if &exif_id == b"Exif\0\0" {
+                // TIFF header starts here
+                return reader.stream_position().map_err(|e| ThumbnailError::DecodeError(e.to_string()));
+            }
+        } else if buf[1] == 0xD9 || buf[1] == 0xDA {
+            // EOI or SOS - no EXIF found
+            break;
+        } else if buf[1] >= 0xE0 && buf[1] <= 0xEF || buf[1] == 0xFE {
+            // Other APP or COM segment, skip it
+            let mut len_buf = [0u8; 2];
+            reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
+            reader.seek(std::io::SeekFrom::Current(seg_len)).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+        }
+    }
+
+    Err(ThumbnailError::DecodeError("EXIF APP1 not found".to_string()))
 }
 
 /// Generates a stable, platform-independent key for a thumbnail configuration.
