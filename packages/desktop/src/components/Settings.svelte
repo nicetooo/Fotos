@@ -18,9 +18,7 @@
         try {
             await invoke("clear_thumbnail_cache", { thumbDir });
             await emit("reload-photos");
-            alert("Thumbnail cache cleared successfully!");
         } catch (e) {
-            console.error(e);
             alert("Failed to clear cache: " + e);
         } finally {
             clearCacheLoading = false;
@@ -33,19 +31,14 @@
         try {
             await invoke("regenerate_thumbnails", { dbPath, thumbDir });
             await emit("reload-photos");
-            alert("Thumbnails regenerated successfully!");
         } catch (e) {
-            console.error(e);
-            alert("Failed to regenerate thumbnails: " + e);
+            alert("Failed to regenerate: " + e);
         } finally {
             regenerateLoading = false;
         }
     }
 
-    async function handleOpenPath(
-        path: string,
-        mode: "open" | "reveal" = "open",
-    ) {
+    async function handleOpenPath(path: string, mode: "open" | "reveal" = "open") {
         if (!path) return;
         try {
             if (mode === "reveal") {
@@ -54,132 +47,83 @@
                 await openPath(path);
             }
         } catch (e) {
-            console.error("Failed to open path:", path, e);
-            alert(`Failed to open path: ${path}\nError: ${e}`);
+            alert(`Failed to open: ${e}`);
         }
     }
 </script>
 
-<div
-    class="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500"
->
-    <!-- Header -->
-    <div class="flex flex-col gap-2">
-        <h2 class="text-3xl font-extrabold text-white">Settings</h2>
-        <p class="text-slate-400">
-            Configure your global preferences and storage.
-        </p>
-    </div>
+<div class="p-4 max-w-2xl">
+    <h2 class="text-lg font-medium text-white mb-6">Settings</h2>
 
-    <!-- Storage Section -->
-    <div
-        class="rounded-2xl bg-slate-800/50 border border-slate-700/50 overflow-hidden"
-    >
-        <div class="p-6 border-b border-slate-700/50">
-            <h3 class="text-lg font-bold text-white flex items-center gap-3">
-                <i class="fa-solid fa-database text-indigo-400"></i>
-                Storage & Database
-            </h3>
-        </div>
-        <div class="p-6 space-y-6">
-            <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-slate-400"
-                    >Database Location</label
-                >
-                <div
-                    class="flex items-center gap-3 p-3 rounded-xl bg-slate-900/50 border border-slate-700 font-mono text-xs text-slate-300"
-                >
-                    <i class="fa-solid fa-file-code text-slate-500"></i>
-                    <span class="truncate flex-1">{dbPath || "Loading..."}</span
-                    >
-                    <button
-                        onclick={() => handleOpenPath(dbPath, "reveal")}
-                        class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-indigo-400 border border-slate-700 transition"
-                        title="Show in Finder"
-                    >
-                        <i class="fa-solid fa-folder-open"></i>
-                    </button>
+    <!-- Storage -->
+    <section class="mb-6">
+        <h3 class="text-sm text-neutral-400 mb-3">Storage</h3>
+
+        <div class="space-y-3">
+            <div class="flex items-center justify-between py-2">
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm text-neutral-300">Database</p>
+                    <p class="text-xs text-neutral-500 font-mono truncate">{dbPath || "..."}</p>
                 </div>
-            </div>
-
-            <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-slate-400"
-                    >Thumbnail Cache</label
-                >
-                <div
-                    class="flex items-center gap-3 p-3 rounded-xl bg-slate-900/50 border border-slate-700 font-mono text-xs text-slate-300"
-                >
-                    <i class="fa-solid fa-images text-slate-500"></i>
-                    <span class="truncate flex-1"
-                        >{thumbDir || "Loading..."}</span
-                    >
-                    <button
-                        onclick={() => handleOpenPath(thumbDir)}
-                        class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-indigo-400 border border-slate-700 transition"
-                        title="Open in Finder"
-                    >
-                        <i class="fa-solid fa-folder-open"></i>
-                    </button>
-                </div>
-            </div>
-
-            <div class="pt-4 border-t border-slate-700/50 flex gap-4">
                 <button
-                    onclick={handleClearCache}
-                    disabled={clearCacheLoading}
-                    class="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors text-sm font-medium disabled:opacity-50"
+                    onclick={() => handleOpenPath(dbPath, "reveal")}
+                    class="ml-3 p-1.5 rounded hover:bg-neutral-800 text-neutral-400 hover:text-white text-xs"
                 >
-                    {#if clearCacheLoading}
-                        <i class="fa-solid fa-circle-notch fa-spin"></i>
-                    {:else}
-                        <i class="fa-solid fa-trash-can"></i>
-                    {/if}
-                    Clear Cache
+                    <i class="fa-solid fa-folder-open"></i>
                 </button>
+            </div>
 
+            <div class="flex items-center justify-between py-2">
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm text-neutral-300">Thumbnails</p>
+                    <p class="text-xs text-neutral-500 font-mono truncate">{thumbDir || "..."}</p>
+                </div>
                 <button
-                    onclick={handleRegenerate}
-                    disabled={regenerateLoading}
-                    class="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors text-sm font-medium disabled:opacity-50"
+                    onclick={() => handleOpenPath(thumbDir)}
+                    class="ml-3 p-1.5 rounded hover:bg-neutral-800 text-neutral-400 hover:text-white text-xs"
                 >
-                    {#if regenerateLoading}
-                        <i class="fa-solid fa-circle-notch fa-spin"></i>
-                    {:else}
-                        <i class="fa-solid fa-arrows-rotate"></i>
-                    {/if}
-                    Regenerate All
+                    <i class="fa-solid fa-folder-open"></i>
                 </button>
             </div>
         </div>
-    </div>
+    </section>
 
-    <!-- Application Section -->
-    <div
-        class="rounded-2xl bg-slate-800/50 border border-slate-700/50 overflow-hidden"
-    >
-        <div class="p-6 border-b border-slate-700/50">
-            <h3 class="text-lg font-bold text-white flex items-center gap-3">
-                <i class="fa-solid fa-cube text-indigo-400"></i>
-                Application
-            </h3>
+    <!-- Cache -->
+    <section class="mb-6">
+        <h3 class="text-sm text-neutral-400 mb-3">Cache</h3>
+
+        <div class="flex gap-2">
+            <button
+                onclick={handleClearCache}
+                disabled={clearCacheLoading}
+                class="px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
+            >
+                {#if clearCacheLoading}
+                    <i class="fa-solid fa-spinner fa-spin mr-1"></i>
+                {/if}
+                Clear Cache
+            </button>
+
+            <button
+                onclick={handleRegenerate}
+                disabled={regenerateLoading}
+                class="px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
+            >
+                {#if regenerateLoading}
+                    <i class="fa-solid fa-spinner fa-spin mr-1"></i>
+                {/if}
+                Regenerate
+            </button>
         </div>
-        <div class="p-6 grid grid-cols-2 gap-6">
-            <div class="flex flex-col gap-1">
-                <span class="text-sm font-medium text-slate-400"
-                    >Core Engine Version</span
-                >
-                <span class="text-lg font-bold text-white tracking-tight"
-                    >{version}</span
-                >
-            </div>
-            <div class="flex flex-col gap-1">
-                <span class="text-sm font-medium text-slate-400"
-                    >UI Platform</span
-                >
-                <span class="text-lg font-bold text-white tracking-tight"
-                    >Tauri v2 + Svelte 5</span
-                >
-            </div>
+    </section>
+
+    <!-- About -->
+    <section>
+        <h3 class="text-sm text-neutral-400 mb-3">About</h3>
+
+        <div class="text-sm">
+            <p class="text-neutral-300">Fotos <span class="text-neutral-500">v{version}</span></p>
+            <p class="text-neutral-500 text-xs mt-1">Tauri + Svelte + Rust</p>
         </div>
-    </div>
+    </section>
 </div>

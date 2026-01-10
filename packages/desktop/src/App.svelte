@@ -11,7 +11,7 @@
     import Map from "./components/Map.svelte";
     import type { PhotoInfo } from "./types";
 
-    let version = $state("Loading...");
+    let version = $state("...");
     let currentView = $state("library");
     let importStatus = $state({
         success: 0,
@@ -30,42 +30,30 @@
     let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
     let sortOrder = $state<"asc" | "desc">("desc");
 
-    // Computed sorted photos
     let sortedPhotos = $derived.by(() => {
         const photosCopy = [...photos];
-
         photosCopy.sort((a, b) => {
             let comparison = 0;
-
             switch (sortBy) {
                 case "name":
                     const nameA = a.path.split("/").pop() || "";
                     const nameB = b.path.split("/").pop() || "";
                     comparison = nameA.localeCompare(nameB);
                     break;
-
                 case "date":
                     const dateA = a.metadata.date_taken || "";
                     const dateB = b.metadata.date_taken || "";
                     comparison = dateA.localeCompare(dateB);
                     break;
-
                 case "size":
-                    const sizeA = a.metadata.width * a.metadata.height;
-                    const sizeB = b.metadata.width * b.metadata.height;
-                    comparison = sizeA - sizeB;
-                    break;
-
                 case "dimensions":
                     const pixelsA = a.metadata.width * a.metadata.height;
                     const pixelsB = b.metadata.width * b.metadata.height;
                     comparison = pixelsA - pixelsB;
                     break;
             }
-
             return sortOrder === "asc" ? comparison : -comparison;
         });
-
         return photosCopy;
     });
 
@@ -76,7 +64,6 @@
             dbPath = await join(appData, "fotos.db");
             thumbDir = await join(appData, "thumbnails");
 
-            // Listen for progress
             await listen("import-progress", (event: any) => {
                 const payload = event.payload;
                 importStatus = {
@@ -87,18 +74,12 @@
                     total: payload.total,
                     lastPath: payload.last_path,
                 };
-
-                // Refresh occasionally for live update
                 if (payload.current <= 5 || payload.current % 50 === 0) {
                     loadPhotos();
                 }
             });
 
-            await listen("reload-photos", () => {
-                console.log("Reloading photos due to cache clear...");
-                loadPhotos();
-            });
-
+            await listen("reload-photos", () => loadPhotos());
             await loadPhotos();
         } catch (e) {
             error = "Failed to initialize: " + e;
@@ -117,36 +98,21 @@
 
     async function handleScan() {
         try {
-            console.log("Opening folder picker...");
-            const selected = await open({
-                directory: true,
-                multiple: false,
-            });
-
-            console.log("Picker selected:", selected);
+            const selected = await open({ directory: true, multiple: false });
             if (!selected) return;
-
-            // In case it returns an array even with multiple: false
             const rootPath = Array.isArray(selected) ? selected[0] : selected;
 
             isScanning = true;
             error = "";
 
-            console.log("Calling import_photos with:", {
+            const result = await invoke("import_photos", {
                 rootPath,
                 dbPath,
                 thumbDir,
             });
-            const result = await invoke("import_photos", {
-                rootPath,
-                dbPath: dbPath,
-                thumbDir: thumbDir,
-            });
-            console.log("Import result:", result);
             importStatus = result as any;
             await loadPhotos();
         } catch (e) {
-            console.error("Scan error:", e);
             error = String(e);
         } finally {
             isScanning = false;
@@ -154,11 +120,10 @@
     }
 
     async function handleShowInFinder(path: string, e: MouseEvent) {
-        e.stopPropagation(); // Prevent opening preview
+        e.stopPropagation();
         try {
             await revealItemInDir(path);
         } catch (e) {
-            console.error("Failed to reveal item:", e);
             alert("Failed to open location: " + e);
         }
     }
@@ -170,257 +135,130 @@
     function closePreview() {
         previewPhoto = null;
     }
-
-    function formatDate(dateStr?: string): string {
-        if (!dateStr) return "";
-        try {
-            // EXIF date format is usually "YYYY:MM:DD HH:MM:SS"
-            // If it's standard ISO, Date parse works. If it's EXIF, we might need manual parsing or just display.
-            // Let's try simple display first, or replace : with - for the date part.
-            // Many parsers handle it, but to be safe:
-            const standardized = dateStr.replace(
-                /^(\d{4}):(\d{2}):(\d{2})/,
-                "$1-$2-$3",
-            );
-            const date = new Date(standardized);
-            if (isNaN(date.getTime())) return dateStr;
-            return date.toLocaleDateString(undefined, {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-            });
-        } catch {
-            return dateStr;
-        }
-    }
 </script>
 
-<main
-    class="fixed inset-0 flex bg-[#0f172a] text-slate-200 overflow-hidden font-sans"
->
+<main class="fixed inset-0 flex bg-neutral-900 text-neutral-200 overflow-hidden">
     <!-- Sidebar -->
-    <aside
-        class="w-64 shrink-0 border-r border-slate-800 bg-[#0f172a]/50 backdrop-blur-xl flex flex-col p-6 gap-8 h-full overflow-y-auto"
-    >
-        <div class="flex items-center gap-3 px-2">
-            <div
-                class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/20"
-            >
-                <i class="fa-solid fa-camera text-white text-sm"></i>
-            </div>
-            <h1 class="text-xl font-bold tracking-tight text-white">Fotos</h1>
+    <aside class="w-48 shrink-0 border-r border-neutral-800 bg-neutral-900 flex flex-col py-3 h-full">
+        <div class="px-4 py-2 mb-2">
+            <h1 class="text-sm font-semibold text-neutral-300">Fotos</h1>
         </div>
 
-        <nav class="flex-1 space-y-2">
+        <nav class="flex-1 px-2 space-y-0.5">
             <button
                 onclick={() => (currentView = "library")}
-                class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group {currentView ===
-                'library'
-                    ? 'bg-white/10 text-white'
-                    : 'text-slate-400 hover:bg-white/5 hover:text-white'}"
+                class="w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm {currentView === 'library'
+                    ? 'bg-neutral-800 text-white'
+                    : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200'}"
             >
-                <i
-                    class="fa-solid fa-images text-indigo-400 group-hover:scale-110 transition-transform"
-                ></i>
-                <span class="font-medium">Library</span>
+                <i class="fa-solid fa-images w-4 text-center text-xs"></i>
+                <span>Library</span>
             </button>
             <button
                 onclick={() => (currentView = "map")}
-                class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group {currentView ===
-                'map'
-                    ? 'bg-white/10 text-white'
-                    : 'text-slate-400 hover:bg-white/5 hover:text-white'}"
+                class="w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm {currentView === 'map'
+                    ? 'bg-neutral-800 text-white'
+                    : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200'}"
             >
-                <i
-                    class="fa-solid fa-map-location-dot group-hover:scale-110 transition-transform"
-                ></i>
-                <span class="font-medium">Map</span>
+                <i class="fa-solid fa-map w-4 text-center text-xs"></i>
+                <span>Map</span>
             </button>
             <button
                 onclick={() => (currentView = "settings")}
-                class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group {currentView ===
-                'settings'
-                    ? 'bg-white/10 text-white'
-                    : 'text-slate-400 hover:bg-white/5 hover:text-white'}"
+                class="w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm {currentView === 'settings'
+                    ? 'bg-neutral-800 text-white'
+                    : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200'}"
             >
-                <i
-                    class="fa-solid fa-gear group-hover:rotate-45 transition-transform"
-                ></i>
-                <span class="font-medium">Settings</span>
+                <i class="fa-solid fa-gear w-4 text-center text-xs"></i>
+                <span>Settings</span>
             </button>
         </nav>
 
-        <div
-            class="mt-auto p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20"
-        >
-            <div class="flex items-center gap-2 mb-2 text-indigo-300">
-                <i class="fa-solid fa-circle-info text-[10px]"></i>
-                <span class="text-xs font-semibold uppercase tracking-wider"
-                    >Engine Info</span
-                >
-            </div>
-            <p class="text-sm text-slate-400">
-                Version: <span class="text-white font-mono">{version}</span>
-            </p>
+        <div class="px-4 py-2 text-xs text-neutral-600">
+            v{version}
         </div>
     </aside>
 
     <!-- Main Content -->
-    <section
-        class="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative {currentView ===
-        'map'
-            ? 'p-0'
-            : 'p-8'}"
-    >
+    <section class="flex-1 flex flex-col min-w-0 h-full overflow-hidden {currentView === 'map' ? '' : 'p-4'}">
         {#if currentView === "library"}
-            <!-- Header -->
-            <header class="flex justify-between items-end mb-8 shrink-0">
-                <div>
-                    <h2 class="text-3xl font-extrabold text-white mb-2">
-                        My Gallery
-                    </h2>
-                    <p class="text-slate-400">
-                        Manage your memories with high-precision Rust engine.
-                    </p>
+            <!-- Toolbar -->
+            <header class="flex justify-between items-center mb-4 shrink-0">
+                <div class="flex items-center gap-4">
+                    <h2 class="text-lg font-medium text-white">{photos.length} Photos</h2>
                 </div>
 
-                <div class="flex items-center gap-3">
-                    <!-- Sort Controls -->
-                    <div
-                        class="flex items-center gap-2 bg-slate-800/50 rounded-xl p-2 border border-slate-700"
+                <div class="flex items-center gap-2">
+                    <select
+                        bind:value={sortBy}
+                        class="bg-neutral-800 text-neutral-300 text-sm px-2 py-1 rounded border border-neutral-700 focus:outline-none focus:border-neutral-600"
                     >
-                        <select
-                            bind:value={sortBy}
-                            class="bg-transparent text-white text-sm px-3 py-1.5 rounded-lg border border-slate-600 hover:border-slate-500 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                        >
-                            <option value="date">Date Taken</option>
-                            <option value="name">File Name</option>
-                            <option value="dimensions">Resolution</option>
-                        </select>
+                        <option value="date">Date</option>
+                        <option value="name">Name</option>
+                        <option value="dimensions">Size</option>
+                    </select>
 
-                        <button
-                            onclick={() =>
-                                (sortOrder =
-                                    sortOrder === "asc" ? "desc" : "asc")}
-                            class="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-                            title={sortOrder === "asc"
-                                ? "Ascending"
-                                : "Descending"}
-                        >
-                            <i
-                                class="fa-solid {sortOrder === 'asc'
-                                    ? 'fa-arrow-up-short-wide'
-                                    : 'fa-arrow-down-wide-short'}"
-                            ></i>
-                        </button>
-                    </div>
+                    <button
+                        onclick={() => (sortOrder = sortOrder === "asc" ? "desc" : "asc")}
+                        class="p-1.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-white"
+                        title={sortOrder === "asc" ? "Ascending" : "Descending"}
+                    >
+                        <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
+                    </button>
 
                     <button
                         onclick={handleScan}
                         disabled={isScanning}
-                        class="flex items-center gap-3 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-not-allowed group"
+                        class="flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-50"
                     >
-                        <i
-                            class="fa-solid fa-folder-open text-lg {isScanning
-                                ? 'animate-pulse'
-                                : 'group-hover:-rotate-12 transition-transform'}"
-                        ></i>
-                        <span
-                            >{isScanning
-                                ? "Scanning..."
-                                : "Import Photos"}</span
-                        >
+                        <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-xs"></i>
+                        <span>{isScanning ? "Importing..." : "Import"}</span>
                     </button>
                 </div>
             </header>
 
             {#if error}
-                <div
-                    class="mb-6 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-3 shrink-0"
-                >
-                    <i class="fa-solid fa-circle-info shrink-0 mt-0.5"></i>
-                    <p>{error}</p>
+                <div class="mb-3 px-3 py-2 rounded bg-red-900/30 border border-red-800/50 text-red-400 text-sm shrink-0">
+                    {error}
                 </div>
             {/if}
 
             <!-- Photo Grid -->
-            <div class="flex-1 overflow-hidden flex flex-col">
+            <div class="flex-1 overflow-hidden">
                 {#if photos.length > 0}
                     <VirtualPhotoGrid
                         photos={sortedPhotos}
                         {uniqueTs}
                         onPhotoClick={openPreview}
                         onShowInFinder={handleShowInFinder}
-                        {formatDate}
+                        formatDate={(d) => d || ""}
                     />
                 {:else if !isScanning}
-                    <div
-                        class="h-full flex flex-col items-center justify-center p-12 text-center"
-                    >
-                        <div
-                            class="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center mb-6 text-slate-600"
-                        >
-                            <i class="fa-solid fa-images text-4xl"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-300 mb-2">
-                            No photos imported yet
-                        </h3>
-                        <p class="text-slate-500 max-w-xs">
-                            Start by importing a folder to see your collection
-                            organized by the core engine.
-                        </p>
+                    <div class="h-full flex flex-col items-center justify-center text-neutral-500">
+                        <i class="fa-solid fa-images text-3xl mb-3"></i>
+                        <p class="text-sm">No photos. Click Import to add.</p>
                     </div>
                 {:else}
-                    <div
-                        class="h-full flex flex-col items-center justify-center p-12 text-center"
-                    >
-                        <i
-                            class="fa-solid fa-circle-notch fa-spin text-4xl text-indigo-500 mb-4"
-                        ></i>
-                        <p class="text-slate-400">Analyzing your photos...</p>
-                        {#if importStatus.total > 0}
-                            <p class="text-xs text-slate-500 mt-2">
-                                Processed {importStatus.current} of {importStatus.total}
-                            </p>
-                        {/if}
+                    <div class="h-full flex flex-col items-center justify-center text-neutral-500">
+                        <i class="fa-solid fa-spinner fa-spin text-xl mb-2"></i>
+                        <p class="text-sm">
+                            {#if importStatus.total > 0}
+                                {importStatus.current} / {importStatus.total}
+                            {:else}
+                                Scanning...
+                            {/if}
+                        </p>
                     </div>
                 {/if}
             </div>
 
-            <!-- Scanning Overlay / Progress -->
+            <!-- Import Progress -->
             {#if isScanning && importStatus.success > 0}
-                <div
-                    class="absolute bottom-12 right-12 p-6 rounded-3xl bg-slate-900/90 backdrop-blur-xl border border-indigo-500/30 shadow-2xl flex items-center gap-6 animate-in fade-in slide-in-from-bottom-4"
-                >
-                    <div class="flex flex-col">
-                        <span
-                            class="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-1"
-                            >Indexing Status</span
-                        >
-                        <div class="flex gap-4">
-                            <div class="flex items-baseline gap-1">
-                                <span class="text-2xl font-black text-white"
-                                    >{importStatus.success}</span
-                                >
-                                <span
-                                    class="text-[10px] text-slate-500 font-bold uppercase"
-                                    >Imported</span
-                                >
-                            </div>
-                            {#if importStatus.failure > 0}
-                                <div class="flex items-baseline gap-1">
-                                    <span
-                                        class="text-2xl font-black text-red-500"
-                                        >{importStatus.failure}</span
-                                    >
-                                    <span
-                                        class="text-[10px] text-slate-500 font-bold uppercase"
-                                        >Skipped</span
-                                    >
-                                </div>
-                            {/if}
-                        </div>
-                    </div>
+                <div class="absolute bottom-4 right-4 px-3 py-2 rounded bg-neutral-800 border border-neutral-700 text-sm">
+                    <span class="text-green-400">{importStatus.success}</span>
+                    {#if importStatus.failure > 0}
+                        / <span class="text-red-400">{importStatus.failure} failed</span>
+                    {/if}
                 </div>
             {/if}
         {:else if currentView === "settings"}
@@ -432,130 +270,94 @@
 </main>
 
 {#if previewPhoto}
-    <!-- Photo Preview Overlay -->
     <div
-        class="fixed inset-0 z-50 flex bg-black/95 backdrop-blur-sm animate-in fade-in duration-200"
+        class="fixed inset-0 z-50 flex bg-black/90"
         onclick={closePreview}
     >
-        <!-- Close button -->
-        <div class="absolute top-6 right-6 flex items-center gap-4 z-10">
-            <button
-                onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
-                class="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors backdrop-blur-md"
-                title="Show in Finder"
-            >
-                <i class="fa-solid fa-folder-open text-lg"></i>
-            </button>
-            <button
-                onclick={closePreview}
-                class="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors backdrop-blur-md"
-            >
-                <i class="fa-solid fa-xmark text-lg"></i>
-            </button>
+        <!-- Top bar -->
+        <div class="absolute top-0 left-0 right-0 h-12 flex items-center justify-between px-4 bg-black/50 z-10">
+            <span class="text-sm text-neutral-400 truncate max-w-md">
+                {previewPhoto.path.split("/").pop()}
+            </span>
+            <div class="flex items-center gap-2">
+                <button
+                    onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
+                    class="p-2 rounded hover:bg-white/10 text-neutral-400 hover:text-white"
+                    title="Show in Finder"
+                >
+                    <i class="fa-solid fa-folder-open text-sm"></i>
+                </button>
+                <button
+                    onclick={closePreview}
+                    class="p-2 rounded hover:bg-white/10 text-neutral-400 hover:text-white"
+                >
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
         </div>
 
-        <!-- Image container -->
-        <div class="flex-1 flex items-center justify-center p-4" onclick={(e) => e.stopPropagation()}>
+        <!-- Image -->
+        <div class="flex-1 flex items-center justify-center pt-12" onclick={(e) => e.stopPropagation()}>
             <ThumbnailImage
                 path={previewPhoto.path}
-                alt="Full preview"
-                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+                alt="Preview"
+                className="max-w-full max-h-full object-contain"
             />
         </div>
 
         <!-- Info Panel -->
         <div
-            class="w-80 bg-slate-900/90 backdrop-blur-xl border-l border-slate-700 p-6 overflow-y-auto"
+            class="w-64 bg-neutral-900 border-l border-neutral-800 pt-12 px-4 py-4 overflow-y-auto text-sm"
             onclick={(e) => e.stopPropagation()}
         >
-            <h3 class="text-lg font-bold text-white mb-4 truncate" title={previewPhoto.path.split("/").pop()}>
-                {previewPhoto.path.split("/").pop()}
-            </h3>
-
-            <div class="space-y-4">
-                <!-- Date & Time -->
+            <div class="space-y-3">
                 {#if previewPhoto.metadata.date_taken}
-                    <div class="flex items-start gap-3">
-                        <i class="fa-solid fa-calendar text-indigo-400 mt-1"></i>
-                        <div>
-                            <p class="text-xs text-slate-500 uppercase tracking-wider">Date Taken</p>
-                            <p class="text-white font-mono text-sm">{previewPhoto.metadata.date_taken}</p>
-                        </div>
+                    <div>
+                        <p class="text-neutral-500 text-xs">Date</p>
+                        <p class="text-neutral-200 font-mono text-xs">{previewPhoto.metadata.date_taken}</p>
                     </div>
                 {/if}
 
-                <!-- Dimensions -->
-                <div class="flex items-start gap-3">
-                    <i class="fa-solid fa-expand text-indigo-400 mt-1"></i>
-                    <div>
-                        <p class="text-xs text-slate-500 uppercase tracking-wider">Dimensions</p>
-                        <p class="text-white text-sm">{previewPhoto.metadata.width} x {previewPhoto.metadata.height} px</p>
-                    </div>
+                <div>
+                    <p class="text-neutral-500 text-xs">Dimensions</p>
+                    <p class="text-neutral-200">{previewPhoto.metadata.width} × {previewPhoto.metadata.height}</p>
                 </div>
 
-                <!-- Camera -->
                 {#if previewPhoto.metadata.make || previewPhoto.metadata.model}
-                    <div class="flex items-start gap-3">
-                        <i class="fa-solid fa-camera text-indigo-400 mt-1"></i>
-                        <div>
-                            <p class="text-xs text-slate-500 uppercase tracking-wider">Camera</p>
-                            <p class="text-white text-sm">
-                                {previewPhoto.metadata.make || ""} {previewPhoto.metadata.model || ""}
-                            </p>
-                        </div>
-                    </div>
-                {/if}
-
-                <!-- Exposure Settings -->
-                {#if previewPhoto.metadata.iso || previewPhoto.metadata.f_number || previewPhoto.metadata.exposure_time}
-                    <div class="flex items-start gap-3">
-                        <i class="fa-solid fa-sliders text-indigo-400 mt-1"></i>
-                        <div>
-                            <p class="text-xs text-slate-500 uppercase tracking-wider">Exposure</p>
-                            <div class="flex flex-wrap gap-2 mt-1">
-                                {#if previewPhoto.metadata.iso}
-                                    <span class="px-2 py-1 bg-slate-800 rounded text-xs text-white">ISO {previewPhoto.metadata.iso}</span>
-                                {/if}
-                                {#if previewPhoto.metadata.f_number}
-                                    <span class="px-2 py-1 bg-slate-800 rounded text-xs text-white">f/{previewPhoto.metadata.f_number.toFixed(1)}</span>
-                                {/if}
-                                {#if previewPhoto.metadata.exposure_time}
-                                    <span class="px-2 py-1 bg-slate-800 rounded text-xs text-white">{previewPhoto.metadata.exposure_time}</span>
-                                {/if}
-                            </div>
-                        </div>
-                    </div>
-                {/if}
-
-                <!-- GPS -->
-                {#if previewPhoto.metadata.lat && previewPhoto.metadata.lon}
-                    <div class="flex items-start gap-3">
-                        <i class="fa-solid fa-location-dot text-indigo-400 mt-1"></i>
-                        <div>
-                            <p class="text-xs text-slate-500 uppercase tracking-wider">Location</p>
-                            <p class="text-white text-sm font-mono">
-                                {previewPhoto.metadata.lat.toFixed(6)}, {previewPhoto.metadata.lon.toFixed(6)}
-                            </p>
-                        </div>
-                    </div>
-                {/if}
-
-                <!-- File Path -->
-                <div class="flex items-start gap-3">
-                    <i class="fa-solid fa-folder text-indigo-400 mt-1"></i>
                     <div>
-                        <p class="text-xs text-slate-500 uppercase tracking-wider">Path</p>
-                        <p class="text-white text-xs font-mono break-all">{previewPhoto.path}</p>
+                        <p class="text-neutral-500 text-xs">Camera</p>
+                        <p class="text-neutral-200">{previewPhoto.metadata.make || ""} {previewPhoto.metadata.model || ""}</p>
                     </div>
+                {/if}
+
+                {#if previewPhoto.metadata.iso || previewPhoto.metadata.f_number || previewPhoto.metadata.exposure_time}
+                    <div>
+                        <p class="text-neutral-500 text-xs">Exposure</p>
+                        <p class="text-neutral-200">
+                            {#if previewPhoto.metadata.iso}ISO {previewPhoto.metadata.iso}{/if}
+                            {#if previewPhoto.metadata.f_number} f/{previewPhoto.metadata.f_number.toFixed(1)}{/if}
+                            {#if previewPhoto.metadata.exposure_time} {previewPhoto.metadata.exposure_time}{/if}
+                        </p>
+                    </div>
+                {/if}
+
+                {#if previewPhoto.metadata.lat && previewPhoto.metadata.lon}
+                    <div>
+                        <p class="text-neutral-500 text-xs">GPS</p>
+                        <p class="text-neutral-200 font-mono text-xs">
+                            {previewPhoto.metadata.lat.toFixed(6)}, {previewPhoto.metadata.lon.toFixed(6)}
+                        </p>
+                    </div>
+                {/if}
+
+                <div>
+                    <p class="text-neutral-500 text-xs">Path</p>
+                    <p class="text-neutral-200 text-xs font-mono break-all">{previewPhoto.path}</p>
                 </div>
 
-                <!-- Hash -->
-                <div class="flex items-start gap-3">
-                    <i class="fa-solid fa-fingerprint text-indigo-400 mt-1"></i>
-                    <div>
-                        <p class="text-xs text-slate-500 uppercase tracking-wider">Hash</p>
-                        <p class="text-white text-xs font-mono">{previewPhoto.hash}</p>
-                    </div>
+                <div>
+                    <p class="text-neutral-500 text-xs">Hash</p>
+                    <p class="text-neutral-200 text-xs font-mono">{previewPhoto.hash}</p>
                 </div>
             </div>
         </div>
@@ -565,19 +367,5 @@
 <style>
     :global(body) {
         overflow: hidden;
-    }
-
-    .custom-scrollbar::-webkit-scrollbar {
-        width: 6px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-track {
-        background: transparent;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #1e293b;
-        border-radius: 10px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: #334155;
     }
 </style>
