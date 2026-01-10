@@ -8,6 +8,11 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 
 [dependencies]
 thiserror = "1.0"
-image = { version = "0.24", default-features = false, features = ["jpeg", "png"] }
+# WARNING: maintain 'pure Rust' and 'platform-independent' constraints.
+# DO NOT add features that depend on system dynamic libraries (e.g., dav1d, rav1e, etc.)
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 walkdir = "2.4"
 rusqlite = { version = "0.30", features = ["bundled"] }
+kamadak-exif = "0.5"
+image_hasher = "3.0.0"
+blake3 = "1.5"
