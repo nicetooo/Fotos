@@ -2,7 +2,8 @@
     import { onMount, onDestroy } from "svelte";
     import * as L from "leaflet";
     import "leaflet/dist/leaflet.css";
-    import { invoke } from "@tauri-apps/api/core";
+    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+    import { appDataDir, join } from "@tauri-apps/api/path";
 
     let { photos } = $props<{ photos: any[] }>();
 
@@ -10,6 +11,7 @@
     let map: L.Map | null = null;
     let objectUrls: string[] = [];
     let resizeObserver: ResizeObserver | null = null;
+    let tileCacheDir = "";
 
     // Fix for default marker icons
     delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -19,8 +21,64 @@
         shadowUrl: null,
     });
 
-    onMount(() => {
+    // Custom tile layer with local caching
+    const CachedTileLayer = L.TileLayer.extend({
+        createTile: function (coords: L.Coords, done: L.DoneCallback) {
+            const tile = document.createElement("img");
+            tile.alt = "";
+            tile.setAttribute("role", "presentation");
+
+            const { x, y, z } = coords;
+            const subdomains = this.options.subdomains;
+            const s = subdomains[Math.abs(x + y) % subdomains.length];
+            const url = `https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
+
+            // Try to load from cache first, then download if needed
+            (async () => {
+                try {
+                    if (tileCacheDir) {
+                        // Check cache
+                        const cachedPath = await invoke<string | null>("get_cached_tile", {
+                            cacheDir: tileCacheDir,
+                            z, x, y
+                        });
+
+                        if (cachedPath) {
+                            tile.src = convertFileSrc(cachedPath);
+                            done(undefined, tile);
+                            return;
+                        }
+
+                        // Download and cache
+                        const savedPath = await invoke<string>("download_tile", {
+                            cacheDir: tileCacheDir,
+                            z, x, y,
+                            url
+                        });
+                        tile.src = convertFileSrc(savedPath);
+                        done(undefined, tile);
+                    } else {
+                        // Fallback to direct URL
+                        tile.src = url;
+                        done(undefined, tile);
+                    }
+                } catch (e) {
+                    // Fallback to direct URL on error
+                    tile.src = url;
+                    done(undefined, tile);
+                }
+            })();
+
+            return tile;
+        }
+    });
+
+    onMount(async () => {
         if (!mapContainer) return;
+
+        // Setup tile cache directory
+        const appData = await appDataDir();
+        tileCacheDir = await join(appData, "map_tiles");
 
         // Initialize map with explicit size
         map = L.map(mapContainer, {
@@ -31,44 +89,46 @@
         L.control.zoom({ position: "topright" }).addTo(map);
         L.control.attribution({ position: "bottomright" }).addTo(map);
 
-        L.tileLayer(
-            "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-            {
-                attribution:
-                    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-                subdomains: "abcd",
-                maxZoom: 20,
-            },
-        ).addTo(map);
+        // Use cached tile layer
+        new CachedTileLayer("", {
+            attribution:
+                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: "abcd",
+            maxZoom: 20,
+        }).addTo(map);
 
         // Initial marker update
         updateMarkers();
 
-        // Setup resize observer with debouncing
+        // Setup resize observer with debouncing - only trigger on actual size changes
+        let lastWidth = 0;
+        let lastHeight = 0;
         let resizeTimeout: number | null = null;
-        resizeObserver = new ResizeObserver(() => {
+
+        resizeObserver = new ResizeObserver((entries) => {
             if (!map || !mapContainer) return;
+
+            const entry = entries[0];
+            const { width, height } = entry.contentRect;
+
+            // Skip if size hasn't actually changed
+            if (width === lastWidth && height === lastHeight) return;
+            if (width === 0 || height === 0) return;
+
+            lastWidth = width;
+            lastHeight = height;
 
             // Clear previous timeout
             if (resizeTimeout) {
                 clearTimeout(resizeTimeout);
             }
 
-            // Immediate size check
-            const rect = mapContainer.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                map.invalidateSize({ pan: false });
-            }
-
-            // Debounced final invalidation
+            // Debounced invalidation only
             resizeTimeout = window.setTimeout(() => {
-                if (map && mapContainer) {
-                    const rect = mapContainer.getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {
-                        map.invalidateSize({ pan: false });
-                    }
+                if (map) {
+                    map.invalidateSize({ pan: false, animate: false });
                 }
-            }, 100);
+            }, 150);
         });
 
         resizeObserver.observe(mapContainer);
@@ -87,17 +147,8 @@
         objectUrls = [];
     });
 
-    async function loadThumbnailUrl(path: string): Promise<string> {
-        try {
-            const bytes = await invoke<number[]>("read_file_bytes", { path });
-            const blob = new Blob([new Uint8Array(bytes)]);
-            const url = URL.createObjectURL(blob);
-            objectUrls.push(url);
-            return url;
-        } catch (e) {
-            console.error("Failed to load map thumb:", path, e);
-            return "";
-        }
+    function getThumbnailUrl(path: string): string {
+        return convertFileSrc(path);
     }
 
     $effect(() => {
@@ -122,20 +173,6 @@
             (p: any) => p.metadata.lat && p.metadata.lon,
         );
 
-        console.log(
-            `Total photos: ${photos.length}, Geotagged: ${geotagged.length}`,
-        );
-        if (geotagged.length > 0) {
-            console.log(
-                "Geotagged photos:",
-                geotagged.map((p) => ({
-                    name: p.path.split("/").pop(),
-                    lat: p.metadata.lat,
-                    lon: p.metadata.lon,
-                })),
-            );
-        }
-
         if (geotagged.length === 0) return;
 
         const bounds = new L.LatLngBounds([]);
@@ -153,15 +190,17 @@
         }
     }
 
-    async function addMarker(photo: any, lat: number, lon: number) {
+    function addMarker(photo: any, lat: number, lon: number) {
         if (!map) return;
 
         const iconSize = 48;
+        const thumbPath = photo.thumb_path || photo.path;
+        const url = getThumbnailUrl(thumbPath);
 
         const customIcon = L.divIcon({
-            className: "custom-map-marker",
-            html: `<div class="w-12 h-12 rounded-full border-2 border-white bg-slate-800 shadow-lg overflow-hidden flex items-center justify-center">
-                    <i class="fa-solid fa-spinner fa-spin text-white"></i>
+            className: "custom-map-marker group",
+            html: `<div class="w-12 h-12 rounded-full border-2 border-white bg-slate-800 shadow-lg overflow-hidden relative group-hover:scale-110 transition-transform">
+                    <img src="${url}" class="w-full h-full object-cover" onerror="this.style.display='none'" />
                    </div>`,
             iconSize: [iconSize, iconSize],
             iconAnchor: [iconSize / 2, iconSize / 2],
@@ -174,22 +213,6 @@
                 <p class="text-[10px] text-gray-500">${photo.metadata.date_taken || "No date"}</p>
             </div>
         `);
-
-        // Load image
-        const thumbPath = photo.thumb_path || photo.path;
-        const url = await loadThumbnailUrl(thumbPath);
-
-        if (url) {
-            const newIcon = L.divIcon({
-                className: "custom-map-marker group",
-                html: `<div class="w-12 h-12 rounded-full border-2 border-white bg-slate-800 shadow-lg overflow-hidden relative group-hover:scale-110 transition-transform">
-                        <img src="${url}" class="w-full h-full object-cover" />
-                       </div>`,
-                iconSize: [iconSize, iconSize],
-                iconAnchor: [iconSize / 2, iconSize / 2],
-            });
-            marker.setIcon(newIcon);
-        }
     }
 </script>
 

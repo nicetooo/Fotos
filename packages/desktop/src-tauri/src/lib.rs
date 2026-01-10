@@ -162,19 +162,62 @@ async fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_cached_tile(cache_dir: String, z: u32, x: u32, y: u32) -> Result<Option<String>, String> {
+    let tile_path = std::path::PathBuf::from(&cache_dir)
+        .join(z.to_string())
+        .join(x.to_string())
+        .join(format!("{}.png", y));
+
+    if tile_path.exists() {
+        Ok(Some(tile_path.to_string_lossy().to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+async fn download_tile(cache_dir: String, z: u32, x: u32, y: u32, url: String) -> Result<String, String> {
+    let tile_path = std::path::PathBuf::from(&cache_dir)
+        .join(z.to_string())
+        .join(x.to_string())
+        .join(format!("{}.png", y));
+
+    // Check if already cached
+    if tile_path.exists() {
+        return Ok(tile_path.to_string_lossy().to_string());
+    }
+
+    // Create directory structure
+    if let Some(parent) = tile_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    // Download tile
+    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+
+    // Save to cache
+    std::fs::write(&tile_path, &bytes).map_err(|e| e.to_string())?;
+
+    Ok(tile_path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            greet, 
+            greet,
             get_core_version,
             import_photos,
             list_photos,
             clear_thumbnail_cache,
             regenerate_thumbnails,
-            read_file_bytes
+            read_file_bytes,
+            get_cached_tile,
+            download_tile
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
