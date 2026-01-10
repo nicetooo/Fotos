@@ -3,12 +3,48 @@
     import * as L from "leaflet";
     import "leaflet/dist/leaflet.css";
     import { convertFileSrc } from "@tauri-apps/api/core";
+    import TimelineSlider from "./TimelineSlider.svelte";
 
     let { photos } = $props<{ photos: any[] }>();
 
     let mapContainer: HTMLDivElement;
-    let map: L.Map | null = null;
+    let map = $state<L.Map | null>(null);
     let resizeObserver: ResizeObserver | null = null;
+
+    // Time filter state
+    let timeFilterStart = $state<Date | null>(null);
+    let timeFilterEnd = $state<Date | null>(null);
+
+    // Parse date from photo metadata
+    function parsePhotoDate(dateStr: string | null): Date | null {
+        if (!dateStr) return null;
+        const cleaned = dateStr.replace(/"/g, '').trim();
+        const date = new Date(cleaned.replace(' ', 'T'));
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    // Pre-compute geotagged photos (only once when photos change)
+    let geotaggedPhotos = $derived(() => {
+        return photos.filter((p: any) => p.metadata?.lat && p.metadata?.lon);
+    });
+
+    let hasGeotaggedPhotos = $derived(() => geotaggedPhotos().length > 0);
+
+    // Filter photos by time range
+    let filteredPhotos = $derived(() => {
+        const geo = geotaggedPhotos();
+        if (!timeFilterStart || !timeFilterEnd) return geo;
+        return geo.filter(p => {
+            const date = parsePhotoDate(p.metadata?.date_taken);
+            if (!date) return true; // Show photos without dates
+            return date >= timeFilterStart! && date <= timeFilterEnd!;
+        });
+    });
+
+    function handleTimeRangeChange(start: Date, end: Date) {
+        timeFilterStart = start;
+        timeFilterEnd = end;
+    }
 
     // Fix for default marker icons
     delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -88,10 +124,27 @@
         return convertFileSrc(path);
     }
 
+    let initialBoundsFit = false;
+
+    // Throttle marker updates (execute at most once per 100ms)
+    let lastUpdateTime = 0;
+    let pendingUpdate = false;
+
     $effect(() => {
-        photos;
+        filteredPhotos();
         if (map) {
-            updateMarkers();
+            const now = Date.now();
+            if (now - lastUpdateTime >= 100) {
+                lastUpdateTime = now;
+                updateMarkers();
+            } else if (!pendingUpdate) {
+                pendingUpdate = true;
+                setTimeout(() => {
+                    pendingUpdate = false;
+                    lastUpdateTime = Date.now();
+                    updateMarkers();
+                }, 100 - (now - lastUpdateTime));
+            }
         }
     });
 
@@ -105,16 +158,20 @@
             }
         });
 
-        // Filter photos with coords
-        const geotagged = photos.filter(
-            (p: any) => p.metadata.lat && p.metadata.lon,
-        );
+        // Use pre-filtered photos (already geotagged + time filtered)
+        const geotagged = filteredPhotos();
 
         if (geotagged.length === 0) return;
 
         const bounds = new L.LatLngBounds([]);
 
-        for (const photo of geotagged) {
+        // Limit markers to prevent performance issues
+        const maxMarkers = 500;
+        const photosToShow = geotagged.length > maxMarkers
+            ? geotagged.slice(0, maxMarkers)
+            : geotagged;
+
+        for (const photo of photosToShow) {
             const lat = photo.metadata.lat!;
             const lon = photo.metadata.lon!;
 
@@ -122,8 +179,10 @@
             bounds.extend([lat, lon]);
         }
 
-        if (geotagged.length > 0) {
+        // Only fit bounds on initial load, not during timeline scrubbing
+        if (!initialBoundsFit && photosToShow.length > 0) {
             map.fitBounds(bounds, { padding: [50, 50] });
+            initialBoundsFit = true;
         }
     }
 
@@ -153,9 +212,10 @@
     }
 </script>
 
-<div class="w-full h-full bg-[#1e293b] relative">
-    <div bind:this={mapContainer} class="w-full h-full z-0 outline-none"></div>
-    {#if photos.filter((p: any) => p.metadata.lat).length === 0}
+<div class="w-full h-full bg-[#1e293b] relative flex flex-col">
+    <div bind:this={mapContainer} class="flex-1 z-0 outline-none"></div>
+
+    {#if !hasGeotaggedPhotos()}
         <div
             class="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-[1000] pointer-events-none"
         >
@@ -172,6 +232,13 @@
                     None of your imported photos have GPS data.
                 </p>
             </div>
+        </div>
+    {/if}
+
+    <!-- Timeline slider at bottom -->
+    {#if hasGeotaggedPhotos() && map}
+        <div class="z-[1000]">
+            <TimelineSlider photos={geotaggedPhotos()} onTimeRangeChange={handleTimeRangeChange} />
         </div>
     {/if}
 </div>
