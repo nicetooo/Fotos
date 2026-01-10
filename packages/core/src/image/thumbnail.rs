@@ -52,12 +52,24 @@ fn fnv1a_64(bytes: &[u8], start: u64) -> u64 {
 fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Result<(), ThumbnailError> {
     println!("[thumbnail] generate_image_file: source={:?}, dest={:?}", source, dest);
 
+    // Read EXIF orientation first
+    let orientation = read_exif_orientation(source);
+    println!("[thumbnail] EXIF orientation: {:?}", orientation);
+
     // Step 1: Try to use embedded thumbnail from EXIF
     match try_extract_embedded_thumbnail(source, spec) {
         Ok(embedded_thumb) => {
             println!("[thumbnail] SUCCESS: extracted embedded thumbnail ({} bytes)", embedded_thumb.len());
-            // Save the embedded thumbnail directly
-            std::fs::write(dest, embedded_thumb)
+            
+            // Apply orientation correction to embedded thumbnail
+            let corrected_thumb = if let Some(orient) = orientation {
+                apply_orientation_correction(&embedded_thumb, orient)?
+            } else {
+                embedded_thumb
+            };
+            
+            // Save the corrected thumbnail
+            std::fs::write(dest, corrected_thumb)
                 .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
             return Ok(());
         }
@@ -74,15 +86,70 @@ fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Resu
     })?;
     println!("[thumbnail] full decode success, image size: {}x{}", img.width(), img.height());
     
+    // Apply EXIF orientation correction
+    let corrected_img = if let Some(orient) = orientation {
+        apply_orientation_to_image(img, orient)
+    } else {
+        img
+    };
+    
     // thumbnail() is faster than resize() because it downsamples during load if supported,
     // or uses nearest neighbor optimization for large downscales.
-    let thumb = img.thumbnail(spec.width, spec.height);
+    let thumb = corrected_img.thumbnail(spec.width, spec.height);
     
     // Force JPEG format when saving
     thumb.write_to(&mut std::fs::File::create(dest).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?, image::ImageFormat::Jpeg)
          .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
     
     Ok(())
+}
+
+/// Reads EXIF orientation tag from an image file
+fn read_exif_orientation(source: &Path) -> Option<u32> {
+    use std::io::BufReader;
+    
+    let file = std::fs::File::open(source).ok()?;
+    let mut reader = BufReader::new(file);
+    
+    let exif_reader = exif::Reader::new();
+    let exif = exif_reader.read_from_container(&mut reader).ok()?;
+    
+    let orientation_field = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY)?;
+    orientation_field.value.get_uint(0)
+}
+
+/// Applies EXIF orientation correction to image bytes
+fn apply_orientation_correction(image_bytes: &[u8], orientation: u32) -> Result<Vec<u8>, ThumbnailError> {
+    if orientation == 1 {
+        // No correction needed
+        return Ok(image_bytes.to_vec());
+    }
+    
+    let img = image::load_from_memory(image_bytes)
+        .map_err(|e| ThumbnailError::DecodeError(format!("Failed to decode for orientation: {}", e)))?;
+    
+    let corrected = apply_orientation_to_image(img, orientation);
+    
+    let mut output = Vec::new();
+    corrected.write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Jpeg)
+        .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+    
+    Ok(output)
+}
+
+/// Applies EXIF orientation transformation to a DynamicImage
+fn apply_orientation_to_image(img: image::DynamicImage, orientation: u32) -> image::DynamicImage {
+    match orientation {
+        1 => img, // Normal
+        2 => img.fliph(), // Flip horizontal
+        3 => img.rotate180(), // Rotate 180
+        4 => img.flipv(), // Flip vertical
+        5 => img.rotate90().fliph(), // Rotate 90 CW and flip horizontal
+        6 => img.rotate90(), // Rotate 90 CW
+        7 => img.rotate270().fliph(), // Rotate 270 CW and flip horizontal
+        8 => img.rotate270(), // Rotate 270 CW
+        _ => img, // Unknown orientation, keep as-is
+    }
 }
 
 /// Attempts to extract and resize embedded EXIF thumbnail.
