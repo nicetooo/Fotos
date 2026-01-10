@@ -45,21 +45,34 @@ fn fnv1a_64(bytes: &[u8], start: u64) -> u64 {
 }
 
 /// Internal core function to generate a thumbnail from source to dest.
-/// 
+///
 /// Performance optimization strategy:
 /// 1. Try to extract embedded EXIF thumbnail (fastest, ~1-5ms)
 /// 2. Fall back to full image decode + resize (slower, ~50-500ms for large files)
 fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Result<(), ThumbnailError> {
+    println!("[thumbnail] generate_image_file: source={:?}, dest={:?}", source, dest);
+
     // Step 1: Try to use embedded thumbnail from EXIF
-    if let Ok(embedded_thumb) = try_extract_embedded_thumbnail(source, spec) {
-        // Save the embedded thumbnail directly
-        std::fs::write(dest, embedded_thumb)
-            .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
-        return Ok(());
+    match try_extract_embedded_thumbnail(source, spec) {
+        Ok(embedded_thumb) => {
+            println!("[thumbnail] SUCCESS: extracted embedded thumbnail ({} bytes)", embedded_thumb.len());
+            // Save the embedded thumbnail directly
+            std::fs::write(dest, embedded_thumb)
+                .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+            return Ok(());
+        }
+        Err(e) => {
+            println!("[thumbnail] embedded extraction failed: {:?}, falling back to full decode", e);
+        }
     }
-    
+
     // Step 2: Fall back to full decode + resize
-    let img = image::open(source).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    println!("[thumbnail] starting full image decode...");
+    let img = image::open(source).map_err(|e| {
+        println!("[thumbnail] FAILED: full decode error: {}", e);
+        ThumbnailError::DecodeError(e.to_string())
+    })?;
+    println!("[thumbnail] full decode success, image size: {}x{}", img.width(), img.height());
     
     // thumbnail() is faster than resize() because it downsamples during load if supported,
     // or uses nearest neighbor optimization for large downscales.
@@ -76,39 +89,110 @@ fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Resu
 /// Returns the JPEG bytes if successful, or an error if not available or too small.
 fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8>, ThumbnailError> {
     use std::io::BufReader;
-    
+
+    println!("[exif] try_extract_embedded_thumbnail: {:?}", source);
+
     let file = std::fs::File::open(source)
         .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
     let mut reader = BufReader::new(file);
-    
+
     let exif_reader = exif::Reader::new();
     let exif = exif_reader.read_from_container(&mut reader)
-        .map_err(|e| ThumbnailError::DecodeError(format!("No EXIF: {}", e)))?;
-    
-    // Check if there's a thumbnail
-    if let Some(thumbnail_field) = exif.get_field(exif::Tag::JPEGInterchangeFormat, exif::In::PRIMARY) {
-        if let Some(length_field) = exif.get_field(exif::Tag::JPEGInterchangeFormatLength, exif::In::PRIMARY) {
-            // Extract offset and length
-            let offset = thumbnail_field.value.get_uint(0)
+        .map_err(|e| {
+            println!("[exif] no EXIF data: {}", e);
+            ThumbnailError::DecodeError(format!("No EXIF: {}", e))
+        })?;
+
+    println!("[exif] EXIF found, checking for embedded thumbnail...");
+
+    // Check if there's a thumbnail - EXIF thumbnails are stored in the THUMBNAIL IFD, not PRIMARY
+    let thumbnail_field = exif.get_field(exif::Tag::JPEGInterchangeFormat, exif::In::THUMBNAIL);
+    let length_field = exif.get_field(exif::Tag::JPEGInterchangeFormatLength, exif::In::THUMBNAIL);
+
+    println!("[exif] JPEGInterchangeFormat: {:?}, JPEGInterchangeFormatLength: {:?}",
+             thumbnail_field.is_some(), length_field.is_some());
+
+    if let Some(thumbnail_field) = thumbnail_field {
+        if let Some(length_field) = length_field {
+            // Extract offset and length (relative to TIFF header)
+            let tiff_offset = thumbnail_field.value.get_uint(0)
                 .ok_or_else(|| ThumbnailError::DecodeError("Invalid thumbnail offset".to_string()))? as usize;
             let length = length_field.value.get_uint(0)
                 .ok_or_else(|| ThumbnailError::DecodeError("Invalid thumbnail length".to_string()))? as usize;
-            
-            // Read the embedded JPEG thumbnail
+
+            println!("[exif] thumbnail tiff_offset={}, length={}", tiff_offset, length);
+
+            // For JPEG files, we need to find the EXIF APP1 segment and calculate absolute offset
+            // JPEG structure: SOI (2) + APP1 marker (2) + length (2) + "Exif\0\0" (6) + TIFF header
+            // The offset in EXIF is relative to TIFF header start
             let file = std::fs::File::open(source)
                 .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
             let mut reader = BufReader::new(file);
             use std::io::{Seek, Read};
-            reader.seek(std::io::SeekFrom::Start(offset as u64))
+
+            // Find APP1 (EXIF) segment position
+            let mut buf = [0u8; 2];
+            reader.read_exact(&mut buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            if buf != [0xFF, 0xD8] {
+                return Err(ThumbnailError::DecodeError("Not a JPEG file".to_string()));
+            }
+
+            // Scan for APP1 marker (0xFFE1)
+            let mut app1_data_start: Option<u64> = None;
+            loop {
+                reader.read_exact(&mut buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                if buf[0] != 0xFF {
+                    return Err(ThumbnailError::DecodeError("Invalid JPEG marker".to_string()));
+                }
+                if buf[1] == 0xE1 {
+                    // APP1 found, read length
+                    let mut len_buf = [0u8; 2];
+                    reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                    // Check for "Exif\0\0"
+                    let mut exif_id = [0u8; 6];
+                    reader.read_exact(&mut exif_id).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                    if &exif_id == b"Exif\0\0" {
+                        // TIFF header starts here
+                        app1_data_start = Some(reader.stream_position().map_err(|e| ThumbnailError::DecodeError(e.to_string()))?);
+                        break;
+                    }
+                } else if buf[1] == 0xD9 || buf[1] == 0xDA {
+                    // EOI or SOS - no EXIF found
+                    break;
+                } else if buf[1] >= 0xE0 && buf[1] <= 0xEF || buf[1] == 0xFE {
+                    // Other APP or COM segment, skip it
+                    let mut len_buf = [0u8; 2];
+                    reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                    let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
+                    reader.seek(std::io::SeekFrom::Current(seg_len)).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+                }
+            }
+
+            let tiff_header_pos = app1_data_start.ok_or_else(|| ThumbnailError::DecodeError("EXIF APP1 not found".to_string()))?;
+            let absolute_offset = tiff_header_pos + tiff_offset as u64;
+
+            println!("[exif] tiff_header_pos={}, absolute_offset={}", tiff_header_pos, absolute_offset);
+
+            // Seek to thumbnail data
+            reader.seek(std::io::SeekFrom::Start(absolute_offset))
                 .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            
+
             let mut thumb_data = vec![0u8; length];
             reader.read_exact(&mut thumb_data)
                 .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            
+
+            // Debug: check first bytes
+            println!("[exif] thumbnail data first 4 bytes: {:02X} {:02X} {:02X} {:02X}",
+                     thumb_data.get(0).unwrap_or(&0),
+                     thumb_data.get(1).unwrap_or(&0),
+                     thumb_data.get(2).unwrap_or(&0),
+                     thumb_data.get(3).unwrap_or(&0));
+
             // Decode the embedded thumbnail to check its size
             let thumb_img = image::load_from_memory(&thumb_data)
                 .map_err(|e| ThumbnailError::DecodeError(format!("Embedded thumb decode failed: {}", e)))?;
+
+            println!("[exif] embedded thumbnail decoded: {}x{}", thumb_img.width(), thumb_img.height());
             
             // If embedded thumbnail is already smaller than or equal to target size, use it directly
             if thumb_img.width() <= spec.width && thumb_img.height() <= spec.height {
@@ -200,21 +284,26 @@ impl Thumbnailer {
         }
     }
     /// Atomically gets or creates a thumbnail.
-    /// 
+    ///
     /// Workflow:
     /// 1. Check if cache exists. If yes, return immediately.
     /// 2. Generate to a temporary file in the same directory (to ensure atomic rename).
     /// 3. Rename temp file to final destination.
-    /// 
+    ///
     /// This pattern prevents partial writes and handles process concurrency gracefully (last writer wins).
     pub fn get_or_create(&self, source: &Path, spec: &ThumbnailSpec) -> Result<PathBuf, ThumbnailError> {
         let key = thumbnail_key(source, spec)?;
         let dest = cache_path(&self.cache_root, &key);
-        
+
+        println!("[thumbnailer] get_or_create: source={:?}, cache_root={:?}, dest={:?}",
+                 source, self.cache_root, dest);
+
         // 1. Fast path: exists
         if dest.exists() {
+            println!("[thumbnailer] cache HIT: {:?}", dest);
             return Ok(dest);
         }
+        println!("[thumbnailer] cache MISS, generating...");
         
         // Ensure parent directory exists
         if let Some(parent) = dest.parent() {
