@@ -352,8 +352,8 @@
                 <div class="absolute inset-0 flex items-end">
                     {#each zoomedDensityBins as count}
                         <div
-                            class="flex-1 bg-[var(--accent)]/30"
-                            style="height: {Math.max(2, (count / maxZoomedBinCount) * 100)}%"
+                            class="flex-1"
+                            style="height: {Math.max(2, (count / maxZoomedBinCount) * 100)}%; background-color: color-mix(in srgb, var(--accent) 40%, transparent);"
                         ></div>
                     {/each}
                 </div>
@@ -394,8 +394,8 @@
             <div class="absolute inset-0 flex items-end">
                 {#each densityBins as count}
                     <div
-                        class="flex-1 theme-text-muted opacity-30"
-                        style="height: {Math.max(2, (count / maxBinCount) * 100)}%; background-color: currentColor;"
+                        class="flex-1"
+                        style="height: {Math.max(2, (count / maxBinCount) * 100)}%; background-color: color-mix(in srgb, var(--accent) 50%, transparent);"
                     ></div>
                 {/each}
             </div>
