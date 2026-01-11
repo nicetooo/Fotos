@@ -3,9 +3,10 @@
     import { invoke } from "@tauri-apps/api/core";
     import { appDataDir } from "@tauri-apps/api/path";
 
-    let { src, alt = "Preview" } = $props<{
+    let { src, alt = "Preview", thumbPath = "" } = $props<{
         src: string;
         alt?: string;
+        thumbPath?: string;
     }>();
 
     let container: HTMLDivElement | undefined = $state();
@@ -17,8 +18,9 @@
     let containerWidth = $state(0);
     let containerHeight = $state(0);
     let rawPreviewPath = $state<string | null>(null);
-    let loadedSrc = $state<string>("");
+    let rawPreviewFailed = $state(false);
     let loading = $state(false);
+    let lastSrc = "";
 
     // Check if file is a RAW format
     const RAW_EXTENSIONS = ["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"];
@@ -27,57 +29,76 @@
         return RAW_EXTENSIONS.includes(ext);
     }
 
+    // Is current file a RAW?
+    let isRaw = $derived(isRawFile(src));
+
     // Get the image source URL
+    // For RAW: try rawPreviewPath first, then thumbPath as fallback
     let imageSrc = $derived.by(() => {
-        if (isRawFile(src)) {
-            return rawPreviewPath ? convertFileSrc(rawPreviewPath) : "";
+        if (isRaw) {
+            if (rawPreviewPath) {
+                return convertFileSrc(rawPreviewPath);
+            }
+            // Use thumbnail as fallback if RAW preview extraction failed
+            if (rawPreviewFailed && thumbPath) {
+                return convertFileSrc(thumbPath);
+            }
+            return "";
         }
         return convertFileSrc(src);
     });
 
-    // Reset state when src changes
+    // Handle src changes
     $effect(() => {
         const currentSrc = src;
 
-        // Reset zoom and scroll
+        // Skip if same source
+        if (currentSrc === lastSrc) return;
+        lastSrc = currentSrc;
+
+        // Reset view state
         zoom = 1;
         loaded = false;
         error = false;
+        rawPreviewPath = null;
+        rawPreviewFailed = false;
+        loading = false;
+        naturalWidth = 0;
+        naturalHeight = 0;
+
         if (container) {
             container.scrollLeft = 0;
             container.scrollTop = 0;
         }
 
-        // Clear old RAW preview path if src changed
-        if (loadedSrc !== currentSrc) {
-            rawPreviewPath = null;
-        }
-
         // Load RAW preview if needed
-        if (isRawFile(currentSrc) && loadedSrc !== currentSrc && !loading) {
+        if (isRawFile(currentSrc)) {
             loading = true;
             loadRawPreview(currentSrc);
         }
     });
 
     async function loadRawPreview(path: string) {
-        console.log("[RAW] Loading preview for:", path);
         try {
             const cacheDir = await appDataDir();
             const previewPath = await invoke<string>("get_raw_preview", { path, cacheDir });
-            console.log("[RAW] Preview cached at:", previewPath);
             // Only set if this is still the current src
             if (path === src) {
                 rawPreviewPath = previewPath;
-                loadedSrc = path;
             }
         } catch (e) {
-            console.error("[RAW] Failed to load RAW preview:", e);
+            console.error("[RAW] Failed to load full preview, will use thumbnail:", e);
             if (path === src) {
-                error = true;
+                rawPreviewFailed = true;
+                // Only set error if no thumbnail fallback available
+                if (!thumbPath) {
+                    error = true;
+                }
             }
         } finally {
-            loading = false;
+            if (path === src) {
+                loading = false;
+            }
         }
     }
 
@@ -198,11 +219,20 @@
             <div class="flex flex-col items-center justify-center text-neutral-500 gap-3">
                 <i class="fa-solid fa-image-slash text-4xl"></i>
                 <p class="text-sm">Unable to load image</p>
-                <p class="text-xs text-neutral-600">File may have been moved or the drive disconnected</p>
+                <p class="text-xs text-neutral-600">
+                    {#if isRaw}
+                        Failed to extract preview from RAW file
+                    {:else}
+                        File may have been moved or the drive disconnected
+                    {/if}
+                </p>
             </div>
         {:else if !loaded || loading}
-            <div class="absolute inset-0 flex items-center justify-center">
+            <div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
                 <i class="fa-solid fa-spinner fa-spin text-neutral-500 text-2xl"></i>
+                {#if isRaw && loading}
+                    <p class="text-neutral-500 text-xs">Extracting RAW preview...</p>
+                {/if}
             </div>
         {/if}
         {#if imageSrc}
@@ -222,5 +252,12 @@
 {#if zoom !== 1}
     <div class="absolute bottom-4 left-1/2 -translate-x-1/2 px-2 py-1 rounded bg-black/60 text-xs text-neutral-300 pointer-events-none">
         {Math.round(zoom * 100)}%
+    </div>
+{/if}
+
+{#if isRaw && rawPreviewFailed && thumbPath && loaded}
+    <div class="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-amber-900/80 text-xs text-amber-200 pointer-events-none">
+        <i class="fa-solid fa-triangle-exclamation mr-1.5"></i>
+        Showing thumbnail (full preview unavailable)
     </div>
 {/if}

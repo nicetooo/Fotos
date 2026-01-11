@@ -133,8 +133,13 @@
                     }
                 }
             } else {
-                // Only RAW - show RAW files
-                result.push(...group.raws);
+                // Only RAW - mark as standalone RAW
+                for (const raw of group.raws) {
+                    result.push({
+                        ...raw,
+                        isRawOnly: true,
+                    });
+                }
             }
         }
 
@@ -509,6 +514,8 @@
                                     />
                                     {#if photo.hasRaw}
                                         <div class="absolute top-1 right-1 bg-amber-600 text-white text-[8px] font-bold px-1 rounded">R</div>
+                                    {:else if photo.isRawOnly}
+                                        <div class="absolute top-1 right-1 bg-rose-600 text-white text-[8px] font-bold px-1 rounded">RAW</div>
                                     {/if}
                                     {#if photo.metadata?.lat && photo.metadata?.lon}
                                         <div class="absolute bottom-1 left-1 text-white/70 text-[10px]">
@@ -650,7 +657,11 @@
             onclick={(e) => e.stopPropagation()}
         >
             {#key previewPhoto.path}
-                <ImagePreview src={previewPhoto.path} alt={previewPhoto.path.split("/").pop() || "Preview"} />
+                <ImagePreview
+                    src={previewPhoto.path}
+                    alt={previewPhoto.path.split("/").pop() || "Preview"}
+                    thumbPath={previewPhoto.thumb_path || ""}
+                />
             {/key}
         </div>
 
@@ -697,6 +708,18 @@
                         <p class="theme-text-primary font-mono text-xs">
                             {previewPhoto.metadata.lat.toFixed(6)}, {previewPhoto.metadata.lon.toFixed(6)}
                         </p>
+                    </div>
+                {/if}
+
+                {#if previewPhoto.hasRaw || previewPhoto.isRawOnly}
+                    <div>
+                        <p class="theme-text-muted text-xs">RAW</p>
+                        {#if previewPhoto.hasRaw}
+                            <p class="text-amber-500 text-xs font-medium">JPEG + RAW</p>
+                            <p class="theme-text-muted text-[10px] font-mono break-all mt-0.5">{previewPhoto.rawPath}</p>
+                        {:else if previewPhoto.isRawOnly}
+                            <p class="text-rose-500 text-xs font-medium">RAW Only</p>
+                        {/if}
                     </div>
                 {/if}
 

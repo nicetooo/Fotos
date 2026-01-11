@@ -118,7 +118,8 @@ pub fn is_raw_file(path: &Path) -> bool {
 
 /// Extract the embedded JPEG preview from a RAW file.
 /// Returns the full-resolution preview JPEG bytes with orientation correction applied.
-/// Optimized: stops scanning once a large enough preview (>500KB) is found.
+/// Scans the entire RAW file to find the largest embedded JPEG preview by file size.
+/// Falls back to small thumbnail if no large preview is available.
 pub fn extract_raw_preview(path: &Path) -> Result<Vec<u8>, ThumbnailError> {
     use std::io::{BufReader, Read, Seek, SeekFrom};
 
@@ -137,9 +138,13 @@ pub fn extract_raw_preview(path: &Path) -> Result<Vec<u8>, ThumbnailError> {
     let scan_start = 8u64;
     let mut best_preview: Option<Vec<u8>> = None;
     let mut best_size = 0u64;
+    let mut fallback_preview: Option<Vec<u8>> = None; // Any valid JPEG as last resort
+    let mut fallback_size = 0u64;
 
     // Threshold: once we find a JPEG > 500KB, it's almost certainly the main preview
     const GOOD_ENOUGH_SIZE: u64 = 500_000;
+    // Minimum size for "good" preview (filter out tiny thumbnails for best_preview)
+    const MIN_GOOD_SIZE: u64 = 50_000;
 
     reader.seek(SeekFrom::Start(scan_start))
         .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
@@ -161,15 +166,21 @@ pub fn extract_raw_preview(path: &Path) -> Result<Vec<u8>, ThumbnailError> {
                 if let Ok(jpeg_data) = extract_jpeg_from_offset(path, jpeg_start, file_size) {
                     let jpeg_size = jpeg_data.len() as u64;
 
-                    // Keep the largest JPEG found (minimum 50KB to filter out tiny thumbnails)
-                    if jpeg_size > best_size && jpeg_size > 50_000 {
+                    // Track the largest "good" preview (>50KB)
+                    if jpeg_size > best_size && jpeg_size > MIN_GOOD_SIZE {
                         best_size = jpeg_size;
-                        best_preview = Some(jpeg_data);
+                        best_preview = Some(jpeg_data.clone());
 
                         // If we found a large enough preview, stop scanning immediately
                         if jpeg_size >= GOOD_ENOUGH_SIZE {
                             break 'scan;
                         }
+                    }
+
+                    // Also track the largest JPEG of any size as fallback
+                    if jpeg_size > fallback_size {
+                        fallback_size = jpeg_size;
+                        fallback_preview = Some(jpeg_data);
                     }
                 }
             }
@@ -180,12 +191,10 @@ pub fn extract_raw_preview(path: &Path) -> Result<Vec<u8>, ThumbnailError> {
             .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
     }
 
-    if let Some(preview_data) = best_preview {
-        // Validate the JPEG only once at the end
-        if image::load_from_memory(&preview_data).is_err() {
-            return Err(ThumbnailError::DecodeError("Invalid JPEG preview data".to_string()));
-        }
+    // Use best preview if available, otherwise fall back to any valid JPEG (even small thumbnail)
+    let preview_data = best_preview.or(fallback_preview);
 
+    if let Some(preview_data) = preview_data {
         // Apply orientation correction
         if let Some(orient) = orientation {
             if orient > 1 {
@@ -464,6 +473,7 @@ fn try_extract_raw_preview(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8
 }
 
 /// Extract JPEG data from a specific offset in a file.
+/// Tries multiple potential end markers to find a valid JPEG.
 fn extract_jpeg_from_offset(source: &Path, start: u64, file_size: u64) -> Result<Vec<u8>, ThumbnailError> {
     use std::io::{BufReader, Read, Seek, SeekFrom};
 
@@ -481,16 +491,30 @@ fn extract_jpeg_from_offset(source: &Path, start: u64, file_size: u64) -> Result
         .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
     data.truncate(bytes_read);
 
-    // Find JPEG end marker (0xFF 0xD9)
+    // Find ALL potential JPEG end markers (0xFF 0xD9) and try each one
+    // The first false-positive end marker might be in raw sensor data
+    let mut end_positions: Vec<usize> = Vec::new();
     for i in 2..data.len() {
         if data[i - 1] == 0xFF && data[i] == 0xD9 {
-            data.truncate(i + 1);
-            return Ok(data);
+            end_positions.push(i + 1);
         }
     }
 
-    // If no end marker found, try anyway (might work for some formats)
-    Err(ThumbnailError::DecodeError("JPEG end marker not found".to_string()))
+    // Try each end position, starting from the first one
+    // A valid JPEG should decode successfully
+    for end_pos in end_positions.iter().take(20) {
+        // Skip very small "JPEGs" (< 1KB) - likely false positives
+        if *end_pos < 1024 {
+            continue;
+        }
+
+        let candidate = &data[0..*end_pos];
+        if image::load_from_memory(candidate).is_ok() {
+            return Ok(candidate.to_vec());
+        }
+    }
+
+    Err(ThumbnailError::DecodeError("No valid JPEG found".to_string()))
 }
 
 /// Find the TIFF header position in a JPEG file by scanning for EXIF APP1 segment.

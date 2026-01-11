@@ -27,4 +27,5 @@ export interface PhotoInfo {
     // For grouped RAW+JPEG pairs
     rawPath?: string;
     hasRaw?: boolean;
+    isRawOnly?: boolean;
 }
