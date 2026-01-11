@@ -388,7 +388,13 @@
 
         <!-- Library Drawer (right side) -->
         {#if showLibrary}
-            <div class="absolute top-0 right-0 bottom-0 w-1/2 min-w-[500px] theme-bg-overlay backdrop-blur-md border-l theme-border z-[1001] flex flex-col">
+            <!-- Overlay to close drawer when clicking outside -->
+            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+            <div
+                class="fixed inset-0 bg-black/30 backdrop-blur-sm z-[1002]"
+                onclick={() => showLibrary = false}
+            ></div>
+            <div class="absolute top-0 right-0 bottom-0 w-1/2 min-w-[500px] theme-bg-overlay backdrop-blur-md border-l theme-border z-[1003] flex flex-col">
                 <!-- Header -->
                 <div class="flex items-center justify-between px-4 py-3 border-b theme-border">
                     <div class="flex items-center gap-2">
