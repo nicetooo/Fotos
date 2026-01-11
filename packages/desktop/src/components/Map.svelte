@@ -220,7 +220,7 @@
         }
     });
 
-    // Pan map to fit visible photos when time filter changes
+    // Pan map to center of visible photos when time filter changes (keep zoom level)
     $effect(() => {
         if (!map || allMarkers.size === 0) return;
 
@@ -237,9 +237,9 @@
             }
         }
 
-        // Fit map to visible photos if any exist
+        // Pan to center of visible photos without changing zoom
         if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [80, 80], animate: true, duration: 0.3 });
+            map.panTo(bounds.getCenter(), { animate: true, duration: 0.3 });
         }
     });
 
