@@ -19,6 +19,12 @@
     let timeFilterStart = $state<Date | null>(null);
     let timeFilterEnd = $state<Date | null>(null);
 
+    // Box selection state
+    let isBoxSelectMode = $state(false);
+    let isDrawingBox = $state(false);
+    let boxStartPoint: L.Point | null = null;
+    let selectionBox: HTMLDivElement | null = null;
+
     // Parse date from photo metadata
     function parsePhotoDate(dateStr: string | null): Date | null {
         if (!dateStr) return null;
@@ -299,10 +305,128 @@
 
         return marker;
     }
+
+    // === Box Selection ===
+    function toggleBoxSelectMode() {
+        isBoxSelectMode = !isBoxSelectMode;
+        if (!isBoxSelectMode) {
+            cleanupBoxSelection();
+        }
+    }
+
+    function cleanupBoxSelection() {
+        if (selectionBox && selectionBox.parentNode) {
+            selectionBox.parentNode.removeChild(selectionBox);
+        }
+        selectionBox = null;
+        isDrawingBox = false;
+        boxStartPoint = null;
+    }
+
+    // Box selected time range (to pass to TimelineSlider)
+    let boxSelectedTimeRange = $state<{ start: Date; end: Date } | null>(null);
+
+    // Global mouse handlers for box selection
+    function handleGlobalMouseDown(e: MouseEvent) {
+        if (!isBoxSelectMode || !map || !mapContainer) return;
+
+        // Check if click is within map container
+        const rect = mapContainer.getBoundingClientRect();
+        if (e.clientX < rect.left || e.clientX > rect.right ||
+            e.clientY < rect.top || e.clientY > rect.bottom) return;
+
+        e.preventDefault();
+        isDrawingBox = true;
+        boxStartPoint = L.point(e.clientX - rect.left, e.clientY - rect.top);
+
+        // Create selection box element
+        selectionBox = document.createElement('div');
+        selectionBox.className = 'selection-box';
+        selectionBox.style.left = `${boxStartPoint.x}px`;
+        selectionBox.style.top = `${boxStartPoint.y}px`;
+        selectionBox.style.width = '0px';
+        selectionBox.style.height = '0px';
+        mapContainer.appendChild(selectionBox);
+
+        map.dragging.disable();
+    }
+
+    function handleGlobalMouseMove(e: MouseEvent) {
+        if (!isDrawingBox || !boxStartPoint || !selectionBox || !mapContainer) return;
+
+        const rect = mapContainer.getBoundingClientRect();
+        const currentPoint = L.point(e.clientX - rect.left, e.clientY - rect.top);
+
+        const minX = Math.min(boxStartPoint.x, currentPoint.x);
+        const minY = Math.min(boxStartPoint.y, currentPoint.y);
+        const width = Math.abs(currentPoint.x - boxStartPoint.x);
+        const height = Math.abs(currentPoint.y - boxStartPoint.y);
+
+        selectionBox.style.left = `${minX}px`;
+        selectionBox.style.top = `${minY}px`;
+        selectionBox.style.width = `${width}px`;
+        selectionBox.style.height = `${height}px`;
+    }
+
+    function handleGlobalMouseUp(e: MouseEvent) {
+        if (!isDrawingBox || !boxStartPoint || !map || !mapContainer) return;
+
+        const rect = mapContainer.getBoundingClientRect();
+        const endPoint = L.point(e.clientX - rect.left, e.clientY - rect.top);
+
+        // Calculate bounds from pixel coordinates
+        const sw = map.containerPointToLatLng(L.point(
+            Math.min(boxStartPoint.x, endPoint.x),
+            Math.max(boxStartPoint.y, endPoint.y)
+        ));
+        const ne = map.containerPointToLatLng(L.point(
+            Math.max(boxStartPoint.x, endPoint.x),
+            Math.min(boxStartPoint.y, endPoint.y)
+        ));
+        const bounds = L.latLngBounds(sw, ne);
+
+        // Find photos within bounds
+        const photosInBounds: Date[] = [];
+        for (const { photo, date } of allMarkers.values()) {
+            if (!date) continue;
+            const lat = photo.metadata?.lat;
+            const lon = photo.metadata?.lon;
+            if (lat && lon && bounds.contains([lat, lon])) {
+                photosInBounds.push(date);
+            }
+        }
+
+        if (photosInBounds.length > 0) {
+            photosInBounds.sort((a, b) => a.getTime() - b.getTime());
+            boxSelectedTimeRange = {
+                start: photosInBounds[0],
+                end: photosInBounds[photosInBounds.length - 1]
+            };
+
+            // Fit map to selected bounds
+            map.fitBounds(bounds, { padding: [50, 50], animate: true });
+        }
+
+        // Cleanup
+        cleanupBoxSelection();
+        map.dragging.enable();
+        isBoxSelectMode = false;
+    }
 </script>
 
-<div class="w-full h-full theme-bg-secondary relative flex flex-col">
-    <div bind:this={mapContainer} class="flex-1 z-0 outline-none"></div>
+<svelte:window
+    onmousedown={handleGlobalMouseDown}
+    onmousemove={handleGlobalMouseMove}
+    onmouseup={handleGlobalMouseUp}
+/>
+
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="w-full h-full theme-bg-secondary relative flex flex-col" style:cursor={isBoxSelectMode ? 'crosshair' : 'auto'}>
+    <div
+        bind:this={mapContainer}
+        class="flex-1 z-0 outline-none"
+        class:box-select-mode={isBoxSelectMode}
+    ></div>
 
     <!-- Time range indicator -->
     {#if timeRangeDisplay && hasGeotaggedPhotos}
@@ -334,10 +458,30 @@
         </div>
     {/if}
 
+    <!-- Box select button -->
+    {#if hasGeotaggedPhotos}
+        <button
+            onclick={(e) => { e.stopPropagation(); toggleBoxSelectMode(); }}
+            onmousedown={(e) => e.stopPropagation()}
+            class="absolute left-4 bottom-72 z-[1001] w-10 h-10 flex items-center justify-center rounded-xl shadow-lg transition-colors
+                {isBoxSelectMode
+                    ? 'bg-[var(--accent)] text-black'
+                    : 'theme-bg-card backdrop-blur-sm theme-text-primary hover:bg-[var(--accent)] hover:text-black'}"
+            title="Box select photos"
+        >
+            <i class="fa-solid fa-vector-square"></i>
+        </button>
+    {/if}
+
     <!-- Timeline slider at bottom (delayed load) -->
     {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0}
         <div class="z-[1000]">
-            <TimelineSlider photos={photosWithMarkers} onTimeRangeChange={handleTimeRangeChange} />
+            <TimelineSlider
+                photos={photosWithMarkers}
+                externalTimeRange={boxSelectedTimeRange}
+                onTimeRangeChange={handleTimeRangeChange}
+                onExternalRangeConsumed={() => boxSelectedTimeRange = null}
+            />
         </div>
     {/if}
 </div>
@@ -454,5 +598,23 @@
         font-size: 9px;
         color: #d97706;
         margin-top: 2px;
+    }
+
+    /* Box selection styles */
+    :global(.selection-box) {
+        position: absolute;
+        border: 2px dashed var(--accent);
+        background-color: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
+        pointer-events: none;
+        z-index: 1000;
+    }
+
+    /* Force crosshair cursor in box select mode */
+    .box-select-mode,
+    .box-select-mode :global(*),
+    .box-select-mode :global(.leaflet-container),
+    .box-select-mode :global(.leaflet-grab),
+    .box-select-mode :global(.leaflet-dragging) {
+        cursor: crosshair !important;
     }
 </style>

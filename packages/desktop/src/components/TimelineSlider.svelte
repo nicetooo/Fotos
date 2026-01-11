@@ -1,10 +1,14 @@
 <script lang="ts">
     let {
         photos,
-        onTimeRangeChange
+        externalTimeRange,
+        onTimeRangeChange,
+        onExternalRangeConsumed
     } = $props<{
         photos: any[];
+        externalTimeRange?: { start: Date; end: Date } | null;
         onTimeRangeChange: (start: Date, end: Date) => void;
+        onExternalRangeConsumed?: () => void;
     }>();
 
     // Parse dates from photos
@@ -89,6 +93,39 @@
             windowPosition = 0;
             prevPhotosLength = len;
         }
+    });
+
+    // Handle external time range (from map box selection)
+    $effect(() => {
+        if (!externalTimeRange) return;
+
+        const totalMs = timeRange.max.getTime() - timeRange.min.getTime();
+        if (totalMs === 0) return;
+
+        const startMs = externalTimeRange.start.getTime();
+        const endMs = externalTimeRange.end.getTime();
+
+        // Convert to percentages
+        let newLeft = ((startMs - timeRange.min.getTime()) / totalMs) * 100;
+        let newRight = ((endMs - timeRange.min.getTime()) / totalMs) * 100;
+
+        // Clamp to valid range
+        newLeft = Math.max(0, Math.min(100, newLeft));
+        newRight = Math.max(0, Math.min(100, newRight));
+
+        // Ensure minimum width
+        if (newRight - newLeft < 1) {
+            const center = (newLeft + newRight) / 2;
+            newLeft = Math.max(0, center - 0.5);
+            newRight = Math.min(100, center + 0.5);
+        }
+
+        leftPercent = newLeft;
+        rightPercent = newRight;
+        windowPosition = 0;
+
+        // Notify parent that we consumed the external range
+        onExternalRangeConsumed?.();
     });
 
     // Actual viewing window (what photos to show)
