@@ -5,6 +5,85 @@
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
 
+    // === IndexedDB Tile Cache ===
+    const DB_NAME = 'map-tile-cache';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'tiles';
+    let tileDb: IDBDatabase | null = null;
+
+    async function initTileCache(): Promise<IDBDatabase> {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onupgradeneeded = (event) => {
+                const db = (event.target as IDBOpenDBRequest).result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    db.createObjectStore(STORE_NAME);
+                }
+            };
+        });
+    }
+
+    async function getCachedTile(key: string): Promise<Blob | null> {
+        if (!tileDb) return null;
+        return new Promise((resolve) => {
+            const tx = tileDb!.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.get(key);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => resolve(null);
+        });
+    }
+
+    async function cacheTile(key: string, blob: Blob): Promise<void> {
+        if (!tileDb) return;
+        return new Promise((resolve) => {
+            const tx = tileDb!.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            store.put(blob, key);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+        });
+    }
+
+    // Custom cached tile layer
+    function createCachedTileLayer(urlTemplate: string, options: L.TileLayerOptions) {
+        const CachedTileLayer = L.TileLayer.extend({
+            createTile: function(coords: L.Coords, done: L.DoneCallback) {
+                const tile = document.createElement('img');
+                const url = this.getTileUrl(coords);
+                const cacheKey = `${coords.z}/${coords.x}/${coords.y}`;
+
+                tile.alt = '';
+                tile.setAttribute('role', 'presentation');
+
+                // Try cache first
+                getCachedTile(cacheKey).then(async (cached) => {
+                    if (cached) {
+                        tile.src = URL.createObjectURL(cached);
+                        done(undefined, tile);
+                    } else {
+                        // Fetch and cache
+                        try {
+                            const response = await fetch(url);
+                            const blob = await response.blob();
+                            cacheTile(cacheKey, blob);
+                            tile.src = URL.createObjectURL(blob);
+                            done(undefined, tile);
+                        } catch (err) {
+                            tile.src = url;
+                            done(err as Error, tile);
+                        }
+                    }
+                });
+
+                return tile;
+            }
+        });
+        return new CachedTileLayer(urlTemplate, options);
+    }
+
     let { photos, onOpenPreview } = $props<{
         photos: any[];
         onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
@@ -66,8 +145,15 @@
         shadowUrl: null,
     });
 
-    onMount(() => {
+    onMount(async () => {
         if (!mapContainer) return;
+
+        // Initialize tile cache
+        try {
+            tileDb = await initTileCache();
+        } catch (e) {
+            console.warn('Failed to init tile cache:', e);
+        }
 
         // Initialize map with explicit size
         map = L.map(mapContainer, {
@@ -76,18 +162,24 @@
             zoomDelta: 1,
             zoomSnap: 0.5,
             wheelPxPerZoomLevel: 8,
+            preferCanvas: true,
+            renderer: L.canvas(),
         }).setView([20, 0], 2);
 
         L.control.zoom({ position: "topright" }).addTo(map);
         L.control.attribution({ position: "bottomright" }).addTo(map);
 
-        L.tileLayer(
+        // Use cached tile layer
+        createCachedTileLayer(
             "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
             {
                 attribution:
                     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                 subdomains: "abcd",
                 maxZoom: 20,
+                keepBuffer: 100,
+                updateWhenZooming: false,
+                updateWhenIdle: true,
             },
         ).addTo(map);
 
@@ -134,6 +226,10 @@
         if (map) {
             map.remove();
             map = null;
+        }
+        if (tileDb) {
+            tileDb.close();
+            tileDb = null;
         }
     });
 
@@ -279,20 +375,13 @@
 
         const rawBadge = photo.hasRaw ? '<div class="marker-raw-badge">R</div>' : '';
 
+        // Simplified marker - preview image loads on hover via CSS
         const customIcon = L.divIcon({
             className: "custom-map-marker",
-            html: `<div class="marker-wrapper">
+            html: `<div class="marker-wrapper" data-preview-url="${url}" data-filename="${fileName}" data-date="${dateTaken}" data-hasraw="${photo.hasRaw}">
                     <div class="marker-dot">
-                        <img src="${url}" onerror="this.style.display='none'" />
+                        <img src="${url}" loading="lazy" decoding="async" onerror="this.style.display='none'" />
                         ${rawBadge}
-                    </div>
-                    <div class="marker-preview">
-                        <img src="${url}" onerror="this.parentElement.style.display='none'" />
-                        <div class="marker-info">
-                            <div class="marker-name">${fileName}</div>
-                            ${dateTaken ? `<div class="marker-date">${dateTaken}</div>` : ''}
-                            ${photo.hasRaw ? '<div class="marker-raw-info">RAW available</div>' : ''}
-                        </div>
                     </div>
                    </div>`,
             iconSize: [iconSize, iconSize],
@@ -517,7 +606,6 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: transform 0.15s ease;
     }
     :global(.marker-dot img) {
         width: 44px !important;
@@ -537,49 +625,6 @@
     :global(.marker-wrapper:hover .marker-dot) {
         transform: scale(1.1);
     }
-    :global(.marker-preview) {
-        position: absolute;
-        bottom: 56px;
-        left: 50%;
-        transform: translateX(-50%) scale(0.8);
-        opacity: 0;
-        pointer-events: none;
-        transition: all 0.15s ease;
-        z-index: 1000;
-        width: fit-content;
-        background: rgba(0,0,0,0.9);
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    }
-    :global(.marker-wrapper:hover .marker-preview) {
-        opacity: 1;
-        transform: translateX(-50%) scale(1);
-    }
-    :global(.marker-preview img) {
-        display: block;
-        min-height: 280px;
-        max-height: 360px;
-        width: auto;
-        height: auto;
-    }
-    :global(.marker-info) {
-        padding: 8px;
-        max-width: 450px;
-    }
-    :global(.marker-name) {
-        font-size: 11px;
-        font-weight: 600;
-        color: white;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    :global(.marker-date) {
-        font-size: 10px;
-        color: #94a3b8;
-        margin-top: 2px;
-    }
     :global(.marker-raw-badge) {
         position: absolute;
         top: 10px;
@@ -597,12 +642,6 @@
         justify-content: center;
         box-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
-    :global(.marker-raw-info) {
-        font-size: 9px;
-        color: #d97706;
-        margin-top: 2px;
-    }
-
     /* Box selection styles */
     :global(.selection-box) {
         position: absolute;
