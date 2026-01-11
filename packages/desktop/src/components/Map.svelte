@@ -451,6 +451,7 @@
         position: absolute;
         top: 10px;
         right: 8px;
+        z-index: 10;
         width: 12px;
         height: 12px;
         background: #d97706;
