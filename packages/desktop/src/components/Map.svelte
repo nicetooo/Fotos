@@ -160,8 +160,14 @@
             zoomControl: false,
             attributionControl: false,
             zoomDelta: 1,
-            zoomSnap: 0.5,
+            zoomSnap: 0,
             wheelPxPerZoomLevel: 8,
+            wheelDebounceTime: 0,
+            zoomAnimation: true,
+            fadeAnimation: false,
+            markerZoomAnimation: true,
+            inertia: true,
+            inertiaDeceleration: 3000,
             preferCanvas: true,
             renderer: L.canvas(),
         }).setView([20, 0], 2);
@@ -178,8 +184,6 @@
                 subdomains: "abcd",
                 maxZoom: 20,
                 keepBuffer: 100,
-                updateWhenZooming: false,
-                updateWhenIdle: true,
             },
         ).addTo(map);
 
