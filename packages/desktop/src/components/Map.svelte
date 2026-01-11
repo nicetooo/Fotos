@@ -210,7 +210,8 @@
     function updateMarkerVisibility(start: Date | null, end: Date | null) {
         for (const { marker, date } of photoMarkers.values()) {
             let visible = true;
-            if (start && end && date) {
+            // Only filter if we have a valid time range (start !== end)
+            if (start && end && date && start.getTime() !== end.getTime()) {
                 visible = date >= start && date <= end;
             }
 
@@ -432,15 +433,41 @@
         createPhotoMarkers(geo);
     });
 
+    // Track if we should center on time filter change
+    let lastTimeFilterKey = '';
+
     // Update marker visibility when time filter changes
     $effect(() => {
         const start = timeFilterStart;
         const end = timeFilterEnd;
         const loaded = mapLoaded;
 
-        if (!loaded) return;
+        if (!loaded || !map) return;
 
         updateMarkerVisibility(start, end);
+
+        // Center map on visible photos when time filter changes (not on initial load)
+        if (start && end) {
+            const filterKey = `${start.getTime()}-${end.getTime()}`;
+            if (lastTimeFilterKey && filterKey !== lastTimeFilterKey) {
+                // Collect visible photos
+                const visibleBounds = new maplibregl.LngLatBounds();
+                let hasVisible = false;
+
+                for (const { marker, date } of photoMarkers.values()) {
+                    if (date && date >= start && date <= end) {
+                        visibleBounds.extend(marker.getLngLat());
+                        hasVisible = true;
+                    }
+                }
+
+                // Fit map to visible photos if any
+                if (hasVisible) {
+                    map.fitBounds(visibleBounds, { padding: 100, maxZoom: 15, animate: true });
+                }
+            }
+            lastTimeFilterKey = filterKey;
+        }
     });
 
     // === Box Selection ===
