@@ -27,6 +27,9 @@
     // Hover popup
     let hoverPopup: maplibregl.Popup | null = null;
 
+    // Resize observer
+    let resizeObserver: ResizeObserver | null = null;
+
     // Photo data indexed by id
     let photoIndex: Map<string, any> = new Map();
 
@@ -185,6 +188,17 @@
         map.addControl(new maplibregl.NavigationControl(), 'top-right');
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
+        // Handle resize
+        resizeObserver = new ResizeObserver(() => {
+            map?.resize();
+        });
+        resizeObserver.observe(mapContainer);
+
+        // Force resize after mount to ensure proper rendering
+        setTimeout(() => {
+            map?.resize();
+        }, 100);
+
         // Create hover popup
         hoverPopup = new maplibregl.Popup({
             closeButton: false,
@@ -228,28 +242,6 @@
                     ],
                     'circle-stroke-width': 3,
                     'circle-stroke-color': 'rgba(255, 255, 255, 0.9)'
-                }
-            });
-
-            // Cluster count labels
-            map.addLayer({
-                id: 'cluster-count',
-                type: 'symbol',
-                source: 'photos',
-                filter: ['has', 'point_count'],
-                layout: {
-                    'text-field': '{point_count_abbreviated}',
-                    'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                    'text-size': [
-                        'step',
-                        ['get', 'point_count'],
-                        11,
-                        20, 13,
-                        100, 15
-                    ]
-                },
-                paint: {
-                    'text-color': '#ffffff'
                 }
             });
 
@@ -346,6 +338,10 @@
     });
 
     onDestroy(() => {
+        if (resizeObserver) {
+            resizeObserver.disconnect();
+            resizeObserver = null;
+        }
         if (hoverPopup) {
             hoverPopup.remove();
             hoverPopup = null;
@@ -524,7 +520,7 @@
     <div class="flex-1 min-h-0 relative">
         <div
             bind:this={mapContainer}
-            class="absolute inset-0"
+            class="absolute inset-0 map-container"
             class:box-select-mode={isBoxSelectMode}
         ></div>
 
@@ -581,6 +577,24 @@
 </div>
 
 <style>
+    /* Map container must have explicit dimensions for MapLibre */
+    .map-container {
+        width: 100%;
+        height: 100%;
+    }
+    .map-container :global(.maplibregl-map) {
+        width: 100% !important;
+        height: 100% !important;
+    }
+    .map-container :global(.maplibregl-canvas-container) {
+        width: 100% !important;
+        height: 100% !important;
+    }
+    .map-container :global(.maplibregl-canvas) {
+        width: 100% !important;
+        height: 100% !important;
+    }
+
     /* MapLibre overrides */
     :global(.maplibregl-ctrl-attrib) {
         background-color: rgba(15, 23, 42, 0.8) !important;
