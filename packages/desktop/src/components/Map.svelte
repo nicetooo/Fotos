@@ -389,7 +389,7 @@
     :global(.marker-dot img) {
         width: 44px;
         height: 44px;
-        border-radius: 50%;
+        border-radius: 999px;
         border: 2px solid white;
         object-fit: cover;
         object-position: center;
