@@ -740,7 +740,6 @@
         border-radius: 50%;
         border: 2px solid white;
         object-fit: cover;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         background: #1e293b;
         will-change: auto;
     }
