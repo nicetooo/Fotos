@@ -449,8 +449,8 @@
     }
     :global(.marker-raw-badge) {
         position: absolute;
-        top: 6px;
-        right: 6px;
+        top: 10px;
+        right: 8px;
         width: 12px;
         height: 12px;
         background: #d97706;
