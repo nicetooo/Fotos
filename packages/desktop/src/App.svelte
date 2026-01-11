@@ -195,6 +195,11 @@
                 }
             });
 
+            await listen("import-cancelled", async () => {
+                isScanning = false;
+                await loadPhotos();
+            });
+
             await listen("reload-photos", () => loadPhotos());
             await loadPhotos();
         } catch (e) {
@@ -239,6 +244,14 @@
             error = String(e);
         } finally {
             isScanning = false;
+        }
+    }
+
+    async function handleCancelImport() {
+        try {
+            await invoke("cancel_import");
+        } catch (e) {
+            console.error("Failed to cancel import:", e);
         }
     }
 
@@ -567,6 +580,13 @@
                 {:else}
                     <span>Scanning...</span>
                 {/if}
+                <button
+                    onclick={handleCancelImport}
+                    class="ml-1 w-5 h-5 rounded-full bg-white/10 hover:bg-red-500/50 flex items-center justify-center transition-colors"
+                    title="Cancel import"
+                >
+                    <i class="fa-solid fa-xmark text-[10px]"></i>
+                </button>
             </div>
         {/if}
 

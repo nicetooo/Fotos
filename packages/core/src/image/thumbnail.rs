@@ -399,8 +399,6 @@ fn try_extract_embedded_thumbnail(source: &Path, spec: &ThumbnailSpec) -> Result
 fn try_extract_raw_preview(source: &Path, spec: &ThumbnailSpec) -> Result<Vec<u8>, ThumbnailError> {
     use std::io::{BufReader, Read, Seek, SeekFrom};
 
-    println!("[SLOW PATH] Scanning RAW file for embedded JPEG: {:?}", source);
-
     let file = std::fs::File::open(source)
         .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
     let file_size = file.metadata()

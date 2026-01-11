@@ -1,4 +1,13 @@
 use fotos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// Global cancellation flag for import operations
+static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+fn cancel_import() {
+    IMPORT_CANCELLED.store(true, Ordering::SeqCst);
+}
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -51,6 +60,9 @@ async fn import_photos(
     db_path: String,
     thumb_dir: String,
 ) -> Result<ImportResult, String> {
+    // Reset cancellation flag at start
+    IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+
     // Ensure parent directories exist
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -59,7 +71,7 @@ async fn import_photos(
 
     let index = PhotoIndex::open(db_path)
         .map_err(|e| e.to_string())?;
-    
+
     let config = PhotoCoreConfig {
         thumbnail_dir: thumb_dir,
         thumbnail_size: 256,
@@ -76,9 +88,39 @@ async fn import_photos(
     let total = photos.len();
 
     let mut result = ImportResult::default();
+    let mut skipped = 0usize;
     for (i, path) in photos.into_iter().enumerate() {
+        // Check for cancellation
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            println!("[Import] CANCELLED at {}/{}", i + 1, total);
+            use tauri::Emitter;
+            let _ = window.emit("import-cancelled", serde_json::json!({
+                "current": i,
+                "total": total,
+                "success": result.success,
+                "failure": result.failure
+            }));
+            break;
+        }
+
         let path_str = path.to_string_lossy().to_string();
-        
+
+        // Skip if already imported (fast path - avoid expensive metadata/hash/thumbnail work)
+        if let Ok(Some(_)) = index.get_by_path(path_str.clone()) {
+            skipped += 1;
+            // Emit progress but mark as skipped
+            use tauri::Emitter;
+            let _ = window.emit("import-progress", serde_json::json!({
+                "current": i + 1,
+                "total": total,
+                "success": result.success,
+                "failure": result.failure,
+                "skipped": skipped,
+                "last_path": path_str
+            }));
+            continue;
+        }
+
         // Use a block to ensure we can handle errors per-file
         let file_result = (|| -> Result<(), String> {
             let metadata = fotos_core::read_metadata(&path).map_err(|e| e.to_string())?;
@@ -264,6 +306,7 @@ pub fn run() {
             greet,
             get_core_version,
             import_photos,
+            cancel_import,
             list_photos,
             clear_app_data,
             regenerate_thumbnails,
