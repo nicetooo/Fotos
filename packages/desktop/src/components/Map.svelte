@@ -361,9 +361,9 @@
         // Update photosWithMarkers for TimelineSlider
         photosWithMarkers = geotagged;
 
-        // Fit bounds on initial load
+        // Fit bounds on initial load (extra bottom padding for timeline)
         if (geotagged.length > 0 && !initialBoundsFit) {
-            map.fitBounds(bounds, { padding: [50, 50] });
+            map.fitBounds(bounds, { padding: [100, 100] });
             initialBoundsFit = true;
         }
     }
@@ -499,8 +499,8 @@
                 end: photosInBounds[photosInBounds.length - 1]
             };
 
-            // Fit map to selected bounds
-            map.fitBounds(bounds, { padding: [50, 50], animate: true });
+            // Fit map to selected bounds (extra bottom padding for timeline)
+            map.fitBounds(bounds, { padding: [100, 100], animate: true });
         }
 
         // Cleanup
@@ -517,67 +517,63 @@
 />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="w-full h-full theme-bg-secondary relative flex flex-col" style:cursor={isBoxSelectMode ? 'crosshair' : 'auto'}>
-    <div
-        bind:this={mapContainer}
-        class="flex-1 z-0 outline-none"
-        class:box-select-mode={isBoxSelectMode}
-    ></div>
-
-    <!-- Time range indicator -->
-    {#if timeRangeDisplay && hasGeotaggedPhotos}
-        <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
-            <div class="px-5 py-2 theme-bg-card backdrop-blur-sm rounded-full theme-text-primary text-base font-medium shadow-lg flex items-center gap-2">
-                <i class="fa-regular fa-calendar text-[var(--accent)]"></i>
-                <span class="tabular-nums min-w-[200px] text-center">{timeRangeDisplay}</span>
-            </div>
-        </div>
-    {/if}
-
-    {#if photos.length > 0 && !hasGeotaggedPhotos}
+<div class="w-full h-full theme-bg-secondary flex flex-col overflow-hidden" style:cursor={isBoxSelectMode ? 'crosshair' : 'auto'}>
+    <!-- Map area (takes remaining space) -->
+    <div class="flex-1 min-h-0 relative">
         <div
-            class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-[1000] pointer-events-none"
-        >
-            <div
-                class="text-center p-6 theme-bg-secondary rounded-2xl border theme-border shadow-xl"
-            >
-                <i
-                    class="fa-solid fa-location-slash text-4xl theme-text-muted mb-4"
-                ></i>
-                <h3 class="text-xl font-bold theme-text-primary mb-2">
-                    No Geotagged Photos
-                </h3>
-                <p class="theme-text-secondary max-w-xs">
-                    None of your imported photos have GPS data.
-                </p>
+            bind:this={mapContainer}
+            class="absolute inset-0"
+            class:box-select-mode={isBoxSelectMode}
+        ></div>
+
+        <!-- Time range indicator -->
+        {#if timeRangeDisplay && hasGeotaggedPhotos}
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
+                <div class="px-5 py-2 theme-bg-card backdrop-blur-sm rounded-full theme-text-primary text-base font-medium shadow-lg flex items-center gap-2">
+                    <i class="fa-regular fa-calendar text-[var(--accent)]"></i>
+                    <span class="tabular-nums min-w-[200px] text-center">{timeRangeDisplay}</span>
+                </div>
             </div>
-        </div>
-    {/if}
+        {/if}
 
-    <!-- Box select button -->
+        <!-- No geotagged photos message -->
+        {#if photos.length > 0 && !hasGeotaggedPhotos}
+            <div class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-[1000] pointer-events-none">
+                <div class="text-center p-6 theme-bg-secondary rounded-2xl border theme-border shadow-xl">
+                    <i class="fa-solid fa-location-slash text-4xl theme-text-muted mb-4"></i>
+                    <h3 class="text-xl font-bold theme-text-primary mb-2">No Geotagged Photos</h3>
+                    <p class="theme-text-secondary max-w-xs">None of your imported photos have GPS data.</p>
+                </div>
+            </div>
+        {/if}
+
+        <!-- Box select button (positioned in map area) -->
+        {#if hasGeotaggedPhotos}
+            <button
+                onclick={(e) => { e.stopPropagation(); toggleBoxSelectMode(); }}
+                onmousedown={(e) => e.stopPropagation()}
+                class="absolute left-4 bottom-4 z-[1001] w-10 h-10 flex items-center justify-center rounded-xl shadow-lg transition-colors
+                    {isBoxSelectMode
+                        ? 'bg-[var(--accent)] text-black'
+                        : 'theme-bg-card backdrop-blur-sm theme-text-primary hover:bg-[var(--accent)] hover:text-black'}"
+                title="Box select photos"
+            >
+                <i class="fa-solid fa-vector-square"></i>
+            </button>
+        {/if}
+    </div>
+
+    <!-- Timeline slider at bottom (always reserves space) -->
     {#if hasGeotaggedPhotos}
-        <button
-            onclick={(e) => { e.stopPropagation(); toggleBoxSelectMode(); }}
-            onmousedown={(e) => e.stopPropagation()}
-            class="absolute left-4 bottom-72 z-[1001] w-10 h-10 flex items-center justify-center rounded-xl shadow-lg transition-colors
-                {isBoxSelectMode
-                    ? 'bg-[var(--accent)] text-black'
-                    : 'theme-bg-card backdrop-blur-sm theme-text-primary hover:bg-[var(--accent)] hover:text-black'}"
-            title="Box select photos"
-        >
-            <i class="fa-solid fa-vector-square"></i>
-        </button>
-    {/if}
-
-    <!-- Timeline slider at bottom (delayed load) -->
-    {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0}
-        <div class="z-[1000]">
-            <TimelineSlider
-                photos={photosWithMarkers}
-                externalTimeRange={boxSelectedTimeRange}
-                onTimeRangeChange={handleTimeRangeChange}
-                onExternalRangeConsumed={() => boxSelectedTimeRange = null}
-            />
+        <div class="flex-shrink-0 min-h-[120px]">
+            {#if map && isReady && photosWithMarkers.length > 0}
+                <TimelineSlider
+                    photos={photosWithMarkers}
+                    externalTimeRange={boxSelectedTimeRange}
+                    onTimeRangeChange={handleTimeRangeChange}
+                    onExternalRangeConsumed={() => boxSelectedTimeRange = null}
+                />
+            {/if}
         </div>
     {/if}
 </div>
