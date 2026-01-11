@@ -5,9 +5,10 @@
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
 
-    let { photos, onOpenPreview } = $props<{
+    let { photos, onOpenPreview, theme = "dark" } = $props<{
         photos: any[];
         onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
+        theme?: "dark" | "light";
     }>();
 
     let mapContainer: HTMLDivElement;
@@ -275,37 +276,44 @@
         map.fitBounds(bounds, { padding: 100, maxZoom: 15 });
     }
 
+    // Map style based on theme
+    function getMapStyle(isDark: boolean): maplibregl.StyleSpecification {
+        const tileType = isDark ? 'dark_all' : 'light_all';
+        const sourceId = isDark ? 'carto-dark' : 'carto-light';
+        return {
+            version: 8,
+            sources: {
+                [sourceId]: {
+                    type: 'raster',
+                    tiles: [
+                        `https://a.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
+                        `https://b.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
+                        `https://c.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
+                        `https://d.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`
+                    ],
+                    tileSize: 256,
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                }
+            },
+            layers: [
+                {
+                    id: `${sourceId}-layer`,
+                    type: 'raster',
+                    source: sourceId,
+                    minzoom: 0,
+                    maxzoom: 20
+                }
+            ]
+        };
+    }
+
     onMount(() => {
         if (!mapContainer) return;
 
         // Initialize MapLibre map
         map = new maplibregl.Map({
             container: mapContainer,
-            style: {
-                version: 8,
-                sources: {
-                    'carto-dark': {
-                        type: 'raster',
-                        tiles: [
-                            'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-                            'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-                            'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-                            'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
-                        ],
-                        tileSize: 256,
-                        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                    }
-                },
-                layers: [
-                    {
-                        id: 'carto-dark-layer',
-                        type: 'raster',
-                        source: 'carto-dark',
-                        minzoom: 0,
-                        maxzoom: 20
-                    }
-                ]
-            },
+            style: getMapStyle(theme === 'dark'),
             center: [0, 20],
             zoom: 2,
             attributionControl: false
@@ -419,6 +427,16 @@
             map.remove();
             map = null;
         }
+    });
+
+    // Update map style when theme changes
+    let prevTheme = theme;
+    $effect(() => {
+        if (!map || !mapLoaded) return;
+        if (theme === prevTheme) return;
+        prevTheme = theme;
+
+        map.setStyle(getMapStyle(theme === 'dark'));
     });
 
     // Update map data when photos change
@@ -649,7 +667,7 @@
         height: 100% !important;
     }
 
-    /* MapLibre overrides */
+    /* MapLibre overrides - Dark theme (default) */
     :global(.maplibregl-ctrl-attrib) {
         background-color: rgba(15, 23, 42, 0.8) !important;
         color: #94a3b8 !important;
@@ -677,6 +695,28 @@
         filter: invert(1);
     }
 
+    /* MapLibre overrides - Light theme */
+    :global(:root.light .maplibregl-ctrl-attrib) {
+        background-color: rgba(255, 255, 255, 0.9) !important;
+        color: #64748b !important;
+    }
+    :global(:root.light .maplibregl-ctrl-attrib a) {
+        color: #6366f1 !important;
+    }
+    :global(:root.light .maplibregl-ctrl-group) {
+        background: rgba(255, 255, 255, 0.95) !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    }
+    :global(:root.light .maplibregl-ctrl-group button) {
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important;
+    }
+    :global(:root.light .maplibregl-ctrl-group button:hover) {
+        background-color: rgba(0, 0, 0, 0.05) !important;
+    }
+    :global(:root.light .maplibregl-ctrl button .maplibregl-ctrl-icon) {
+        filter: none;
+    }
+
     /* Box select control */
     :global(.maplibregl-ctrl-box-select) {
         width: 29px;
@@ -687,6 +727,9 @@
         color: #e2e8f0;
         cursor: pointer;
         transition: all 0.15s ease;
+    }
+    :global(:root.light .maplibregl-ctrl-box-select) {
+        color: #475569;
     }
     :global(.maplibregl-ctrl-box-select:hover) {
         color: var(--accent);
@@ -728,6 +771,10 @@
         background: #1e293b;
         will-change: auto;
     }
+    :global(:root.light .marker-thumb img) {
+        border-color: #1e293b;
+        background: #f1f5f9;
+    }
     :global(.marker-thumb .raw-badge) {
         position: absolute;
         top: 2px;
@@ -744,7 +791,7 @@
         justify-content: center;
     }
 
-    /* Photo popup styles */
+    /* Photo popup styles - Dark theme (default) */
     :global(.maplibregl-popup-content) {
         background: rgba(15, 23, 42, 0.95) !important;
         border-radius: 12px !important;
@@ -781,6 +828,22 @@
         font-size: 11px;
         color: #94a3b8;
         margin-top: 4px;
+    }
+
+    /* Photo popup styles - Light theme */
+    :global(:root.light .maplibregl-popup-content) {
+        background: rgba(255, 255, 255, 0.98) !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15) !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    }
+    :global(:root.light .maplibregl-popup-tip) {
+        border-top-color: rgba(255, 255, 255, 0.98) !important;
+    }
+    :global(:root.light .popup-info) {
+        color: #1e293b;
+    }
+    :global(:root.light .popup-date) {
+        color: #64748b;
     }
     :global(.popup-raw-badge) {
         position: absolute;

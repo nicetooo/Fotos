@@ -99,14 +99,29 @@
         }
     });
 
+    // Track system preference for reactive effectiveTheme
+    let systemPrefersDark = $state(
+        typeof window !== "undefined"
+            ? window.matchMedia("(prefers-color-scheme: dark)").matches
+            : true
+    );
+
     // Listen for system theme changes
     $effect(() => {
         if (theme !== "system") return;
         const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-        const handler = () => applyTheme("system");
+        const handler = () => {
+            systemPrefersDark = mediaQuery.matches;
+            applyTheme("system");
+        };
         mediaQuery.addEventListener("change", handler);
         return () => mediaQuery.removeEventListener("change", handler);
     });
+
+    // Effective theme resolved to actual dark/light
+    let effectiveTheme = $derived<"dark" | "light">(
+        theme === "system" ? (systemPrefersDark ? "dark" : "light") : theme
+    );
 
     // RAW file extensions
     const RAW_EXTENSIONS = new Set(["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"]);
@@ -458,7 +473,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={groupedPhotos} onOpenPreview={openPreview} />
+        <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} />
 
         <!-- Floating action buttons (top-left) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
