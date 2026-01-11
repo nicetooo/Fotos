@@ -169,6 +169,64 @@
         dragMode = 'none';
     }
 
+    // === Mouse wheel handlers ===
+    function handleOverviewWheel(e: WheelEvent) {
+        e.preventDefault();
+
+        // Get mouse position relative to track
+        const rect = sliderTrack.getBoundingClientRect();
+        const mousePercent = ((e.clientX - rect.left) / rect.width) * 100;
+
+        // Determine zoom direction (negative deltaY = scroll up = zoom in)
+        const zoomIn = e.deltaY < 0;
+        const zoomAmount = 2; // percentage change per scroll (reduced for smoother control)
+
+        const currentWidth = rightPercent - leftPercent;
+        const center = (leftPercent + rightPercent) / 2;
+
+        if (zoomIn) {
+            // Zoom in: shrink selection, center towards mouse position
+            if (currentWidth <= 5) return; // minimum 5% selection
+
+            // Bias center towards mouse position
+            const bias = 0.3;
+            const newCenter = center + (mousePercent - center) * bias;
+            const newWidth = Math.max(5, currentWidth - zoomAmount * 2);
+
+            leftPercent = Math.max(0, newCenter - newWidth / 2);
+            rightPercent = Math.min(100, newCenter + newWidth / 2);
+
+            // Adjust if hitting boundaries
+            if (leftPercent === 0) rightPercent = newWidth;
+            if (rightPercent === 100) leftPercent = 100 - newWidth;
+        } else {
+            // Zoom out: expand selection
+            if (currentWidth >= 100) return;
+
+            const newWidth = Math.min(100, currentWidth + zoomAmount * 2);
+            const expand = (newWidth - currentWidth) / 2;
+
+            leftPercent = Math.max(0, leftPercent - expand);
+            rightPercent = Math.min(100, rightPercent + expand);
+
+            // Reset if near full range
+            if (rightPercent - leftPercent >= 98) {
+                leftPercent = 0;
+                rightPercent = 100;
+            }
+        }
+    }
+
+    function handleZoomedWheel(e: WheelEvent) {
+        e.preventDefault();
+
+        if (selectedDuration === 0) return; // "All" mode, no window to move
+
+        // Scroll to move window position (reduced sensitivity)
+        const delta = e.deltaY > 0 ? 2 : -2;
+        windowPosition = Math.max(0, Math.min(100, windowPosition + delta));
+    }
+
     // === Helpers ===
     function formatDate(date: Date): string {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -288,7 +346,8 @@
             </div>
 
             <!-- Zoomed slider track -->
-            <div bind:this={zoomedTrack} class="relative h-10 bg-neutral-800 rounded-lg overflow-hidden">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div bind:this={zoomedTrack} class="relative h-10 bg-neutral-800 rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
                 <!-- Density visualization -->
                 <div class="absolute inset-0 flex items-end">
                     {#each zoomedDensityBins as count}
@@ -324,7 +383,8 @@
     {/if}
 
     <!-- === Overview (full timeline with handles) === -->
-    <div class="relative h-8 mx-2">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="relative h-8 mx-2" onwheel={handleOverviewWheel}>
         <!-- Track background -->
         <div
             bind:this={sliderTrack}
