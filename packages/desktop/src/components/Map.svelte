@@ -12,6 +12,7 @@
 
     let mapContainer: HTMLDivElement;
     let map = $state<maplibregl.Map | null>(null);
+    let mapLoaded = $state(false);
     let isReady = $state(false);
 
     // Time filter state
@@ -32,6 +33,9 @@
 
     // Photo data indexed by id
     let photoIndex: Map<string, any> = new Map();
+
+    // HTML markers for photos
+    let photoMarkers: Map<string, { marker: maplibregl.Marker; photo: any; date: Date | null }> = new Map();
 
     // Parse date from photo metadata
     function parsePhotoDate(dateStr: string | null): Date | null {
@@ -93,60 +97,106 @@
         return convertFileSrc(path);
     }
 
-    // Convert photos to GeoJSON
-    function photosToGeoJSON(photos: any[]): GeoJSON.FeatureCollection {
-        const features: GeoJSON.Feature[] = [];
+    // Create all markers for photos
+    function createPhotoMarkers(photos: any[]) {
+        if (!map) return;
+
+        // Clear existing markers
+        for (const { marker } of photoMarkers.values()) {
+            marker.remove();
+        }
+        photoMarkers.clear();
+
+        const bounds = new maplibregl.LngLatBounds();
 
         for (const photo of photos) {
             const lat = photo.metadata?.lat;
             const lon = photo.metadata?.lon;
             if (!lat || !lon) continue;
 
-            const date = parsePhotoDate(photo.metadata?.date_taken);
-            const timestamp = date?.getTime() || 0;
+            const thumbPath = photo.thumb_path || photo.path;
+            const url = getThumbnailUrl(thumbPath);
+            const filename = photo.path.split('/').pop();
+            const dateTaken = photo.metadata?.date_taken?.replace(/"/g, '') || '';
 
-            features.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'Point',
-                    coordinates: [lon, lat]
-                },
-                properties: {
-                    id: photo.path,
-                    thumbnail: getThumbnailUrl(photo.thumb_path || photo.path),
-                    filename: photo.path.split('/').pop(),
-                    dateTaken: photo.metadata?.date_taken?.replace(/"/g, '') || '',
-                    timestamp,
-                    hasRaw: photo.hasRaw || false
+            // Create marker element
+            const el = document.createElement('div');
+            el.className = 'photo-marker';
+            el.innerHTML = `
+                <div class="marker-thumb">
+                    <img src="${url}" alt="" loading="lazy" />
+                    ${photo.hasRaw ? '<span class="raw-badge">R</span>' : ''}
+                </div>
+            `;
+
+            // Create marker
+            const marker = new maplibregl.Marker({ element: el })
+                .setLngLat([lon, lat])
+                .addTo(map);
+
+            // Click handler
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (onOpenPreview) {
+                    onOpenPreview(photo, visiblePhotosSorted);
                 }
             });
 
+            // Hover handlers for popup
+            el.addEventListener('mouseenter', () => {
+                if (!map || !hoverPopup) return;
+
+                const rawBadge = photo.hasRaw ? '<div class="popup-raw-badge">RAW</div>' : '';
+                const dateInfo = dateTaken ? `<div class="popup-date">${dateTaken}</div>` : '';
+
+                const html = `
+                    <div class="photo-popup">
+                        <img src="${url}" alt="${filename}" />
+                        <div class="popup-info">
+                            <div class="popup-filename">${filename}</div>
+                            ${dateInfo}
+                        </div>
+                        ${rawBadge}
+                    </div>
+                `;
+
+                hoverPopup.setLngLat([lon, lat]).setHTML(html).addTo(map);
+            });
+
+            el.addEventListener('mouseleave', () => {
+                if (hoverPopup) {
+                    hoverPopup.remove();
+                }
+            });
+
+            const date = parsePhotoDate(photo.metadata?.date_taken);
+            photoMarkers.set(photo.path, { marker, photo, date });
             photoIndex.set(photo.path, photo);
+            bounds.extend([lon, lat]);
         }
 
-        return {
-            type: 'FeatureCollection',
-            features
-        };
+        // Fit bounds
+        if (photos.length > 0) {
+            map.fitBounds(bounds, { padding: 100, maxZoom: 15 });
+        }
+
+        photosWithMarkers = photos;
     }
 
-    // Filter GeoJSON by time range
-    function filterGeoJSONByTime(geojson: GeoJSON.FeatureCollection, start: Date | null, end: Date | null): GeoJSON.FeatureCollection {
-        if (!start || !end) return geojson;
+    // Update marker visibility based on time filter
+    function updateMarkerVisibility(start: Date | null, end: Date | null) {
+        for (const { marker, date } of photoMarkers.values()) {
+            let visible = true;
+            if (start && end && date) {
+                visible = date >= start && date <= end;
+            }
 
-        const startTime = start.getTime();
-        const endTime = end.getTime();
-
-        return {
-            type: 'FeatureCollection',
-            features: geojson.features.filter(f => {
-                const ts = f.properties?.timestamp;
-                return ts && ts >= startTime && ts <= endTime;
-            })
-        };
+            const el = marker.getElement();
+            if (el) {
+                el.style.display = visible ? 'block' : 'none';
+            }
+        }
     }
-
-    let fullGeoJSON: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
     onMount(() => {
         if (!mapContainer) return;
@@ -210,125 +260,8 @@
         map.on('load', () => {
             if (!map) return;
 
-            // Add photos source with clustering
-            map.addSource('photos', {
-                type: 'geojson',
-                data: { type: 'FeatureCollection', features: [] },
-                cluster: true,
-                clusterMaxZoom: 17,
-                clusterRadius: 60
-            });
-
-            // Cluster circles layer
-            map.addLayer({
-                id: 'clusters',
-                type: 'circle',
-                source: 'photos',
-                filter: ['has', 'point_count'],
-                paint: {
-                    'circle-color': [
-                        'step',
-                        ['get', 'point_count'],
-                        'rgba(30, 41, 59, 0.9)',  // < 20: dark gray
-                        20, 'rgba(99, 102, 241, 0.9)',  // 20-99: purple
-                        100, 'rgba(139, 92, 246, 0.9)'  // 100+: violet
-                    ],
-                    'circle-radius': [
-                        'step',
-                        ['get', 'point_count'],
-                        14,   // < 20: small
-                        20, 22,  // 20-99: medium
-                        100, 28  // 100+: large
-                    ],
-                    'circle-stroke-width': 3,
-                    'circle-stroke-color': 'rgba(255, 255, 255, 0.9)'
-                }
-            });
-
-            // Unclustered photo markers
-            map.addLayer({
-                id: 'unclustered-point',
-                type: 'circle',
-                source: 'photos',
-                filter: ['!', ['has', 'point_count']],
-                paint: {
-                    'circle-color': '#1e293b',
-                    'circle-radius': 22,
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#ffffff'
-                }
-            });
-
-            // Click on cluster to zoom
-            map.on('click', 'clusters', async (e) => {
-                if (!map) return;
-                const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
-                if (!features.length) return;
-
-                const clusterId = features[0].properties?.cluster_id;
-                const source = map.getSource('photos') as maplibregl.GeoJSONSource;
-
-                try {
-                    const zoom = await source.getClusterExpansionZoom(clusterId);
-                    const coords = (features[0].geometry as GeoJSON.Point).coordinates;
-                    map.easeTo({
-                        center: coords as [number, number],
-                        zoom: zoom
-                    });
-                } catch (err) {
-                    console.error('Error expanding cluster:', err);
-                }
-            });
-
-            // Click on unclustered point to open preview
-            map.on('click', 'unclustered-point', (e) => {
-                if (!e.features?.length) return;
-                const props = e.features[0].properties;
-                const photo = photoIndex.get(props?.id);
-                if (photo && onOpenPreview) {
-                    onOpenPreview(photo, visiblePhotosSorted);
-                }
-            });
-
-            // Hover on unclustered point to show preview
-            map.on('mouseenter', 'unclustered-point', (e) => {
-                if (!map || !hoverPopup || !e.features?.length) return;
-                map.getCanvas().style.cursor = 'pointer';
-
-                const feature = e.features[0];
-                const coords = (feature.geometry as GeoJSON.Point).coordinates.slice() as [number, number];
-                const props = feature.properties;
-
-                const rawBadge = props?.hasRaw ? '<div class="popup-raw-badge">RAW</div>' : '';
-                const dateInfo = props?.dateTaken ? `<div class="popup-date">${props.dateTaken}</div>` : '';
-
-                const html = `
-                    <div class="photo-popup">
-                        <img src="${props?.thumbnail}" alt="${props?.filename}" />
-                        <div class="popup-info">
-                            <div class="popup-filename">${props?.filename}</div>
-                            ${dateInfo}
-                        </div>
-                        ${rawBadge}
-                    </div>
-                `;
-
-                hoverPopup.setLngLat(coords).setHTML(html).addTo(map);
-            });
-
-            map.on('mouseleave', 'unclustered-point', () => {
-                if (!map || !hoverPopup) return;
-                map.getCanvas().style.cursor = '';
-                hoverPopup.remove();
-            });
-
-            // Hover cursor for clusters
-            map.on('mouseenter', 'clusters', () => {
-                if (map) map.getCanvas().style.cursor = 'pointer';
-            });
-            map.on('mouseleave', 'clusters', () => {
-                if (map) map.getCanvas().style.cursor = '';
-            });
+            // Mark map as loaded
+            mapLoaded = true;
 
             // Ready for timeline
             requestAnimationFrame(() => {
@@ -338,6 +271,12 @@
     });
 
     onDestroy(() => {
+        // Clear all markers
+        for (const { marker } of photoMarkers.values()) {
+            marker.remove();
+        }
+        photoMarkers.clear();
+
         if (resizeObserver) {
             resizeObserver.disconnect();
             resizeObserver = null;
@@ -356,53 +295,23 @@
     $effect(() => {
         const currentMap = map;
         const geo = geotaggedPhotos;
+        const loaded = mapLoaded;
 
-        if (!currentMap || !currentMap.isStyleLoaded()) return;
+        if (!currentMap || !loaded) return;
 
-        photoIndex.clear();
-        fullGeoJSON = photosToGeoJSON(geo);
-        photosWithMarkers = geo;
-
-        const source = currentMap.getSource('photos') as maplibregl.GeoJSONSource;
-        if (source) {
-            const filtered = filterGeoJSONByTime(fullGeoJSON, timeFilterStart, timeFilterEnd);
-            source.setData(filtered);
-
-            // Fit bounds if we have data
-            if (geo.length > 0 && filtered.features.length > 0) {
-                const bounds = new maplibregl.LngLatBounds();
-                for (const feature of filtered.features) {
-                    const coords = (feature.geometry as GeoJSON.Point).coordinates;
-                    bounds.extend(coords as [number, number]);
-                }
-                currentMap.fitBounds(bounds, { padding: 100, maxZoom: 15 });
-            }
-        }
+        // Create HTML markers for all photos
+        createPhotoMarkers(geo);
     });
 
-    // Update data when time filter changes
+    // Update marker visibility when time filter changes
     $effect(() => {
-        const currentMap = map;
         const start = timeFilterStart;
         const end = timeFilterEnd;
+        const loaded = mapLoaded;
 
-        if (!currentMap || !currentMap.isStyleLoaded()) return;
+        if (!loaded) return;
 
-        const source = currentMap.getSource('photos') as maplibregl.GeoJSONSource;
-        if (source && fullGeoJSON.features.length > 0) {
-            const filtered = filterGeoJSONByTime(fullGeoJSON, start, end);
-            source.setData(filtered);
-
-            // Pan to center of filtered data
-            if (start && end && filtered.features.length > 0) {
-                const bounds = new maplibregl.LngLatBounds();
-                for (const feature of filtered.features) {
-                    const coords = (feature.geometry as GeoJSON.Point).coordinates;
-                    bounds.extend(coords as [number, number]);
-                }
-                currentMap.easeTo({ center: bounds.getCenter(), duration: 300 });
-            }
-        }
+        updateMarkerVisibility(start, end);
     });
 
     // === Box Selection ===
@@ -479,14 +388,10 @@
 
         // Find photos within bounds
         const photosInBounds: Date[] = [];
-        for (const feature of fullGeoJSON.features) {
-            const coords = (feature.geometry as GeoJSON.Point).coordinates;
-            const lngLat = new maplibregl.LngLat(coords[0], coords[1]);
-            if (bounds.contains(lngLat)) {
-                const ts = feature.properties?.timestamp;
-                if (ts) {
-                    photosInBounds.push(new Date(ts));
-                }
+        for (const { marker, date } of photoMarkers.values()) {
+            const lngLat = marker.getLngLat();
+            if (bounds.contains(lngLat) && date) {
+                photosInBounds.push(date);
             }
         }
 
@@ -621,6 +526,45 @@
     }
     :global(.maplibregl-ctrl button .maplibregl-ctrl-icon) {
         filter: invert(1);
+    }
+
+    /* Photo marker styles */
+    :global(.photo-marker) {
+        cursor: pointer;
+        transition: transform 0.15s ease;
+    }
+    :global(.photo-marker:hover) {
+        transform: scale(1.15);
+        z-index: 1000 !important;
+    }
+    :global(.marker-thumb) {
+        width: 48px;
+        height: 48px;
+        position: relative;
+    }
+    :global(.marker-thumb img) {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: 2px solid white;
+        object-fit: cover;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        background: #1e293b;
+    }
+    :global(.marker-thumb .raw-badge) {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 14px;
+        height: 14px;
+        background: #d97706;
+        color: white;
+        font-size: 8px;
+        font-weight: bold;
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 
     /* Photo popup styles */
