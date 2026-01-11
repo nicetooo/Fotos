@@ -31,6 +31,8 @@
     let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
     let sortOrder = $state<"asc" | "desc">("desc");
     let importMenuOpen = $state(false);
+    let libraryImportMenuOpen = $state(false);
+    let sortMenuOpen = $state(false);
 
     // Theme state
     type Theme = "dark" | "light" | "system";
@@ -381,7 +383,7 @@
 
         <!-- Library Drawer (right side) -->
         {#if showLibrary}
-            <div class="absolute top-0 right-0 bottom-0 min-w-[500px] w-1/2 max-w-[800px] theme-bg-overlay backdrop-blur-md border-l theme-border z-[1001] flex flex-col">
+            <div class="absolute top-0 right-0 bottom-0 w-1/2 min-w-[500px] theme-bg-overlay backdrop-blur-md border-l theme-border z-[1001] flex flex-col">
                 <!-- Header -->
                 <div class="flex items-center justify-between px-4 py-3 border-b theme-border">
                     <div class="flex items-center gap-2">
@@ -403,32 +405,90 @@
                 </div>
 
                 <!-- Toolbar -->
-                <div class="flex items-center gap-2 px-3 py-2 border-b theme-border">
-                    <select
-                        bind:value={sortBy}
-                        class="flex-1 theme-bg-secondary theme-text-secondary text-xs px-2 py-1.5 rounded border theme-border focus:outline-none"
-                    >
-                        <option value="date">Date</option>
-                        <option value="name">Name</option>
-                        <option value="dimensions">Size</option>
-                    </select>
+                <div class="flex items-center gap-1.5 px-3 py-2 border-b theme-border">
+                    <!-- Sort dropdown -->
+                    <div class="relative">
+                        <button
+                            onclick={() => sortMenuOpen = !sortMenuOpen}
+                            class="h-7 px-2.5 rounded theme-bg-tertiary theme-text-primary text-xs flex items-center gap-1.5 hover:theme-bg-secondary"
+                        >
+                            <span>{sortBy === 'date' ? 'Date' : sortBy === 'name' ? 'Name' : 'Size'}</span>
+                            <i class="fa-solid fa-chevron-down text-[10px] theme-text-muted"></i>
+                        </button>
+                        {#if sortMenuOpen}
+                            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                            <div
+                                class="fixed inset-0 z-40"
+                                onclick={() => sortMenuOpen = false}
+                            ></div>
+                            <div class="absolute left-0 top-full mt-1 py-1 theme-bg-secondary border theme-border rounded shadow-lg z-50 min-w-[80px]">
+                                <button
+                                    onclick={() => { sortBy = 'date'; sortMenuOpen = false; }}
+                                    class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'date' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
+                                >
+                                    Date
+                                </button>
+                                <button
+                                    onclick={() => { sortBy = 'name'; sortMenuOpen = false; }}
+                                    class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'name' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
+                                >
+                                    Name
+                                </button>
+                                <button
+                                    onclick={() => { sortBy = 'dimensions'; sortMenuOpen = false; }}
+                                    class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'dimensions' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
+                                >
+                                    Size
+                                </button>
+                            </div>
+                        {/if}
+                    </div>
 
                     <button
                         onclick={() => (sortOrder = sortOrder === "asc" ? "desc" : "asc")}
-                        class="p-1.5 rounded theme-bg-secondary border theme-border theme-text-muted hover:theme-text-primary"
+                        class="w-7 h-7 rounded theme-bg-tertiary theme-text-secondary hover:theme-text-primary flex items-center justify-center"
                         title={sortOrder === "asc" ? "Ascending" : "Descending"}
                     >
                         <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
                     </button>
 
-                    <button
-                        onclick={() => { showLibrary = false; handleScan("folder"); }}
-                        disabled={isScanning}
-                        class="p-1.5 rounded theme-bg-secondary border theme-border theme-text-muted hover:theme-text-primary disabled:opacity-50"
-                        title="Import folder"
-                    >
-                        <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-folder-plus'} text-xs"></i>
-                    </button>
+                    <div class="flex-1"></div>
+
+                    <div class="relative">
+                        <button
+                            onclick={() => libraryImportMenuOpen = !libraryImportMenuOpen}
+                            disabled={isScanning}
+                            class="w-7 h-7 rounded theme-bg-tertiary theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center"
+                            title="Import"
+                        >
+                            <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-xs"></i>
+                        </button>
+                        {#if libraryImportMenuOpen}
+                            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                            <div
+                                class="fixed inset-0 z-40"
+                                onclick={() => libraryImportMenuOpen = false}
+                            ></div>
+                            <div class="absolute right-0 top-full mt-1 py-1 theme-bg-secondary border theme-border rounded shadow-lg z-50 min-w-[130px]">
+                                <button
+                                    onclick={() => { libraryImportMenuOpen = false; handleScan("folder"); }}
+                                    disabled={isScanning}
+                                    class="w-full px-3 py-1.5 text-left text-xs theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
+                                >
+                                    <i class="fa-solid fa-folder w-3"></i>
+                                    Import Folder
+                                </button>
+                                <button
+                                    onclick={() => { libraryImportMenuOpen = false; handleScan("file"); }}
+                                    disabled={isScanning}
+                                    class="w-full px-3 py-1.5 text-left text-xs theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
+                                >
+                                    <i class="fa-solid fa-file-image w-3"></i>
+                                    Import File
+                                </button>
+                            </div>
+                        {/if}
+                    </div>
                 </div>
 
                 <!-- Photo Grid -->
