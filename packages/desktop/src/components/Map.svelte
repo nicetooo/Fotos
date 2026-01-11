@@ -10,6 +10,7 @@
     let mapContainer: HTMLDivElement;
     let map = $state<L.Map | null>(null);
     let resizeObserver: ResizeObserver | null = null;
+    let isReady = $state(false); // Delayed initialization flag
 
     // Time filter state
     let timeFilterStart = $state<Date | null>(null);
@@ -23,23 +24,22 @@
         return isNaN(date.getTime()) ? null : date;
     }
 
-    // Pre-compute geotagged photos (only once when photos change)
-    let geotaggedPhotos = $derived(() => {
-        return photos.filter((p: any) => p.metadata?.lat && p.metadata?.lon);
+    // Cached geotagged photos (computed lazily)
+    let cachedGeotagged: any[] | null = null;
+    function getGeotaggedPhotos() {
+        if (cachedGeotagged === null) {
+            cachedGeotagged = photos.filter((p: any) => p.metadata?.lat && p.metadata?.lon);
+        }
+        return cachedGeotagged;
+    }
+
+    // Reset cache when photos change
+    $effect(() => {
+        photos;
+        cachedGeotagged = null;
     });
 
-    let hasGeotaggedPhotos = $derived(() => geotaggedPhotos().length > 0);
-
-    // Filter photos by time range
-    let filteredPhotos = $derived(() => {
-        const geo = geotaggedPhotos();
-        if (!timeFilterStart || !timeFilterEnd) return geo;
-        return geo.filter(p => {
-            const date = parsePhotoDate(p.metadata?.date_taken);
-            if (!date) return true; // Show photos without dates
-            return date >= timeFilterStart! && date <= timeFilterEnd!;
-        });
-    });
+    let hasGeotaggedPhotos = $derived(getGeotaggedPhotos().length > 0);
 
     function handleTimeRangeChange(start: Date, end: Date) {
         timeFilterStart = start;
@@ -76,8 +76,10 @@
             },
         ).addTo(map);
 
-        // Initial marker update
-        updateMarkers();
+        // Delay timeline to next frame for smoother tab switch
+        requestAnimationFrame(() => {
+            isReady = true;
+        });
 
         // Setup resize observer with debouncing
         let resizeTimeout: number | null = null;
@@ -126,46 +128,55 @@
 
     let initialBoundsFit = false;
 
-    // Throttle marker updates (execute at most once per 100ms)
-    let lastUpdateTime = 0;
-    let pendingUpdate = false;
+    // Store all markers with their photo data for visibility toggling
+    let allMarkers: Map<string, { marker: L.Marker; photo: any; date: Date | null }> = new Map();
 
+    // Photos that actually have markers (for TimelineSlider)
+    let photosWithMarkers = $state<any[]>([]);
+
+    // Create/recreate all markers when map or photos change
     $effect(() => {
-        filteredPhotos();
-        if (map) {
-            const now = Date.now();
-            if (now - lastUpdateTime >= 100) {
-                lastUpdateTime = now;
-                updateMarkers();
-            } else if (!pendingUpdate) {
-                pendingUpdate = true;
-                setTimeout(() => {
-                    pendingUpdate = false;
-                    lastUpdateTime = Date.now();
-                    updateMarkers();
-                }, 100 - (now - lastUpdateTime));
+        const currentMap = map;  // Read map to establish dependency
+        const geo = getGeotaggedPhotos();
+
+        // Clear old markers first
+        for (const { marker } of allMarkers.values()) {
+            marker.remove();
+        }
+        allMarkers.clear();
+        initialBoundsFit = false;
+
+        // Create new markers if we have map and photos
+        if (currentMap && geo.length > 0) {
+            createAllMarkers(geo);
+        }
+    });
+
+    // Update visibility based on time filter (fast - just toggle opacity)
+    $effect(() => {
+        if (!map || allMarkers.size === 0) return;
+
+        const start = timeFilterStart;
+        const end = timeFilterEnd;
+
+        for (const { marker, date } of allMarkers.values()) {
+            let visible = true;
+            if (start && end && date) {
+                visible = date >= start && date <= end;
+            }
+
+            const el = marker.getElement();
+            if (el) {
+                el.style.opacity = visible ? '1' : '0';
+                el.style.pointerEvents = visible ? 'auto' : 'none';
             }
         }
     });
 
-    async function updateMarkers() {
+    function createAllMarkers(geotagged: any[]) {
         if (!map) return;
 
-        // Clear existing markers
-        map.eachLayer((layer) => {
-            if (layer instanceof L.Marker) {
-                map!.removeLayer(layer);
-            }
-        });
-
-        // Use pre-filtered photos (already geotagged + time filtered)
-        const geotagged = filteredPhotos();
-
-        if (geotagged.length === 0) return;
-
         const bounds = new L.LatLngBounds([]);
-
-        // Limit markers to prevent performance issues
         const maxMarkers = 500;
         const photosToShow = geotagged.length > maxMarkers
             ? geotagged.slice(0, maxMarkers)
@@ -174,24 +185,26 @@
         for (const photo of photosToShow) {
             const lat = photo.metadata.lat!;
             const lon = photo.metadata.lon!;
-
-            addMarker(photo, lat, lon);
-            bounds.extend([lat, lon]);
+            const marker = createMarker(photo, lat, lon);
+            if (marker) {
+                const date = parsePhotoDate(photo.metadata?.date_taken);
+                allMarkers.set(photo.path, { marker, photo, date });
+                bounds.extend([lat, lon]);
+            }
         }
 
-        // On initial load, fit all markers in view
-        if (!initialBoundsFit && photosToShow.length > 0) {
+        // Update photosWithMarkers for TimelineSlider
+        photosWithMarkers = photosToShow;
+
+        // Fit bounds on initial load
+        if (photosToShow.length > 0 && !initialBoundsFit) {
             map.fitBounds(bounds, { padding: [50, 50] });
             initialBoundsFit = true;
-        } else if (photosToShow.length > 0) {
-            // During timeline scrubbing, pan to center of visible photos
-            const center = bounds.getCenter();
-            map.panTo(center, { animate: true, duration: 0.3 });
         }
     }
 
-    function addMarker(photo: any, lat: number, lon: number) {
-        if (!map) return;
+    function createMarker(photo: any, lat: number, lon: number): L.Marker | null {
+        if (!map) return null;
 
         const iconSize = 48;
         const thumbPath = photo.thumb_path || photo.path;
@@ -213,13 +226,14 @@
                 <p class="text-[10px] text-gray-500">${photo.metadata.date_taken || "No date"}</p>
             </div>
         `);
+        return marker;
     }
 </script>
 
 <div class="w-full h-full bg-[#1e293b] relative flex flex-col">
     <div bind:this={mapContainer} class="flex-1 z-0 outline-none"></div>
 
-    {#if !hasGeotaggedPhotos()}
+    {#if !hasGeotaggedPhotos}
         <div
             class="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-[1000] pointer-events-none"
         >
@@ -239,10 +253,10 @@
         </div>
     {/if}
 
-    <!-- Timeline slider at bottom -->
-    {#if hasGeotaggedPhotos() && map}
+    <!-- Timeline slider at bottom (delayed load) -->
+    {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0}
         <div class="z-[1000]">
-            <TimelineSlider photos={geotaggedPhotos()} onTimeRangeChange={handleTimeRangeChange} />
+            <TimelineSlider photos={photosWithMarkers} onTimeRangeChange={handleTimeRangeChange} />
         </div>
     {/if}
 </div>

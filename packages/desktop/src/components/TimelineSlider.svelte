@@ -17,7 +17,7 @@
     }
 
     // Get time range from all photos
-    let timeRange = $derived(() => {
+    let timeRange = $derived.by(() => {
         const dates = photos
             .map(p => parsePhotoDate(p.metadata?.date_taken))
             .filter((d): d is Date => d !== null)
@@ -44,8 +44,8 @@
     let sliderPosition = $state(0); // 0-100 percentage
 
     // Calculate window based on slider position
-    let windowRange = $derived(() => {
-        const range = timeRange();
+    let windowRange = $derived.by(() => {
+        const range = timeRange;
         const totalMs = range.max.getTime() - range.min.getTime();
 
         // "All" mode - return full range
@@ -89,7 +89,7 @@
 
     // Notify parent of changes
     $effect(() => {
-        const range = windowRange();
+        const range = windowRange;
         onTimeRangeChange(range.start, range.end);
     });
 
@@ -117,7 +117,7 @@
         const clickPercent = (clickX / rect.width) * 100;
 
         // Move window center to click position
-        const widthPct = windowWidthPercent();
+        const widthPct = windowWidthPercent;
         const halfWidth = widthPct / 2;
         const maxLeftPercent = 100 - widthPct;
 
@@ -136,7 +136,7 @@
         const deltaPercent = (deltaX / rect.width) * 100;
 
         // Convert delta to slider position change
-        const widthPct = windowWidthPercent();
+        const widthPct = windowWidthPercent;
         const maxLeftPercent = 100 - widthPct;
 
         if (maxLeftPercent > 0) {
@@ -150,8 +150,8 @@
     }
 
     // Count photos in current window
-    let photosInWindow = $derived(() => {
-        const range = windowRange();
+    let photosInWindow = $derived.by(() => {
+        const range = windowRange;
         return photos.filter(p => {
             const date = parsePhotoDate(p.metadata?.date_taken);
             if (!date) return false;
@@ -160,9 +160,9 @@
     });
 
     // Calculate window width percentage
-    let windowWidthPercent = $derived(() => {
+    let windowWidthPercent = $derived.by(() => {
         if (selectedDuration === 0) return 100;
-        const range = timeRange();
+        const range = timeRange;
         const totalMs = range.max.getTime() - range.min.getTime();
         if (totalMs === 0) return 100;
         return Math.min(100, (selectedDuration / totalMs) * 100);
@@ -170,8 +170,8 @@
 
     // Pre-compute density bins (O(n) instead of O(n²))
     const NUM_BINS = 50;
-    let densityBins = $derived(() => {
-        const range = timeRange();
+    let densityBins = $derived.by(() => {
+        const range = timeRange;
         const totalMs = range.max.getTime() - range.min.getTime();
         if (totalMs === 0) return Array(NUM_BINS).fill(0);
 
@@ -190,11 +190,11 @@
         return bins;
     });
 
-    let maxBinCount = $derived(() => Math.max(1, ...densityBins()));
+    let maxBinCount = $derived(Math.max(1, ...densityBins));
 
     // Calculate actual left position of window on the timeline
-    let windowLeftPercent = $derived(() => {
-        const widthPct = windowWidthPercent();
+    let windowLeftPercent = $derived.by(() => {
+        const widthPct = windowWidthPercent;
         // sliderPosition 0-100 maps to window position 0 to (100-width)
         return (sliderPosition / 100) * (100 - widthPct);
     });
@@ -223,15 +223,15 @@
         </div>
         <div class="text-xs text-slate-400">
             <i class="fa-solid fa-images mr-1"></i>
-            {photosInWindow()} photos
+            {photosInWindow} photos
         </div>
     </div>
 
     <!-- Time display -->
     <div class="flex justify-between text-xs text-slate-300 mb-1">
-        <span>{formatDateTime(windowRange().start)}</span>
+        <span>{formatDateTime(windowRange.start)}</span>
         <span class="text-slate-500">to</span>
-        <span>{formatDateTime(windowRange().end)}</span>
+        <span>{formatDateTime(windowRange.end)}</span>
     </div>
 
     <!-- Slider track -->
@@ -258,10 +258,10 @@
 
         <!-- Photo density visualization (pre-computed) -->
         <div class="absolute inset-0 flex items-end px-0.5 gap-px pointer-events-none">
-            {#each densityBins() as count, i}
+            {#each densityBins as count, i}
                 <div
                     class="flex-1 bg-blue-500/30 rounded-t"
-                    style="height: {Math.max(2, (count / maxBinCount()) * 100)}%"
+                    style="height: {Math.max(2, (count / maxBinCount) * 100)}%"
                 ></div>
             {/each}
         </div>
@@ -270,7 +270,7 @@
         {#if selectedDuration !== 0}
             <div
                 class="absolute top-0 bottom-0 bg-blue-500/30 border-x-2 border-blue-400 rounded pointer-events-none"
-                style="left: {windowLeftPercent()}%; width: {windowWidthPercent()}%"
+                style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
             >
                 <!-- Draggable Handle -->
                 <div
@@ -287,8 +287,8 @@
 
     <!-- Full range labels -->
     <div class="flex justify-between text-[10px] text-slate-500 mt-1">
-        <span>{formatDate(timeRange().min)}</span>
-        <span>{formatDate(timeRange().max)}</span>
+        <span>{formatDate(timeRange.min)}</span>
+        <span>{formatDate(timeRange.max)}</span>
     </div>
 </div>
 
