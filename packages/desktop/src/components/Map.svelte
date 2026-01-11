@@ -46,6 +46,22 @@
         timeFilterEnd = end;
     }
 
+    // Format time range for display
+    function formatTimeRange(start: Date | null, end: Date | null): string {
+        if (!start || !end) return '';
+
+        const sameDay = start.toDateString() === end.toDateString();
+        const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+        if (sameDay) {
+            return `${formatDate(start)} ${formatTime(start)} - ${formatTime(end)}`;
+        }
+        return `${formatDate(start)} - ${formatDate(end)}`;
+    }
+
+    let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd));
+
     // Fix for default marker icons
     delete (L.Icon.Default.prototype as any)._getIconUrl;
     L.Icon.Default.mergeOptions({
@@ -232,6 +248,16 @@
 
 <div class="w-full h-full bg-[#1e293b] relative flex flex-col">
     <div bind:this={mapContainer} class="flex-1 z-0 outline-none"></div>
+
+    <!-- Time range indicator -->
+    {#if timeRangeDisplay && hasGeotaggedPhotos}
+        <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
+            <div class="px-5 py-2 bg-black/80 backdrop-blur-sm rounded-full text-white text-base font-medium shadow-lg flex items-center gap-2">
+                <i class="fa-regular fa-calendar text-yellow-400"></i>
+                <span class="tabular-nums min-w-[200px] text-center">{timeRangeDisplay}</span>
+            </div>
+        </div>
+    {/if}
 
     {#if !hasGeotaggedPhotos}
         <div
