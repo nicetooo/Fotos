@@ -528,19 +528,27 @@
         filter: invert(1);
     }
 
-    /* Photo marker styles */
+    /* Photo marker styles - optimized for smooth map movement */
+    :global(.maplibregl-marker) {
+        will-change: transform;
+        contain: layout style;
+    }
     :global(.photo-marker) {
         cursor: pointer;
-        transition: transform 0.15s ease;
+        will-change: transform;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+        transform: translateZ(0);
     }
     :global(.photo-marker:hover) {
-        transform: scale(1.15);
+        transform: translateZ(0) scale(1.15);
         z-index: 1000 !important;
     }
     :global(.marker-thumb) {
         width: 48px;
         height: 48px;
         position: relative;
+        contain: strict;
     }
     :global(.marker-thumb img) {
         width: 44px;
@@ -548,8 +556,9 @@
         border-radius: 50%;
         border: 2px solid white;
         object-fit: cover;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         background: #1e293b;
+        will-change: auto;
     }
     :global(.marker-thumb .raw-badge) {
         position: absolute;
