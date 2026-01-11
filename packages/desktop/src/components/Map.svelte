@@ -220,6 +220,29 @@
         }
     });
 
+    // Pan map to fit visible photos when time filter changes
+    $effect(() => {
+        if (!map || allMarkers.size === 0) return;
+
+        const start = timeFilterStart;
+        const end = timeFilterEnd;
+        if (!start || !end) return;
+
+        // Collect visible photo positions
+        const bounds = new L.LatLngBounds([]);
+        for (const { photo, date } of allMarkers.values()) {
+            if (!date) continue;
+            if (date >= start && date <= end) {
+                bounds.extend([photo.metadata.lat, photo.metadata.lon]);
+            }
+        }
+
+        // Fit map to visible photos if any exist
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [80, 80], animate: true, duration: 0.3 });
+        }
+    });
+
     function createAllMarkers(geotagged: any[]) {
         if (!map) return;
 
