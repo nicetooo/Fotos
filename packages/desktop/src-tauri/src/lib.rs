@@ -31,12 +31,13 @@ async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo
     
     let mut photos = index.list().map_err(|e| e.to_string())?;
     
-    // Populate thumb_path using the same key logic as thumbnail generation
+    // Populate thumb_path and file_size
     let thumbnailer = fotos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
     let spec = fotos_core::ThumbnailSpec { width: 256, height: 256 };
     for photo in &mut photos {
         let source_path = std::path::Path::new(&photo.path);
-        // Use get_cached_path which uses the same thumbnail_key logic as generation
+
+        // Get thumbnail path
         match thumbnailer.get_cached_path(source_path, &spec) {
             Ok(Some(path)) => {
                 photo.thumb_path = Some(path.to_string_lossy().to_string());
@@ -47,6 +48,11 @@ async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo
             Err(_) => {
                 photo.thumb_path = None;
             }
+        }
+
+        // Get file size
+        if let Ok(metadata) = std::fs::metadata(source_path) {
+            photo.file_size = metadata.len();
         }
     }
 

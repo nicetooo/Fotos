@@ -128,6 +128,22 @@
         return lastDot > 0 ? fileName.substring(0, lastDot).toLowerCase() : fileName.toLowerCase();
     }
 
+    function formatFileSize(bytes: number): string {
+        if (bytes === 0) return "0 B";
+        const units = ["B", "KB", "MB", "GB"];
+        const k = 1024;
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        const size = bytes / Math.pow(k, i);
+        return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+    }
+
+    // Get RAW file size for a photo that has an associated RAW
+    function getRawFileSize(photo: PhotoInfo): number {
+        if (!photo.hasRaw || !photo.rawPath) return 0;
+        const rawPhoto = photos.find(p => p.path === photo.rawPath);
+        return rawPhoto?.file_size || 0;
+    }
+
     // Group RAW+JPEG pairs: show JPEG with RAW badge, hide standalone RAW
     let groupedPhotos = $derived.by(() => {
         // Build a map of base name -> photos
@@ -811,6 +827,19 @@
                 <div>
                     <p class="theme-text-muted text-xs">Dimensions</p>
                     <p class="theme-text-primary">{previewPhoto.metadata.width} × {previewPhoto.metadata.height}</p>
+                </div>
+
+                <div>
+                    <p class="theme-text-muted text-xs">File Size</p>
+                    <p class="theme-text-primary">
+                        {formatFileSize(previewPhoto.file_size)}
+                        {#if previewPhoto.hasRaw}
+                            {@const rawSize = getRawFileSize(previewPhoto)}
+                            {#if rawSize > 0}
+                                <span class="text-amber-500 ml-2">+ {formatFileSize(rawSize)} RAW</span>
+                            {/if}
+                        {/if}
+                    </p>
                 </div>
 
                 {#if previewPhoto.metadata.make || previewPhoto.metadata.model}

@@ -192,7 +192,14 @@
         // Fit bounds only on initial load or when adding new photos
         // Don't reset view when deleting photos
         if (photos.length > 0 && (isInitialLoad || isAddingPhotos)) {
-            map.fitBounds(bounds, { padding: 100, maxZoom: 15 });
+            // Delay fitBounds on initial load to ensure map is properly sized
+            if (isInitialLoad) {
+                setTimeout(() => {
+                    map?.fitBounds(bounds, { padding: 100, maxZoom: 15 });
+                }, 150);
+            } else {
+                map.fitBounds(bounds, { padding: 100, maxZoom: 15 });
+            }
         }
 
         prevPhotoCount = photos.length;
