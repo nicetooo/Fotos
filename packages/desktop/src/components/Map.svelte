@@ -387,8 +387,13 @@
         transition: transform 0.15s ease;
     }
     :global(.marker-dot img) {
-        width: 44px;
-        height: 44px;
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px;
+        min-height: 44px;
+        max-width: 44px;
+        max-height: 44px;
+        aspect-ratio: 1/1;
         border-radius: 999px;
         border: 2px solid white;
         object-fit: cover;
