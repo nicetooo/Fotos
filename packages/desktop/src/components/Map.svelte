@@ -225,23 +225,28 @@
         const iconSize = 48;
         const thumbPath = photo.thumb_path || photo.path;
         const url = getThumbnailUrl(thumbPath);
+        const fileName = photo.path.split("/").pop();
+        const dateTaken = photo.metadata.date_taken || "";
 
         const customIcon = L.divIcon({
-            className: "custom-map-marker group",
-            html: `<div class="w-12 h-12 rounded-full border-2 border-white bg-slate-800 shadow-lg overflow-hidden relative group-hover:scale-110 transition-transform">
-                    <img src="${url}" class="w-full h-full object-cover" onerror="this.style.display='none'" />
+            className: "custom-map-marker",
+            html: `<div class="marker-wrapper">
+                    <div class="marker-dot">
+                        <img src="${url}" onerror="this.style.display='none'" />
+                    </div>
+                    <div class="marker-preview">
+                        <img src="${url}" onerror="this.parentElement.style.display='none'" />
+                        <div class="marker-info">
+                            <div class="marker-name">${fileName}</div>
+                            ${dateTaken ? `<div class="marker-date">${dateTaken}</div>` : ''}
+                        </div>
+                    </div>
                    </div>`,
             iconSize: [iconSize, iconSize],
             iconAnchor: [iconSize / 2, iconSize / 2],
         });
 
         const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map);
-        marker.bindPopup(`
-            <div class="text-center">
-                <p class="font-bold text-xs">${photo.path.split("/").pop()}</p>
-                <p class="text-[10px] text-gray-500">${photo.metadata.date_taken || "No date"}</p>
-            </div>
-        `);
         return marker;
     }
 </script>
@@ -296,5 +301,74 @@
     }
     :global(.leaflet-control-container .leaflet-control-attribution a) {
         color: #818cf8 !important;
+    }
+
+    /* Map marker styles */
+    :global(.custom-map-marker) {
+        background: transparent !important;
+        border: none !important;
+    }
+    :global(.marker-wrapper) {
+        position: relative;
+        width: 48px;
+        height: 48px;
+    }
+    :global(.marker-dot) {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: 2px solid white;
+        background: #1e293b;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        transition: transform 0.15s ease;
+    }
+    :global(.marker-dot img) {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    :global(.marker-wrapper:hover .marker-dot) {
+        transform: scale(1.1);
+    }
+    :global(.marker-preview) {
+        position: absolute;
+        bottom: 56px;
+        left: 50%;
+        transform: translateX(-50%) scale(0.8);
+        opacity: 0;
+        pointer-events: none;
+        transition: all 0.15s ease;
+        z-index: 1000;
+        width: 160px;
+        background: rgba(0,0,0,0.9);
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    :global(.marker-wrapper:hover .marker-preview) {
+        opacity: 1;
+        transform: translateX(-50%) scale(1);
+    }
+    :global(.marker-preview img) {
+        width: 100%;
+        height: 120px;
+        object-fit: cover;
+    }
+    :global(.marker-info) {
+        padding: 8px;
+    }
+    :global(.marker-name) {
+        font-size: 11px;
+        font-weight: 600;
+        color: white;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    :global(.marker-date) {
+        font-size: 10px;
+        color: #94a3b8;
+        margin-top: 2px;
     }
 </style>
