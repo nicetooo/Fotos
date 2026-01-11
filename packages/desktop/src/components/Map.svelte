@@ -67,7 +67,7 @@
     function formatTimeRange(start: Date | null, end: Date | null): string {
         if (!start || !end) return '';
         const sameDay = start.toDateString() === end.toDateString();
-        const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         if (sameDay) {
             return `${formatDate(start)} ${formatTime(start)} - ${formatTime(end)}`;

@@ -148,13 +148,10 @@
     $effect(() => {
         if (!mapViewTimeRange) return;
 
-        // Add some padding to the time range (10% on each side)
-        const rangeMs = mapViewTimeRange.end.getTime() - mapViewTimeRange.start.getTime();
-        const padding = rangeMs * 0.1;
-
+        // Use exact time range from map, no padding
         displayTimeRange = {
-            min: new Date(mapViewTimeRange.start.getTime() - padding),
-            max: new Date(mapViewTimeRange.end.getTime() + padding)
+            min: mapViewTimeRange.start,
+            max: mapViewTimeRange.end
         };
 
         // Reset selection to full range when map constrains the view
