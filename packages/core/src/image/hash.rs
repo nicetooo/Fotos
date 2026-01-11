@@ -19,28 +19,10 @@ pub fn compute_hash(path: &Path) -> Result<String, CoreError> {
         }
     }
 
-    // Check if this is a RAW file - if so, we can't decode it without embedded thumbnail
-    if is_raw_file(path) {
-        // For RAW files without embedded thumbnail, use a file-based hash
-        return compute_file_hash(path);
-    }
-
-    // Fallback to full image decode (slow path) - only for standard formats
-    let img = image::open(path).map_err(|_| CoreError::ImageDecode)?;
-    let hash = hasher.hash_image(&img);
-    Ok(hash.to_base64())
-}
-
-/// Check if file is a RAW format based on extension
-fn is_raw_file(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase())
-            .as_deref(),
-        Some("cr2" | "cr3" | "nef" | "nrw" | "arw" | "srf" | "sr2" |
-             "dng" | "raf" | "orf" | "rw2" | "pef" | "raw")
-    )
+    // For files without EXIF thumbnail (RAW or regular images),
+    // use file-based hash to avoid slow full image decode.
+    // File hash is sufficient for deduplication (same file = same hash).
+    compute_file_hash(path)
 }
 
 /// Compute a simple file-based hash for files that can't be decoded

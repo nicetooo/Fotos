@@ -75,33 +75,9 @@ fn generate_image_file(source: &Path, dest: &Path, spec: &ThumbnailSpec) -> Resu
         return Ok(());
     }
 
-    // Check if this is a RAW file - if embedded thumbnail failed, we can't proceed
-    if is_raw_file(source) {
-        return Err(ThumbnailError::DecodeError(format!(
-            "RAW file has no extractable embedded thumbnail: {:?}",
-            thumb_result.err()
-        )));
-    }
-
-    // Step 2: Fall back to full decode + resize (slow path) - only for standard formats
-    let img = image::open(source).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-
-    // Apply EXIF orientation correction
-    let corrected_img = if let Some(orient) = orientation {
-        apply_orientation_to_image(img, orient)
-    } else {
-        img
-    };
-
-    // thumbnail() is faster than resize() because it downsamples during load if supported,
-    // or uses nearest neighbor optimization for large downscales.
-    let thumb = corrected_img.thumbnail(spec.width, spec.height);
-
-    // Force JPEG format when saving
-    thumb.write_to(&mut std::fs::File::create(dest).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?, image::ImageFormat::Jpeg)
-         .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
-
-    Ok(())
+    // No embedded thumbnail found - skip generation, use original image directly
+    // This avoids slow full image decode. Frontend will display original scaled down.
+    Err(ThumbnailError::DecodeError("No embedded thumbnail, use original".to_string()))
 }
 
 /// Check if file is a RAW format based on extension

@@ -125,7 +125,8 @@ async fn import_photos(
         let file_result = (|| -> Result<(), String> {
             let metadata = fotos_core::read_metadata(&path).map_err(|e| e.to_string())?;
             let hash = fotos_core::compute_hash(&path).map_err(|e| e.to_string())?;
-            fotos_core::generate_thumbnail(&path, &config).map_err(|e| e.to_string())?;
+            // Thumbnail generation may fail if no EXIF thumbnail - that's OK, frontend uses original
+            let _ = fotos_core::generate_thumbnail(&path, &config);
             index.insert(path_str.clone(), hash.clone(), metadata).map_err(|e| e.to_string())?;
             Ok(())
         })();
