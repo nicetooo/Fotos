@@ -54,7 +54,28 @@
         { label: 'All', value: 0 },
     ];
 
-    let selectedDuration = $state(durationOptions[0].value); // Default: 1 hour
+    // Load saved duration from localStorage, default to 1 hour
+    const STORAGE_KEY = 'timeline-window-duration';
+    let selectedDuration = $state((() => {
+        if (typeof localStorage !== 'undefined') {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const value = parseInt(saved, 10);
+                if (durationOptions.some(o => o.value === value)) {
+                    return value;
+                }
+            }
+        }
+        return durationOptions[0].value;
+    })());
+
+    // Save duration when changed
+    $effect(() => {
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(STORAGE_KEY, selectedDuration.toString());
+        }
+    });
+
     let windowPosition = $state(0); // 0-100 percentage within selected range
 
     // Actual viewing window (what photos to show)
@@ -107,11 +128,16 @@
         if (dragMode === 'none') return;
 
         if (dragMode === 'window' && zoomedTrack) {
-            // Drag fixed window in zoomed view
+            // Drag fixed window in zoomed view (1:1 mouse tracking)
             const rect = zoomedTrack.getBoundingClientRect();
             const deltaPercent = ((e.clientX - dragStartX) / rect.width) * 100;
-            let newPos = dragStartWindow + deltaPercent;
-            windowPosition = Math.max(0, Math.min(100, newPos));
+            // Convert to windowPosition space (compensate for window size)
+            const maxMovement = 100 - windowWidthPercent;
+            if (maxMovement > 0) {
+                const deltaWindowPos = (deltaPercent / maxMovement) * 100;
+                let newPos = dragStartWindow + deltaWindowPos;
+                windowPosition = Math.max(0, Math.min(100, newPos));
+            }
         } else if (sliderTrack) {
             // Drag handles in overview
             const rect = sliderTrack.getBoundingClientRect();
