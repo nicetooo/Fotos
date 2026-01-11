@@ -166,22 +166,34 @@
 
     // Actual viewing window (what photos to show)
     let viewWindow = $derived.by(() => {
-        if (!isZoomed || selectedDuration === 0) {
-            // Show full selected range
-            return {
-                start: new Date(selectedRange.startMs),
-                end: new Date(selectedRange.endMs)
-            };
+        // If "All" is selected, show full range (selected or total)
+        if (selectedDuration === 0) {
+            if (isZoomed) {
+                return {
+                    start: new Date(selectedRange.startMs),
+                    end: new Date(selectedRange.endMs)
+                };
+            } else {
+                return {
+                    start: timeRange.min,
+                    end: timeRange.max
+                };
+            }
         }
 
-        // Fixed window within selected range
-        const windowMs = Math.min(selectedDuration, selectedRange.durationMs);
-        const maxOffset = selectedRange.durationMs - windowMs;
+        // Fixed window within range (zoomed or full)
+        const baseStartMs = isZoomed ? selectedRange.startMs : timeRange.min.getTime();
+        const baseDurationMs = isZoomed
+            ? selectedRange.durationMs
+            : timeRange.max.getTime() - timeRange.min.getTime();
+
+        const windowMs = Math.min(selectedDuration, baseDurationMs);
+        const maxOffset = baseDurationMs - windowMs;
         const offset = (windowPosition / 100) * maxOffset;
 
         return {
-            start: new Date(selectedRange.startMs + offset),
-            end: new Date(selectedRange.startMs + offset + windowMs)
+            start: new Date(baseStartMs + offset),
+            end: new Date(baseStartMs + offset + windowMs)
         };
     });
 
@@ -368,10 +380,12 @@
 
     let maxBinCount = $derived(Math.max(1, ...densityBins));
 
-    // Density bins for zoomed view (only selected range)
+    // Density bins for zoomed/detail view (selected range or full range)
     let zoomedDensityBins = $derived.by(() => {
-        if (!isZoomed) return [];
-        const { startMs, endMs, durationMs } = selectedRange;
+        // Use selected range if zoomed, otherwise use full timeRange
+        const startMs = isZoomed ? selectedRange.startMs : timeRange.min.getTime();
+        const endMs = isZoomed ? selectedRange.endMs : timeRange.max.getTime();
+        const durationMs = endMs - startMs;
         if (durationMs === 0) return Array(NUM_BINS).fill(0);
 
         const bins = Array(NUM_BINS).fill(0);
@@ -389,10 +403,15 @@
 
     let maxZoomedBinCount = $derived(Math.max(1, ...zoomedDensityBins));
 
-    // Window width percentage in zoomed view
+    // Window width percentage in detail view
     let windowWidthPercent = $derived.by(() => {
-        if (selectedDuration === 0 || selectedRange.durationMs === 0) return 100;
-        return Math.min(100, (selectedDuration / selectedRange.durationMs) * 100);
+        if (selectedDuration === 0) return 100;
+        // Use selected range if zoomed, otherwise full timeRange
+        const durationMs = isZoomed
+            ? selectedRange.durationMs
+            : timeRange.max.getTime() - timeRange.min.getTime();
+        if (durationMs === 0) return 100;
+        return Math.min(100, (selectedDuration / durationMs) * 100);
     });
 
     // Window left position in zoomed view
@@ -422,63 +441,66 @@
         </div>
     </div>
 
-    {#if isZoomed}
-        <!-- === Zoomed View (full width) === -->
-        <div class="mb-3">
-            <!-- Duration selector -->
-            <div class="flex items-center gap-2 mb-2">
-                <span class="text-[10px] theme-text-muted">Window:</span>
-                <div class="flex gap-1">
-                    {#each durationOptions as option}
-                        <button
-                            onclick={() => { selectedDuration = option.value; if (option.value === 0) windowPosition = 0; }}
-                            class="px-2 py-0.5 text-[10px] rounded transition-colors
-                                {selectedDuration === option.value
-                                    ? 'bg-[var(--accent)] text-black'
-                                    : 'theme-bg-secondary theme-text-muted hover:theme-bg-tertiary'}"
-                        >
-                            {option.label}
-                        </button>
-                    {/each}
-                </div>
-            </div>
-
-            <!-- Zoomed slider track -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
-                <!-- Density visualization -->
-                <div class="absolute inset-0 flex items-end">
-                    {#each zoomedDensityBins as count}
-                        <div
-                            class="flex-1"
-                            style="height: {Math.max(2, (count / maxZoomedBinCount) * 100)}%; background-color: color-mix(in srgb, var(--accent) 40%, transparent);"
-                        ></div>
-                    {/each}
-                </div>
-
-                <!-- Fixed window (draggable) -->
-                {#if selectedDuration !== 0}
-                    <div
-                        class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded cursor-grab active:cursor-grabbing"
-                        style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
-                        onmousedown={(e) => handleMouseDown(e, 'window')}
+    <!-- === Detail View (always visible) === -->
+    <div class="mb-3">
+        <!-- Duration selector - always show all options -->
+        <div class="flex items-center gap-2 mb-2">
+            <span class="text-[10px] theme-text-muted">Window:</span>
+            <div class="flex gap-1">
+                {#each durationOptions as option}
+                    <button
+                        onclick={() => { selectedDuration = option.value; if (option.value === 0) windowPosition = 0; }}
+                        class="px-2 py-0.5 text-[10px] rounded transition-colors
+                            {selectedDuration === option.value
+                                ? 'bg-[var(--accent)] text-black'
+                                : 'theme-bg-secondary theme-text-muted hover:theme-bg-tertiary'}"
                     >
-                        <div class="absolute inset-0 flex items-center justify-center">
-                            <div class="w-8 h-4 bg-[var(--accent)] rounded-full flex items-center justify-center">
-                                <div class="w-4 h-0.5 bg-black/30 rounded"></div>
-                            </div>
-                        </div>
-                    </div>
-                {/if}
-            </div>
-
-            <!-- Zoomed range labels -->
-            <div class="flex justify-between text-[10px] theme-text-muted mt-1">
-                <span>{formatDate(new Date(selectedRange.startMs))}</span>
-                <span>{formatDate(new Date(selectedRange.endMs))}</span>
+                        {option.label}
+                    </button>
+                {/each}
             </div>
         </div>
-    {/if}
+
+        <!-- Detail slider track -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
+            <!-- Density visualization -->
+            <div class="absolute inset-0 flex items-end">
+                {#each zoomedDensityBins as count}
+                    <div
+                        class="flex-1"
+                        style="height: {Math.max(2, (count / maxZoomedBinCount) * 100)}%; background-color: color-mix(in srgb, var(--accent) 40%, transparent);"
+                    ></div>
+                {/each}
+            </div>
+
+            <!-- Fixed window (draggable) - show when duration selected (not All) -->
+            {#if selectedDuration !== 0}
+                <div
+                    class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded cursor-grab active:cursor-grabbing"
+                    style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
+                    onmousedown={(e) => handleMouseDown(e, 'window')}
+                >
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div class="w-8 h-4 bg-[var(--accent)] rounded-full flex items-center justify-center">
+                            <div class="w-4 h-0.5 bg-black/30 rounded"></div>
+                        </div>
+                    </div>
+                </div>
+            {/if}
+        </div>
+
+        <!-- Detail range labels -->
+        <div class="flex justify-between text-[10px] theme-text-muted mt-1">
+            {#if isZoomed}
+                <span>{formatDate(new Date(selectedRange.startMs))}</span>
+                <span>{formatDate(new Date(selectedRange.endMs))}</span>
+            {:else}
+                <span>{formatDate(timeRange.min)}</span>
+                <span>{formatDate(timeRange.max)}</span>
+            {/if}
+        </div>
+    </div>
 
     <!-- === Overview (full timeline with handles) === -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
