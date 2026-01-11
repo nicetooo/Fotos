@@ -340,7 +340,8 @@
         pointer-events: none;
         transition: all 0.15s ease;
         z-index: 1000;
-        width: 240px;
+        max-width: 300px;
+        min-width: 160px;
         background: rgba(0,0,0,0.9);
         border-radius: 8px;
         overflow: hidden;
@@ -351,9 +352,11 @@
         transform: translateX(-50%) scale(1);
     }
     :global(.marker-preview img) {
-        width: 100%;
-        height: 180px;
-        object-fit: cover;
+        display: block;
+        max-width: 300px;
+        max-height: 240px;
+        width: auto;
+        height: auto;
     }
     :global(.marker-info) {
         padding: 8px;
