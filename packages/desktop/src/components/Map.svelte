@@ -352,7 +352,7 @@
     }
     :global(.marker-preview img) {
         display: block;
-        max-width: 450px;
+        min-height: 280px;
         max-height: 360px;
         width: auto;
         height: auto;
