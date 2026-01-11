@@ -352,14 +352,14 @@
     }
     :global(.marker-preview img) {
         display: block;
-        max-width: 300px;
-        max-height: 240px;
+        max-width: 450px;
+        max-height: 360px;
         width: auto;
         height: auto;
     }
     :global(.marker-info) {
         padding: 8px;
-        max-width: 300px;
+        max-width: 450px;
     }
     :global(.marker-name) {
         font-size: 11px;
