@@ -282,17 +282,21 @@
         const fileName = photo.path.split("/").pop();
         const dateTaken = photo.metadata.date_taken || "";
 
+        const rawBadge = photo.hasRaw ? '<div class="marker-raw-badge">R</div>' : '';
+
         const customIcon = L.divIcon({
             className: "custom-map-marker",
             html: `<div class="marker-wrapper">
                     <div class="marker-dot">
                         <img src="${url}" onerror="this.style.display='none'" />
+                        ${rawBadge}
                     </div>
                     <div class="marker-preview">
                         <img src="${url}" onerror="this.parentElement.style.display='none'" />
                         <div class="marker-info">
                             <div class="marker-name">${fileName}</div>
                             ${dateTaken ? `<div class="marker-date">${dateTaken}</div>` : ''}
+                            ${photo.hasRaw ? '<div class="marker-raw-info">RAW available</div>' : ''}
                         </div>
                     </div>
                    </div>`,
@@ -432,6 +436,27 @@
     :global(.marker-date) {
         font-size: 10px;
         color: #94a3b8;
+        margin-top: 2px;
+    }
+    :global(.marker-raw-badge) {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 14px;
+        height: 14px;
+        background: #d97706;
+        color: white;
+        font-size: 8px;
+        font-weight: bold;
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    :global(.marker-raw-info) {
+        font-size: 9px;
+        color: #d97706;
         margin-top: 2px;
     }
 </style>

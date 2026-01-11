@@ -433,7 +433,7 @@
         {:else if currentView === "settings"}
             <Settings {dbPath} {thumbDir} {version} />
         {:else if currentView === "map"}
-            <MapView {photos} onOpenPreview={openPreview} />
+            <MapView photos={groupedPhotos} onOpenPreview={openPreview} />
         {/if}
     </section>
 </main>
