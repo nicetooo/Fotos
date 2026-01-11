@@ -340,8 +340,7 @@
         pointer-events: none;
         transition: all 0.15s ease;
         z-index: 1000;
-        max-width: 300px;
-        min-width: 160px;
+        width: fit-content;
         background: rgba(0,0,0,0.9);
         border-radius: 8px;
         overflow: hidden;
@@ -360,14 +359,15 @@
     }
     :global(.marker-info) {
         padding: 8px;
+        max-width: 300px;
     }
     :global(.marker-name) {
         font-size: 11px;
         font-weight: 600;
         color: white;
-        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
     }
     :global(.marker-date) {
         font-size: 10px;
