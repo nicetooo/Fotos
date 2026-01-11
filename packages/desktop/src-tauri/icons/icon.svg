@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="photo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#e0e7ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="64" y="64" width="896" height="896" rx="180" fill="url(#bg)"/>
+
+  <!-- Photo frame -->
+  <rect x="200" y="240" width="624" height="480" rx="32" fill="url(#photo)"/>
+
+  <!-- Photo inner (landscape image) -->
+  <rect x="232" y="272" width="560" height="416" rx="16" fill="#c7d2fe"/>
+
+  <!-- Mountain in photo -->
+  <path d="M232 580 L400 420 L520 520 L620 380 L792 580 L792 672 Q792 688 776 688 L248 688 Q232 688 232 672 Z" fill="#6366f1"/>
+
+  <!-- Sun in photo -->
+  <circle cx="680" cy="360" r="48" fill="#fbbf24"/>
+
+  <!-- Location pin -->
+  <g transform="translate(680, 560)">
+    <path d="M0 -120 C-66 -120 -120 -66 -120 0 C-120 66 0 160 0 160 C0 160 120 66 120 0 C120 -66 66 -120 0 -120 Z" fill="#ef4444"/>
+    <circle cx="0" cy="-10" r="40" fill="#ffffff"/>
+  </g>
+</svg>

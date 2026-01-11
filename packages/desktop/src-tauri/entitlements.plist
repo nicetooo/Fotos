@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required for Mac App Store -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Network access for map tiles -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- User-selected file access (for importing photos) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Access to user's Pictures folder -->
+    <key>com.apple.security.files.pictures.read-write</key>
+    <true/>
+
+    <!-- Access to removable volumes (external drives, SD cards) -->
+    <key>com.apple.security.files.volumes.removable.read-only</key>
+    <true/>
+</dict>
+</plist>

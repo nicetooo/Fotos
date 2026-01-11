@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "Fotos",
   "version": "0.1.0",
-  "identifier": "com.fotos.app",
+  "identifier": "app.fotos.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -13,14 +13,14 @@
     "windows": [
       {
         "title": "Fotos",
-        "width": 1920,
-        "height": 1080,
-        "minWidth": 1920,
-        "minHeight": 1080
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https://*.basemaps.cartocdn.com data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.basemaps.cartocdn.com",
       "assetProtocol": {
         "enable": true,
         "scope": {
@@ -39,6 +39,23 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Photography",
+    "shortDescription": "Photo management with map and timeline",
+    "longDescription": "Fotos is a privacy-focused photo management app that helps you organize and browse your photos by location and time. Features include map view with geotagged photos, timeline filtering, RAW file support, and JPEG+RAW pairing.",
+    "copyright": "© 2025 Fotos",
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "desktop": {
+        "categories": ["Photography", "Graphics"]
+      }
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "timestampUrl": null
+    }
   }
 }
