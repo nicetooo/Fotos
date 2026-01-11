@@ -8,7 +8,7 @@
     import Settings from "./components/Settings.svelte";
     import VirtualPhotoGrid from "./components/VirtualPhotoGrid.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
-    import Map from "./components/Map.svelte";
+    import MapView from "./components/Map.svelte";
     import type { PhotoInfo } from "./types";
 
     let version = $state("...");
@@ -433,7 +433,7 @@
         {:else if currentView === "settings"}
             <Settings {dbPath} {thumbDir} {version} />
         {:else if currentView === "map"}
-            <Map {photos} onOpenPreview={openPreview} />
+            <MapView {photos} onOpenPreview={openPreview} />
         {/if}
     </section>
 </main>
