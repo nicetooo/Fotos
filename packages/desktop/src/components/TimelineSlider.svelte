@@ -10,7 +10,6 @@
     // Parse dates from photos
     function parsePhotoDate(dateStr: string | null): Date | null {
         if (!dateStr) return null;
-        // Format: "2024-01-15 10:30:00" or similar
         const cleaned = dateStr.replace(/"/g, '').trim();
         const date = new Date(cleaned.replace(' ', 'T'));
         return isNaN(date.getTime()) ? null : date;
@@ -30,39 +29,22 @@
         return { min: dates[0], max: dates[dates.length - 1] };
     });
 
-    // Duration options
-    const durationOptions = [
-        { label: '1h', value: 60 * 60 * 1000 },
-        { label: '6h', value: 6 * 60 * 60 * 1000 },
-        { label: '1d', value: 24 * 60 * 60 * 1000 },
-        { label: '7d', value: 7 * 24 * 60 * 60 * 1000 },
-        { label: '30d', value: 30 * 24 * 60 * 60 * 1000 },
-        { label: 'All', value: 0 },
-    ];
+    // Selection state (0-100 percentage)
+    let leftPercent = $state(0);
+    let rightPercent = $state(100);
 
-    let selectedDuration = $state(durationOptions[2].value); // Default: 1 day
-    let sliderPosition = $state(0); // 0-100 percentage
-
-    // Calculate window based on slider position
-    let windowRange = $derived.by(() => {
+    // Convert percentage to date
+    function percentToDate(percent: number): Date {
         const range = timeRange;
         const totalMs = range.max.getTime() - range.min.getTime();
+        return new Date(range.min.getTime() + (percent / 100) * totalMs);
+    }
 
-        // "All" mode - return full range
-        if (selectedDuration === 0) {
-            return { start: range.min, end: range.max };
-        }
-
-        // Calculate window position
-        const windowMs = Math.min(selectedDuration, totalMs);
-        const maxOffset = totalMs - windowMs;
-        const offset = (sliderPosition / 100) * maxOffset;
-
-        const start = new Date(range.min.getTime() + offset);
-        const end = new Date(start.getTime() + windowMs);
-
-        return { start, end };
-    });
+    // Current window range
+    let windowRange = $derived.by(() => ({
+        start: percentToDate(leftPercent),
+        end: percentToDate(rightPercent)
+    }));
 
     // Format date for display
     function formatDate(date: Date): string {
@@ -81,7 +63,13 @@
     }
 
     function formatDateTime(date: Date): string {
-        if (selectedDuration <= 6 * 60 * 60 * 1000) {
+        const range = timeRange;
+        const totalMs = range.max.getTime() - range.min.getTime();
+        const dayMs = 24 * 60 * 60 * 1000;
+
+        if (totalMs <= dayMs) {
+            return formatTime(date);
+        } else if (totalMs <= 7 * dayMs) {
             return `${formatDate(date)} ${formatTime(date)}`;
         }
         return formatDate(date);
@@ -94,59 +82,61 @@
     });
 
     // Dragging state
-    let isDragging = $state(false);
+    type DragMode = 'none' | 'left' | 'right' | 'middle';
+    let dragMode = $state<DragMode>('none');
     let sliderTrack: HTMLDivElement;
     let dragStartX = 0;
-    let dragStartPosition = 0;
+    let dragStartLeft = 0;
+    let dragStartRight = 0;
 
-    function handleHandleMouseDown(e: MouseEvent) {
-        if (selectedDuration === 0) return;
+    function handleMouseDown(e: MouseEvent, mode: DragMode) {
         e.preventDefault();
         e.stopPropagation();
-        isDragging = true;
+        dragMode = mode;
         dragStartX = e.clientX;
-        dragStartPosition = sliderPosition;
-    }
-
-    function handleTrackClick(e: MouseEvent) {
-        if (selectedDuration === 0) return;
-        if (!sliderTrack) return;
-
-        const rect = sliderTrack.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickPercent = (clickX / rect.width) * 100;
-
-        // Move window center to click position
-        const widthPct = windowWidthPercent;
-        const halfWidth = widthPct / 2;
-        const maxLeftPercent = 100 - widthPct;
-
-        // Calculate where the window left edge should be
-        const targetLeft = Math.max(0, Math.min(clickPercent - halfWidth, maxLeftPercent));
-
-        // Convert to sliderPosition
-        sliderPosition = maxLeftPercent > 0 ? (targetLeft / maxLeftPercent) * 100 : 0;
+        dragStartLeft = leftPercent;
+        dragStartRight = rightPercent;
     }
 
     function handleMouseMove(e: MouseEvent) {
-        if (!isDragging || !sliderTrack) return;
+        if (dragMode === 'none' || !sliderTrack) return;
 
         const rect = sliderTrack.getBoundingClientRect();
-        const deltaX = e.clientX - dragStartX;
-        const deltaPercent = (deltaX / rect.width) * 100;
+        const deltaPercent = ((e.clientX - dragStartX) / rect.width) * 100;
 
-        // Convert delta to slider position change
-        const widthPct = windowWidthPercent;
-        const maxLeftPercent = 100 - widthPct;
+        if (dragMode === 'left') {
+            // Drag left handle
+            let newLeft = dragStartLeft + deltaPercent;
+            newLeft = Math.max(0, Math.min(newLeft, rightPercent - 1)); // Min 1% width
+            leftPercent = newLeft;
+        } else if (dragMode === 'right') {
+            // Drag right handle
+            let newRight = dragStartRight + deltaPercent;
+            newRight = Math.max(leftPercent + 1, Math.min(newRight, 100)); // Min 1% width
+            rightPercent = newRight;
+        } else if (dragMode === 'middle') {
+            // Drag middle to pan
+            const width = dragStartRight - dragStartLeft;
+            let newLeft = dragStartLeft + deltaPercent;
+            let newRight = dragStartRight + deltaPercent;
 
-        if (maxLeftPercent > 0) {
-            const positionDelta = (deltaPercent / maxLeftPercent) * 100;
-            sliderPosition = Math.max(0, Math.min(100, dragStartPosition + positionDelta));
+            // Clamp to bounds
+            if (newLeft < 0) {
+                newLeft = 0;
+                newRight = width;
+            }
+            if (newRight > 100) {
+                newRight = 100;
+                newLeft = 100 - width;
+            }
+
+            leftPercent = newLeft;
+            rightPercent = newRight;
         }
     }
 
     function handleMouseUp() {
-        isDragging = false;
+        dragMode = 'none';
     }
 
     // Count photos in current window
@@ -159,17 +149,8 @@
         }).length;
     });
 
-    // Calculate window width percentage
-    let windowWidthPercent = $derived.by(() => {
-        if (selectedDuration === 0) return 100;
-        const range = timeRange;
-        const totalMs = range.max.getTime() - range.min.getTime();
-        if (totalMs === 0) return 100;
-        return Math.min(100, (selectedDuration / totalMs) * 100);
-    });
-
-    // Pre-compute density bins (O(n) instead of O(n²))
-    const NUM_BINS = 50;
+    // Pre-compute density bins
+    const NUM_BINS = 60;
     let densityBins = $derived.by(() => {
         const range = timeRange;
         const totalMs = range.max.getTime() - range.min.getTime();
@@ -192,101 +173,122 @@
 
     let maxBinCount = $derived(Math.max(1, ...densityBins));
 
-    // Calculate actual left position of window on the timeline
-    let windowLeftPercent = $derived.by(() => {
-        const widthPct = windowWidthPercent;
-        // sliderPosition 0-100 maps to window position 0 to (100-width)
-        return (sliderPosition / 100) * (100 - widthPct);
-    });
+    // Reset to full range
+    function resetSelection() {
+        leftPercent = 0;
+        rightPercent = 100;
+    }
 </script>
 
 <svelte:window on:mousemove={handleMouseMove} on:mouseup={handleMouseUp} />
 
-<div class="timeline-container bg-slate-900/95 backdrop-blur-sm border-t border-slate-700 px-4 py-3">
-    <!-- Duration selector -->
+<div class="timeline-container bg-black/90 backdrop-blur-sm px-4 py-3">
+    <!-- Header -->
     <div class="flex items-center justify-between mb-2">
-        <div class="flex items-center gap-2">
-            <span class="text-xs text-slate-400">Window:</span>
-            <div class="flex gap-1">
-                {#each durationOptions as option}
-                    <button
-                        onclick={() => { selectedDuration = option.value; if (option.value === 0) sliderPosition = 0; }}
-                        class="px-2 py-0.5 text-xs rounded transition-colors
-                            {selectedDuration === option.value
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}"
-                    >
-                        {option.label}
-                    </button>
+        <div class="text-xs text-white/60">
+            {formatDateTime(windowRange.start)} - {formatDateTime(windowRange.end)}
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-xs text-white/60">
+                {photosInWindow} / {photos.length}
+            </span>
+            {#if leftPercent > 0 || rightPercent < 100}
+                <button
+                    onclick={resetSelection}
+                    class="text-xs text-yellow-400 hover:text-yellow-300"
+                >
+                    Reset
+                </button>
+            {/if}
+        </div>
+    </div>
+
+    <!-- Slider track wrapper (allows handles to overflow) -->
+    <div class="relative h-12 mx-2">
+        <!-- Track background with overflow hidden -->
+        <div
+            bind:this={sliderTrack}
+            class="absolute inset-0 bg-neutral-900 rounded-lg overflow-hidden"
+        >
+            <!-- Density visualization (background) -->
+            <div class="absolute inset-0 flex items-end">
+                {#each densityBins as count, i}
+                    <div
+                        class="flex-1 bg-white/20"
+                        style="height: {Math.max(2, (count / maxBinCount) * 100)}%"
+                    ></div>
                 {/each}
             </div>
-        </div>
-        <div class="text-xs text-slate-400">
-            <i class="fa-solid fa-images mr-1"></i>
-            {photosInWindow} photos
-        </div>
-    </div>
 
-    <!-- Time display -->
-    <div class="flex justify-between text-xs text-slate-300 mb-1">
-        <span>{formatDateTime(windowRange.start)}</span>
-        <span class="text-slate-500">to</span>
-        <span>{formatDateTime(windowRange.end)}</span>
-    </div>
-
-    <!-- Slider track -->
-    <div
-        bind:this={sliderTrack}
-        role="slider"
-        aria-label="Time range selector"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={sliderPosition}
-        tabindex="0"
-        class="relative h-8 bg-slate-800 rounded-lg overflow-hidden cursor-pointer"
-        onclick={handleTrackClick}
-    >
-        <!-- Background ticks for time scale -->
-        <div class="absolute inset-0 flex items-end pointer-events-none">
-            {#each Array(20) as _, i}
-                <div
-                    class="flex-1 border-l border-slate-700/50 h-2"
-                    style="margin-left: {i === 0 ? 0 : 0}px"
-                ></div>
-            {/each}
-        </div>
-
-        <!-- Photo density visualization (pre-computed) -->
-        <div class="absolute inset-0 flex items-end px-0.5 gap-px pointer-events-none">
-            {#each densityBins as count, i}
-                <div
-                    class="flex-1 bg-blue-500/30 rounded-t"
-                    style="height: {Math.max(2, (count / maxBinCount) * 100)}%"
-                ></div>
-            {/each}
-        </div>
-
-        <!-- Selection window -->
-        {#if selectedDuration !== 0}
+            <!-- Dimmed left area -->
             <div
-                class="absolute top-0 bottom-0 bg-blue-500/30 border-x-2 border-blue-400 rounded pointer-events-none"
-                style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
-            >
-                <!-- Draggable Handle -->
-                <div
-                    class="absolute inset-y-0 left-0 right-0 flex items-center justify-center pointer-events-auto cursor-grab active:cursor-grabbing"
-                    onmousedown={handleHandleMouseDown}
-                >
-                    <div class="w-10 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-400 transition-colors">
-                        <i class="fa-solid fa-grip-lines-vertical text-[10px] text-white"></i>
-                    </div>
-                </div>
+                class="absolute top-0 bottom-0 left-0 bg-black/70"
+                style="width: {leftPercent}%"
+            ></div>
+
+            <!-- Dimmed right area -->
+            <div
+                class="absolute top-0 bottom-0 right-0 bg-black/70"
+                style="width: {100 - rightPercent}%"
+            ></div>
+
+            <!-- Selected region border -->
+            <div
+                class="absolute top-0 bottom-0 border-y-2 border-yellow-400 pointer-events-none"
+                style="left: {leftPercent}%; right: {100 - rightPercent}%"
+            ></div>
+        </div>
+
+        <!-- Draggable middle region (outside overflow) -->
+        <div
+            class="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing z-10"
+            style="left: {leftPercent}%; right: {100 - rightPercent}%"
+            onmousedown={(e) => handleMouseDown(e, 'middle')}
+            role="slider"
+            aria-label="Selected time range"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={(leftPercent + rightPercent) / 2}
+            tabindex="0"
+        ></div>
+
+        <!-- Left handle (outside overflow) -->
+        <div
+            class="absolute top-0 bottom-0 w-6 cursor-ew-resize flex items-center justify-center z-20"
+            style="left: {leftPercent}%; transform: translateX(-50%)"
+            onmousedown={(e) => handleMouseDown(e, 'left')}
+            role="slider"
+            aria-label="Start time"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={leftPercent}
+            tabindex="0"
+        >
+            <div class="w-2 h-full bg-yellow-400 rounded-sm shadow-lg shadow-black/50 flex items-center justify-center">
+                <div class="w-0.5 h-5 bg-yellow-900/40 rounded-full"></div>
             </div>
-        {/if}
+        </div>
+
+        <!-- Right handle (outside overflow) -->
+        <div
+            class="absolute top-0 bottom-0 w-6 cursor-ew-resize flex items-center justify-center z-20"
+            style="left: {rightPercent}%; transform: translateX(-50%)"
+            onmousedown={(e) => handleMouseDown(e, 'right')}
+            role="slider"
+            aria-label="End time"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={rightPercent}
+            tabindex="0"
+        >
+            <div class="w-2 h-full bg-yellow-400 rounded-sm shadow-lg shadow-black/50 flex items-center justify-center">
+                <div class="w-0.5 h-5 bg-yellow-900/40 rounded-full"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Full range labels -->
-    <div class="flex justify-between text-[10px] text-slate-500 mt-1">
+    <div class="flex justify-between text-[10px] text-white/40 mt-1">
         <span>{formatDate(timeRange.min)}</span>
         <span>{formatDate(timeRange.max)}</span>
     </div>
