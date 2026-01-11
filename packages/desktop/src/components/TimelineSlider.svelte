@@ -2,13 +2,19 @@
     let {
         photos,
         externalTimeRange,
+        mapViewTimeRange,
         onTimeRangeChange,
-        onExternalRangeConsumed
+        onExternalRangeConsumed,
+        onMapRangeConsumed,
+        onShowAll
     } = $props<{
         photos: any[];
         externalTimeRange?: { start: Date; end: Date } | null;
+        mapViewTimeRange?: { start: Date; end: Date } | null;
         onTimeRangeChange: (start: Date, end: Date) => void;
         onExternalRangeConsumed?: () => void;
+        onMapRangeConsumed?: () => void;
+        onShowAll?: () => void;
     }>();
 
     // Parse dates from photos
@@ -20,7 +26,7 @@
     }
 
     // Get time range from all photos
-    let timeRange = $derived.by(() => {
+    let fullTimeRange = $derived.by(() => {
         const dates = photos
             .map(p => parsePhotoDate(p.metadata?.date_taken))
             .filter((d): d is Date => d !== null)
@@ -32,6 +38,15 @@
         }
         return { min: dates[0], max: dates[dates.length - 1] };
     });
+
+    // Display time range (can be constrained by map view)
+    let displayTimeRange = $state<{ min: Date; max: Date } | null>(null);
+
+    // Actual time range used for display (map range or full range)
+    let timeRange = $derived(displayTimeRange ?? fullTimeRange);
+
+    // Is showing constrained range from map?
+    let isMapConstrained = $derived(displayTimeRange !== null);
 
     // === Layer 1: Range selection (iPhone-style handles) ===
     let leftPercent = $state(0);
@@ -128,6 +143,25 @@
         onExternalRangeConsumed?.();
     });
 
+    // Handle map view time range (continuous sync from map pan/zoom)
+    // This changes the TOTAL displayed timeline range, not the selection
+    $effect(() => {
+        if (!mapViewTimeRange) return;
+
+        // Add some padding to the time range (10% on each side)
+        const rangeMs = mapViewTimeRange.end.getTime() - mapViewTimeRange.start.getTime();
+        const padding = rangeMs * 0.1;
+
+        displayTimeRange = {
+            min: new Date(mapViewTimeRange.start.getTime() - padding),
+            max: new Date(mapViewTimeRange.end.getTime() + padding)
+        };
+
+        // Reset selection to full range when map constrains the view
+        leftPercent = 0;
+        rightPercent = 100;
+    });
+
     // Actual viewing window (what photos to show)
     let viewWindow = $derived.by(() => {
         if (!isZoomed || selectedDuration === 0) {
@@ -172,6 +206,9 @@
         dragStartLeft = leftPercent;
         dragStartRight = rightPercent;
         dragStartWindow = windowPosition;
+
+        // User is interacting with timeline - stop map sync
+        onMapRangeConsumed?.();
     }
 
     function handleMouseMove(e: MouseEvent) {
@@ -223,6 +260,9 @@
     function handleOverviewWheel(e: WheelEvent) {
         e.preventDefault();
 
+        // User is interacting with timeline - stop map sync
+        onMapRangeConsumed?.();
+
         // Get mouse position relative to track
         const rect = sliderTrack.getBoundingClientRect();
         const mousePercent = ((e.clientX - rect.left) / rect.width) * 100;
@@ -270,6 +310,9 @@
     function handleZoomedWheel(e: WheelEvent) {
         e.preventDefault();
 
+        // User is interacting with timeline - stop map sync
+        onMapRangeConsumed?.();
+
         if (selectedDuration === 0) return; // "All" mode, no window to move
 
         // Scroll to move window position (reduced sensitivity)
@@ -290,6 +333,9 @@
         leftPercent = 0;
         rightPercent = 100;
         windowPosition = 0;
+        displayTimeRange = null; // Reset to full photo range
+        onMapRangeConsumed?.(); // Stop map sync
+        onShowAll?.(); // Tell map to show all photos
     }
 
     // Count photos in view window
@@ -366,9 +412,9 @@
             <span class="text-xs theme-text-secondary">
                 {photosInWindow} / {photos.length}
             </span>
-            {#if isZoomed}
+            {#if isZoomed || isMapConstrained}
                 <button onclick={resetSelection} class="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)]">
-                    Reset
+                    {isMapConstrained ? 'Show All' : 'Reset'}
                 </button>
             {/if}
         </div>
@@ -490,6 +536,9 @@
     <!-- Full range labels -->
     <div class="flex justify-between text-[10px] theme-text-muted mt-1 mx-2">
         <span>{formatDate(timeRange.min)}</span>
+        {#if isMapConstrained}
+            <span class="text-[var(--accent)]">Map View</span>
+        {/if}
         <span>{formatDate(timeRange.max)}</span>
     </div>
 </div>

@@ -25,6 +25,9 @@
     let boxStart: { x: number; y: number } | null = null;
     let selectionBox: HTMLDivElement | null = null;
 
+    // Sync mode: prevent circular updates
+    let syncSource = $state<'map' | 'timeline' | null>(null);
+
     // Hover popup
     let hoverPopup: maplibregl.Popup | null = null;
 
@@ -50,8 +53,13 @@
     let hasGeotaggedPhotos = $derived(geotaggedPhotos.length > 0);
 
     function handleTimeRangeChange(start: Date, end: Date) {
+        syncSource = 'timeline';
         timeFilterStart = start;
         timeFilterEnd = end;
+        // Reset sync source after a short delay
+        setTimeout(() => {
+            syncSource = null;
+        }, 100);
     }
 
     // Format time range for display
@@ -198,6 +206,59 @@
         }
     }
 
+    // Get time range of photos visible in current map bounds
+    function getVisiblePhotosTimeRange(): { start: Date; end: Date } | null {
+        if (!map || photoMarkers.size === 0) return null;
+
+        const bounds = map.getBounds();
+        const visibleDates: Date[] = [];
+
+        for (const { marker, date } of photoMarkers.values()) {
+            if (!date) continue;
+            const lngLat = marker.getLngLat();
+            if (bounds.contains(lngLat)) {
+                visibleDates.push(date);
+            }
+        }
+
+        if (visibleDates.length === 0) return null;
+
+        visibleDates.sort((a, b) => a.getTime() - b.getTime());
+        return {
+            start: visibleDates[0],
+            end: visibleDates[visibleDates.length - 1]
+        };
+    }
+
+    // Handle map move - sync to timeline
+    function handleMapMove() {
+        if (syncSource === 'timeline') return; // Prevent circular sync
+
+        const timeRange = getVisiblePhotosTimeRange();
+        if (timeRange) {
+            syncSource = 'map';
+            mapVisibleTimeRange = timeRange;
+            // Reset sync source after a short delay
+            setTimeout(() => {
+                syncSource = null;
+            }, 100);
+        }
+    }
+
+    // Time range from map view (for timeline sync)
+    let mapVisibleTimeRange = $state<{ start: Date; end: Date } | null>(null);
+
+    // Fit map to show all photos
+    function handleShowAllPhotos() {
+        if (!map || photoMarkers.size === 0) return;
+
+        const bounds = new maplibregl.LngLatBounds();
+        for (const { marker } of photoMarkers.values()) {
+            bounds.extend(marker.getLngLat());
+        }
+        map.fitBounds(bounds, { padding: 100, maxZoom: 15 });
+    }
+
     onMount(() => {
         if (!mapContainer) return;
 
@@ -268,6 +329,9 @@
                 isReady = true;
             });
         });
+
+        // Map move event - sync to timeline
+        map.on('moveend', handleMapMove);
     });
 
     onDestroy(() => {
@@ -473,8 +537,11 @@
                 <TimelineSlider
                     photos={photosWithMarkers}
                     externalTimeRange={boxSelectedTimeRange}
+                    mapViewTimeRange={mapVisibleTimeRange}
                     onTimeRangeChange={handleTimeRangeChange}
-                    onExternalRangeConsumed={() => boxSelectedTimeRange = null}
+                    onExternalRangeConsumed={() => { boxSelectedTimeRange = null; }}
+                    onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
+                    onShowAll={handleShowAllPhotos}
                 />
             {/if}
         </div>
