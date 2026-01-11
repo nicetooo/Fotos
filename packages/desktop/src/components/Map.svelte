@@ -272,7 +272,7 @@
         for (const { marker } of photoMarkers.values()) {
             bounds.extend(marker.getLngLat());
         }
-        map.fitBounds(bounds, { padding: 100, maxZoom: 15 });
+        map.fitBounds(bounds, { padding: 100, maxZoom: 15, duration: 300 });
     }
 
     // Map style based on theme
