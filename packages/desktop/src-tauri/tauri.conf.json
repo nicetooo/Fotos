@@ -48,11 +48,7 @@
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "10.15"
     },
-    "linux": {
-      "desktop": {
-        "categories": ["Photography", "Graphics"]
-      }
-    },
+    "linux": {},
     "windows": {
       "certificateThumbprint": null,
       "timestampUrl": null
