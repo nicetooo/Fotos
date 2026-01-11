@@ -378,6 +378,7 @@
         height: 48px;
     }
     :global(.marker-dot) {
+        position: relative;
         width: 48px;
         height: 48px;
         border-radius: 50%;
@@ -388,9 +389,13 @@
         transition: transform 0.15s ease;
     }
     :global(.marker-dot img) {
+        position: absolute;
+        top: 0;
+        left: 0;
         width: 100%;
         height: 100%;
         object-fit: cover;
+        object-position: center;
     }
     :global(.marker-wrapper:hover .marker-dot) {
         transform: scale(1.1);
