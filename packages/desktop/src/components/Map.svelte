@@ -312,6 +312,56 @@
 
         // Add controls
         map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+        // Custom box select control
+        class BoxSelectControl {
+            _container: HTMLDivElement | undefined;
+            _button: HTMLButtonElement | undefined;
+
+            onAdd() {
+                this._container = document.createElement('div');
+                this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+
+                this._button = document.createElement('button');
+                this._button.type = 'button';
+                this._button.className = 'maplibregl-ctrl-box-select';
+                this._button.title = 'Box select photos';
+                this._button.innerHTML = '<i class="fa-solid fa-vector-square"></i>';
+                this._button.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleBoxSelectMode();
+                    this._updateStyle();
+                };
+
+                this._container.appendChild(this._button);
+                return this._container;
+            }
+
+            onRemove() {
+                this._container?.parentNode?.removeChild(this._container);
+            }
+
+            _updateStyle() {
+                if (this._button) {
+                    if (isBoxSelectMode) {
+                        this._button.classList.add('active');
+                    } else {
+                        this._button.classList.remove('active');
+                    }
+                }
+            }
+
+            update() {
+                this._updateStyle();
+            }
+        }
+
+        const boxSelectControl = new BoxSelectControl();
+        map.addControl(boxSelectControl as any, 'top-right');
+
+        // Store reference to update control state
+        (window as any).__boxSelectControl = boxSelectControl;
+
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
         // Handle resize
@@ -399,6 +449,8 @@
         if (!isBoxSelectMode) {
             cleanupBoxSelection();
         }
+        // Update control button state
+        (window as any).__boxSelectControl?.update();
     }
 
     function cleanupBoxSelection() {
@@ -489,6 +541,8 @@
         cleanupBoxSelection();
         map.dragPan.enable();
         isBoxSelectMode = false;
+        // Update control button state
+        (window as any).__boxSelectControl?.update();
     }
 </script>
 
@@ -529,20 +583,6 @@
             </div>
         {/if}
 
-        <!-- Box select button -->
-        {#if hasGeotaggedPhotos}
-            <button
-                onclick={(e) => { e.stopPropagation(); toggleBoxSelectMode(); }}
-                onmousedown={(e) => e.stopPropagation()}
-                class="absolute left-4 bottom-4 z-[1001] w-10 h-10 flex items-center justify-center rounded-xl shadow-lg transition-colors
-                    {isBoxSelectMode
-                        ? 'bg-[var(--accent)] text-black'
-                        : 'theme-bg-card backdrop-blur-sm theme-text-primary hover:bg-[var(--accent)] hover:text-black'}"
-                title="Box select photos"
-            >
-                <i class="fa-solid fa-vector-square"></i>
-            </button>
-        {/if}
     </div>
 
     <!-- Timeline slider -->
@@ -608,6 +648,25 @@
     }
     :global(.maplibregl-ctrl button .maplibregl-ctrl-icon) {
         filter: invert(1);
+    }
+
+    /* Box select control */
+    :global(.maplibregl-ctrl-box-select) {
+        width: 29px;
+        height: 29px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #e2e8f0;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    :global(.maplibregl-ctrl-box-select:hover) {
+        color: var(--accent);
+    }
+    :global(.maplibregl-ctrl-box-select.active) {
+        background-color: var(--accent) !important;
+        color: black !important;
     }
 
     /* Photo marker styles - optimized for smooth map movement */
