@@ -1,18 +1,18 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { invoke } from "@tauri-apps/api/core";
+    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
     import { open } from "@tauri-apps/plugin-dialog";
     import { revealItemInDir } from "@tauri-apps/plugin-opener";
     import { appDataDir, join } from "@tauri-apps/api/path";
     import { listen } from "@tauri-apps/api/event";
     import Settings from "./components/Settings.svelte";
-    import VirtualPhotoGrid from "./components/VirtualPhotoGrid.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
     import MapView from "./components/Map.svelte";
     import type { PhotoInfo } from "./types";
 
     let version = $state("...");
-    let currentView = $state("library");
+    let showSettings = $state(false);
+    let showLibrary = $state(false);
     let importStatus = $state({
         success: 0,
         failure: 0,
@@ -31,9 +31,6 @@
     let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
     let sortOrder = $state<"asc" | "desc">("desc");
     let importMenuOpen = $state(false);
-
-    // Grid thumbnail size (pinch to zoom)
-    let thumbSize = $state(200);
 
     // RAW file extensions
     const RAW_EXTENSIONS = new Set(["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"]);
@@ -219,14 +216,6 @@
     // Get the photo list to use for navigation
     let navigationPhotos = $derived(previewPhotoList || sortedPhotos);
 
-    function handleGridWheel(e: WheelEvent) {
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? -20 : 20;
-            thumbSize = Math.max(100, Math.min(400, thumbSize + delta));
-        }
-    }
-
     function navigatePreview(direction: "prev" | "next") {
         if (!previewPhoto) return;
         const photoList = navigationPhotos;
@@ -243,12 +232,21 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
+        // Close modals with Escape
+        if (e.key === "Escape") {
+            if (previewPhoto) {
+                closePreview();
+                return;
+            }
+            if (showSettings) {
+                showSettings = false;
+                return;
+            }
+        }
+
         // Preview navigation (zoom handled by ImagePreview component)
         if (previewPhoto) {
             switch (e.key) {
-                case "Escape":
-                    closePreview();
-                    break;
                 case "ArrowLeft":
                     navigatePreview("prev");
                     break;
@@ -273,66 +271,97 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="fixed inset-0 flex bg-neutral-900 text-neutral-200 overflow-hidden">
-    <!-- Sidebar -->
-    <aside class="w-48 shrink-0 border-r border-neutral-800 bg-neutral-900 flex flex-col py-3 h-full">
-        <div class="px-4 py-2 mb-2">
-            <h1 class="text-sm font-semibold text-neutral-300">Fotos</h1>
+<main class="fixed inset-0 flex flex-col bg-neutral-900 text-neutral-200 overflow-hidden">
+    <!-- Fullscreen Map -->
+    <div class="flex-1 relative">
+        <MapView photos={groupedPhotos} onOpenPreview={openPreview} />
+
+        <!-- Floating action buttons (top-left) -->
+        <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
+            <!-- Import button -->
+            <div class="relative">
+                <button
+                    onclick={() => importMenuOpen = !importMenuOpen}
+                    disabled={isScanning}
+                    class="w-10 h-10 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-white/80 hover:bg-black/90 hover:text-white disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                    title="Import photos"
+                >
+                    <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>
+                </button>
+                {#if importMenuOpen}
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div
+                        class="fixed inset-0 z-40"
+                        onclick={() => importMenuOpen = false}
+                    ></div>
+                    <div class="absolute left-0 top-full mt-2 py-1 bg-black/90 backdrop-blur-sm border border-white/20 rounded-lg shadow-lg z-50 min-w-[140px]">
+                        <button
+                            onclick={() => { importMenuOpen = false; handleScan("folder"); }}
+                            disabled={isScanning}
+                            class="w-full px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-folder text-xs"></i>
+                            Import Folder
+                        </button>
+                        <button
+                            onclick={() => { importMenuOpen = false; handleScan("file"); }}
+                            disabled={isScanning}
+                            class="w-full px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-file-image text-xs"></i>
+                            Import File
+                        </button>
+                    </div>
+                {/if}
+            </div>
+
+            <!-- Library button -->
+            <button
+                onclick={() => showLibrary = !showLibrary}
+                class="w-10 h-10 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-white/80 hover:bg-black/90 hover:text-white flex items-center justify-center shadow-lg transition-all {showLibrary ? 'bg-white/20 text-white' : ''}"
+                title="Library"
+            >
+                <i class="fa-solid fa-images"></i>
+            </button>
+
+            <!-- Settings button -->
+            <button
+                onclick={() => showSettings = true}
+                class="w-10 h-10 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-white/80 hover:bg-black/90 hover:text-white flex items-center justify-center shadow-lg transition-all"
+                title="Settings"
+            >
+                <i class="fa-solid fa-gear"></i>
+            </button>
         </div>
 
-        <nav class="flex-1 px-2 space-y-0.5">
-            <button
-                onclick={() => (currentView = "library")}
-                class="w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm {currentView === 'library'
-                    ? 'bg-neutral-800 text-white'
-                    : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200'}"
-            >
-                <i class="fa-solid fa-images w-4 text-center text-xs"></i>
-                <span>Library</span>
-            </button>
-            <button
-                onclick={() => (currentView = "map")}
-                class="w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm {currentView === 'map'
-                    ? 'bg-neutral-800 text-white'
-                    : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200'}"
-            >
-                <i class="fa-solid fa-map w-4 text-center text-xs"></i>
-                <span>Map</span>
-            </button>
-            <button
-                onclick={() => (currentView = "settings")}
-                class="w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm {currentView === 'settings'
-                    ? 'bg-neutral-800 text-white'
-                    : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200'}"
-            >
-                <i class="fa-solid fa-gear w-4 text-center text-xs"></i>
-                <span>Settings</span>
-            </button>
-        </nav>
-
-        <div class="px-4 py-2 text-xs text-neutral-600">
-            v{version}
-        </div>
-    </aside>
-
-    <!-- Main Content -->
-    <section class="flex-1 flex flex-col min-w-0 h-full overflow-hidden {currentView === 'map' ? '' : 'p-4'}">
-        {#if currentView === "library"}
-            <!-- Toolbar -->
-            <header class="flex justify-between items-center mb-4 shrink-0">
-                <div class="flex items-center gap-4">
-                    <h2 class="text-lg font-medium text-white">
-                        {groupedPhotos.length} Photos
-                        {#if groupedPhotos.length !== photos.length}
-                            <span class="text-sm text-neutral-500 font-normal">({photos.length} files)</span>
-                        {/if}
-                    </h2>
+        <!-- Library Drawer (right side) -->
+        {#if showLibrary}
+            <div class="absolute top-0 right-0 bottom-0 w-80 bg-black/95 backdrop-blur-md border-l border-white/10 z-[1001] flex flex-col">
+                <!-- Header -->
+                <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-images text-white/60 text-sm"></i>
+                        <span class="text-white font-medium">
+                            {sortedPhotos.length} Photos
+                            {#if sortedPhotos.length !== photos.length}
+                                <span class="text-white/50 text-xs">({photos.length} files)</span>
+                            {/if}
+                        </span>
+                    </div>
+                    <button
+                        onclick={() => showLibrary = false}
+                        class="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                        title="Close"
+                    >
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
                 </div>
 
-                <div class="flex items-center gap-2">
+                <!-- Toolbar -->
+                <div class="flex items-center gap-2 px-3 py-2 border-b border-white/10">
                     <select
                         bind:value={sortBy}
-                        class="bg-neutral-800 text-neutral-300 text-sm px-2 py-1 rounded border border-neutral-700 focus:outline-none focus:border-neutral-600"
+                        class="flex-1 bg-white/10 text-white/80 text-xs px-2 py-1.5 rounded border border-white/10 focus:outline-none focus:border-white/30"
                     >
                         <option value="date">Date</option>
                         <option value="name">Name</option>
@@ -341,102 +370,125 @@
 
                     <button
                         onclick={() => (sortOrder = sortOrder === "asc" ? "desc" : "asc")}
-                        class="p-1.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-white"
+                        class="p-1.5 rounded bg-white/10 border border-white/10 text-white/60 hover:text-white hover:bg-white/20"
                         title={sortOrder === "asc" ? "Ascending" : "Descending"}
                     >
                         <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
                     </button>
 
-                    <div class="relative">
-                        <button
-                            onclick={() => importMenuOpen = !importMenuOpen}
-                            disabled={isScanning}
-                            class="flex items-center gap-2 px-3 py-1.5 rounded bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-50"
-                        >
-                            <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-xs"></i>
-                            <span>{isScanning ? "Importing..." : "Import"}</span>
-                            <i class="fa-solid fa-caret-down text-xs text-neutral-500"></i>
-                        </button>
-                        {#if importMenuOpen}
-                            <!-- svelte-ignore a11y_no_static_element_interactions -->
-                            <div
-                                class="fixed inset-0 z-40"
-                                onclick={() => importMenuOpen = false}
-                            ></div>
-                            <div class="absolute right-0 top-full mt-1 py-1 bg-neutral-800 border border-neutral-700 rounded shadow-lg z-50 min-w-[140px]">
-                                <button
-                                    onclick={() => { importMenuOpen = false; handleScan("folder"); }}
-                                    disabled={isScanning}
-                                    class="w-full px-3 py-1.5 text-left text-sm text-neutral-300 hover:bg-neutral-700 flex items-center gap-2"
-                                >
-                                    <i class="fa-solid fa-folder text-xs"></i>
-                                    Folder
-                                </button>
-                                <button
-                                    onclick={() => { importMenuOpen = false; handleScan("file"); }}
-                                    disabled={isScanning}
-                                    class="w-full px-3 py-1.5 text-left text-sm text-neutral-300 hover:bg-neutral-700 flex items-center gap-2"
-                                >
-                                    <i class="fa-solid fa-file-image text-xs"></i>
-                                    Single File
-                                </button>
-                            </div>
-                        {/if}
-                    </div>
+                    <button
+                        onclick={() => { showLibrary = false; handleScan("folder"); }}
+                        disabled={isScanning}
+                        class="p-1.5 rounded bg-white/10 border border-white/10 text-white/60 hover:text-white hover:bg-white/20 disabled:opacity-50"
+                        title="Import folder"
+                    >
+                        <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-folder-plus'} text-xs"></i>
+                    </button>
                 </div>
-            </header>
 
-            {#if error}
-                <div class="mb-3 px-3 py-2 rounded bg-red-900/30 border border-red-800/50 text-red-400 text-sm shrink-0">
-                    {error}
-                </div>
-            {/if}
-
-            <!-- Photo Grid -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="flex-1 min-h-0 flex flex-col" onwheel={handleGridWheel}>
-                {#if photos.length > 0}
-                    <VirtualPhotoGrid
-                        photos={sortedPhotos}
-                        {uniqueTs}
-                        {thumbSize}
-                        onPhotoClick={openPreview}
-                    />
-                {:else if !isScanning}
-                    <div class="h-full flex flex-col items-center justify-center text-neutral-500">
-                        <i class="fa-solid fa-images text-3xl mb-3"></i>
-                        <p class="text-sm">No photos. Click Import to add.</p>
-                    </div>
-                {:else}
-                    <div class="h-full flex flex-col items-center justify-center text-neutral-500">
-                        <i class="fa-solid fa-spinner fa-spin text-xl mb-2"></i>
-                        <p class="text-sm">
-                            {#if importStatus.total > 0}
-                                {importStatus.current} / {importStatus.total}
-                            {:else}
-                                Scanning...
-                            {/if}
-                        </p>
-                    </div>
-                {/if}
-            </div>
-
-            <!-- Import Progress -->
-            {#if isScanning && importStatus.success > 0}
-                <div class="absolute bottom-4 right-4 px-3 py-2 rounded bg-neutral-800 border border-neutral-700 text-sm">
-                    <span class="text-green-400">{importStatus.success}</span>
-                    {#if importStatus.failure > 0}
-                        / <span class="text-red-400">{importStatus.failure} failed</span>
+                <!-- Photo Grid -->
+                <div class="flex-1 overflow-y-auto p-2">
+                    {#if sortedPhotos.length > 0}
+                        <div class="grid grid-cols-3 gap-1">
+                            {#each sortedPhotos as photo (photo.path)}
+                                <button
+                                    class="aspect-square relative overflow-hidden rounded bg-neutral-800 hover:ring-2 hover:ring-white/50 transition-all group"
+                                    onclick={() => openPreview(photo)}
+                                    title={photo.path.split("/").pop()}
+                                >
+                                    <img
+                                        src={convertFileSrc(photo.thumb_path || photo.path)}
+                                        alt=""
+                                        class="w-full h-full object-cover"
+                                        loading="lazy"
+                                    />
+                                    {#if photo.hasRaw}
+                                        <div class="absolute top-1 right-1 bg-amber-600 text-white text-[8px] font-bold px-1 rounded">R</div>
+                                    {/if}
+                                    {#if photo.metadata?.lat && photo.metadata?.lon}
+                                        <div class="absolute bottom-1 left-1 text-white/70 text-[10px]">
+                                            <i class="fa-solid fa-location-dot"></i>
+                                        </div>
+                                    {/if}
+                                </button>
+                            {/each}
+                        </div>
+                    {:else if !isScanning}
+                        <div class="h-full flex flex-col items-center justify-center text-white/50 py-12">
+                            <i class="fa-solid fa-images text-2xl mb-3"></i>
+                            <p class="text-sm">No photos</p>
+                            <button
+                                onclick={() => handleScan("folder")}
+                                class="mt-3 px-3 py-1.5 rounded bg-white/10 text-white/80 text-xs hover:bg-white/20"
+                            >
+                                Import Photos
+                            </button>
+                        </div>
+                    {:else}
+                        <div class="h-full flex flex-col items-center justify-center text-white/50 py-12">
+                            <i class="fa-solid fa-spinner fa-spin text-xl mb-2"></i>
+                            <p class="text-sm">
+                                {#if importStatus.total > 0}
+                                    {importStatus.current} / {importStatus.total}
+                                {:else}
+                                    Scanning...
+                                {/if}
+                            </p>
+                        </div>
                     {/if}
                 </div>
-            {/if}
-        {:else if currentView === "settings"}
-            <Settings {dbPath} {thumbDir} {version} />
-        {:else if currentView === "map"}
-            <MapView photos={groupedPhotos} onOpenPreview={openPreview} />
+            </div>
         {/if}
-    </section>
+
+        <!-- Import progress indicator -->
+        {#if isScanning}
+            <div class="absolute top-4 left-16 z-[1001] px-3 py-2 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-sm text-white/80 flex items-center gap-2">
+                <i class="fa-solid fa-spinner fa-spin text-xs"></i>
+                {#if importStatus.total > 0}
+                    <span>{importStatus.current} / {importStatus.total}</span>
+                {:else}
+                    <span>Scanning...</span>
+                {/if}
+            </div>
+        {/if}
+
+        <!-- Error message -->
+        {#if error}
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1001] px-4 py-2 rounded-lg bg-red-900/80 backdrop-blur-sm border border-red-700/50 text-red-200 text-sm">
+                {error}
+            </div>
+        {/if}
+    </div>
+
 </main>
+
+<!-- Settings Modal -->
+{#if showSettings}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div
+        class="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-sm flex items-center justify-center"
+        onclick={() => showSettings = false}
+    >
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div
+            class="bg-neutral-900 border border-neutral-700 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden"
+            onclick={(e) => e.stopPropagation()}
+        >
+            <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-800">
+                <h2 class="text-lg font-medium text-white">Settings</h2>
+                <button
+                    onclick={() => showSettings = false}
+                    class="p-2 rounded-lg hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors"
+                >
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[calc(80vh-60px)]">
+                <Settings {dbPath} {thumbDir} {version} />
+            </div>
+        </div>
+    </div>
+{/if}
 
 {#if previewPhoto}
     {@const currentIndex = navigationPhotos.findIndex(p => p.path === previewPhoto.path)}

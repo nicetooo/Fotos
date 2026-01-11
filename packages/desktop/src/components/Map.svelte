@@ -27,22 +27,9 @@
         return isNaN(date.getTime()) ? null : date;
     }
 
-    // Cached geotagged photos (computed lazily)
-    let cachedGeotagged: any[] | null = null;
-    function getGeotaggedPhotos() {
-        if (cachedGeotagged === null) {
-            cachedGeotagged = photos.filter((p: any) => p.metadata?.lat && p.metadata?.lon);
-        }
-        return cachedGeotagged;
-    }
-
-    // Reset cache when photos change
-    $effect(() => {
-        photos;
-        cachedGeotagged = null;
-    });
-
-    let hasGeotaggedPhotos = $derived(getGeotaggedPhotos().length > 0);
+    // Geotagged photos (reactive)
+    let geotaggedPhotos = $derived(photos.filter((p: any) => p.metadata?.lat && p.metadata?.lon));
+    let hasGeotaggedPhotos = $derived(geotaggedPhotos.length > 0);
 
     function handleTimeRangeChange(start: Date, end: Date) {
         timeFilterStart = start;
@@ -184,7 +171,7 @@
     // Create/recreate all markers when map or photos change
     $effect(() => {
         const currentMap = map;  // Read map to establish dependency
-        const geo = getGeotaggedPhotos();
+        const geo = geotaggedPhotos;
 
         // Clear old markers first
         for (const { marker } of allMarkers.values()) {
@@ -328,7 +315,7 @@
         </div>
     {/if}
 
-    {#if !hasGeotaggedPhotos}
+    {#if photos.length > 0 && !hasGeotaggedPhotos}
         <div
             class="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-[1000] pointer-events-none"
         >
