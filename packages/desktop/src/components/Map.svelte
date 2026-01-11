@@ -383,17 +383,16 @@
         height: 48px;
         border-radius: 50%;
         border: 2px solid white;
+        box-sizing: border-box;
         background: #1e293b;
         overflow: hidden;
         box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         transition: transform 0.15s ease;
     }
     :global(.marker-dot img) {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
+        display: block;
+        width: 44px;
+        height: 44px;
         object-fit: cover;
         object-position: center;
     }
