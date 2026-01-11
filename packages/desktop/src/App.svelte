@@ -35,8 +35,74 @@
     // Grid thumbnail size (pinch to zoom)
     let thumbSize = $state(200);
 
+    // RAW file extensions
+    const RAW_EXTENSIONS = new Set(["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"]);
+    const JPEG_EXTENSIONS = new Set(["jpg", "jpeg"]);
+
+    function isRawFile(path: string): boolean {
+        const ext = path.split(".").pop()?.toLowerCase() || "";
+        return RAW_EXTENSIONS.has(ext);
+    }
+
+    function isJpegFile(path: string): boolean {
+        const ext = path.split(".").pop()?.toLowerCase() || "";
+        return JPEG_EXTENSIONS.has(ext);
+    }
+
+    function getBaseName(path: string): string {
+        const fileName = path.split("/").pop() || "";
+        const lastDot = fileName.lastIndexOf(".");
+        return lastDot > 0 ? fileName.substring(0, lastDot).toLowerCase() : fileName.toLowerCase();
+    }
+
+    // Group RAW+JPEG pairs: show JPEG with RAW badge, hide standalone RAW
+    let groupedPhotos = $derived.by(() => {
+        // Build a map of base name -> photos
+        const byBaseName = new Map<string, { jpegs: PhotoInfo[]; raws: PhotoInfo[] }>();
+
+        for (const photo of photos) {
+            const baseName = getBaseName(photo.path);
+            if (!byBaseName.has(baseName)) {
+                byBaseName.set(baseName, { jpegs: [], raws: [] });
+            }
+            const group = byBaseName.get(baseName)!;
+            if (isRawFile(photo.path)) {
+                group.raws.push(photo);
+            } else if (isJpegFile(photo.path)) {
+                group.jpegs.push(photo);
+            } else {
+                // Other formats (PNG, etc.) - treat as JPEG for grouping
+                group.jpegs.push(photo);
+            }
+        }
+
+        // Build result: for each group, show JPEGs with RAW badge if RAW exists
+        const result: PhotoInfo[] = [];
+        for (const [_, group] of byBaseName) {
+            if (group.jpegs.length > 0) {
+                // Has JPEG - show JPEG(s) with RAW badge if RAW exists
+                for (const jpeg of group.jpegs) {
+                    if (group.raws.length > 0) {
+                        result.push({
+                            ...jpeg,
+                            hasRaw: true,
+                            rawPath: group.raws[0].path,
+                        });
+                    } else {
+                        result.push(jpeg);
+                    }
+                }
+            } else {
+                // Only RAW - show RAW files
+                result.push(...group.raws);
+            }
+        }
+
+        return result;
+    });
+
     let sortedPhotos = $derived.by(() => {
-        const photosCopy = [...photos];
+        const photosCopy = [...groupedPhotos];
         photosCopy.sort((a, b) => {
             let comparison = 0;
             switch (sortBy) {
@@ -255,7 +321,12 @@
             <!-- Toolbar -->
             <header class="flex justify-between items-center mb-4 shrink-0">
                 <div class="flex items-center gap-4">
-                    <h2 class="text-lg font-medium text-white">{photos.length} Photos</h2>
+                    <h2 class="text-lg font-medium text-white">
+                        {groupedPhotos.length} Photos
+                        {#if groupedPhotos.length !== photos.length}
+                            <span class="text-sm text-neutral-500 font-normal">({photos.length} files)</span>
+                        {/if}
+                    </h2>
                 </div>
 
                 <div class="flex items-center gap-2">

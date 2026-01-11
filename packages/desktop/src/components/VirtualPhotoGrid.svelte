@@ -82,7 +82,7 @@
                     >
                         {#each rowPhotos as photo (photo.id.id)}
                             <div
-                                class="aspect-square rounded bg-neutral-800 overflow-hidden cursor-pointer hover:ring-2 hover:ring-neutral-600 transition-all"
+                                class="aspect-square rounded bg-neutral-800 overflow-hidden cursor-pointer hover:ring-2 hover:ring-neutral-600 transition-all relative"
                                 onclick={() => onPhotoClick(photo)}
                             >
                                 <ThumbnailImage
@@ -92,6 +92,11 @@
                                     className="w-full h-full"
                                     lazy={true}
                                 />
+                                {#if photo.hasRaw}
+                                    <div class="absolute top-1 right-1 px-1.5 py-0.5 bg-amber-600 text-white text-[10px] font-bold rounded shadow">
+                                        RAW
+                                    </div>
+                                {/if}
                             </div>
                         {/each}
                     </div>

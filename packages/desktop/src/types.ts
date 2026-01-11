@@ -24,4 +24,7 @@ export interface PhotoInfo {
     file_size: number;
     created_at?: number;
     modified_at?: number;
+    // For grouped RAW+JPEG pairs
+    rawPath?: string;
+    hasRaw?: boolean;
 }
