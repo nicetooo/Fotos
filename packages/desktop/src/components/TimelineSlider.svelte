@@ -73,43 +73,41 @@
         { label: 'All', value: 0 },
     ];
 
-    // Load saved duration from localStorage, default to 1 hour
-    const STORAGE_KEY = 'timeline-window-duration';
-    let selectedDuration = $state((() => {
-        if (typeof localStorage !== 'undefined') {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                const value = parseInt(saved, 10);
-                if (durationOptions.some(o => o.value === value)) {
-                    return value;
-                }
-            }
-        }
-        return durationOptions[0].value;
-    })());
-
-    // Save duration when changed
-    $effect(() => {
-        if (typeof localStorage !== 'undefined') {
-            localStorage.setItem(STORAGE_KEY, selectedDuration.toString());
-        }
-    });
+    // Default to "All"
+    let selectedDuration = $state(0);
 
     let windowPosition = $state(0); // 0-100 percentage within selected range
 
-    // Reset selection only when photos are ADDED (e.g., after import)
-    // Don't reset when photos are removed (delete operation)
+    // Reset selection and duration when photos change (e.g., after import)
     let prevPhotosLength = $state(0);
     $effect(() => {
         const len = photos.length;
-        if (len > prevPhotosLength && prevPhotosLength > 0) {
-            // Reset to full range only when new photos are added
+        if (len !== prevPhotosLength && prevPhotosLength > 0) {
+            // Reset to full range when photos change
             leftPercent = 0;
             rightPercent = 100;
             windowPosition = 0;
+            selectedDuration = 0; // Reset to "All"
             displayTimeRange = null;
         }
         prevPhotosLength = len;
+    });
+
+    // Reset duration to "All" when overview selection changes
+    let prevLeft = $state(0);
+    let prevRight = $state(100);
+    $effect(() => {
+        const l = leftPercent;
+        const r = rightPercent;
+        if (l !== prevLeft || r !== prevRight) {
+            if (prevLeft !== 0 || prevRight !== 100) {
+                // Overview selection changed, reset to All
+                selectedDuration = 0;
+                windowPosition = 0;
+            }
+            prevLeft = l;
+            prevRight = r;
+        }
     });
 
     // Handle external time range (from map box selection)
@@ -317,8 +315,8 @@
 
         if (selectedDuration === 0) return; // "All" mode, no window to move
 
-        // Scroll to move window position (reduced sensitivity)
-        const delta = e.deltaY > 0 ? 1 : -1;
+        // Scroll to move window position (low sensitivity)
+        const delta = e.deltaY > 0 ? 0.3 : -0.3;
         windowPosition = Math.max(0, Math.min(100, windowPosition + delta));
     }
 
