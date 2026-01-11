@@ -443,13 +443,20 @@
 
         const rawBadge = photo.hasRaw ? '<div class="marker-raw-badge">R</div>' : '';
 
-        // Simplified marker - preview image loads on hover via CSS
+        // Marker with hover preview
         const customIcon = L.divIcon({
             className: "custom-map-marker",
-            html: `<div class="marker-wrapper" data-preview-url="${url}" data-filename="${fileName}" data-date="${dateTaken}" data-hasraw="${photo.hasRaw}">
+            html: `<div class="marker-wrapper">
                     <div class="marker-dot">
                         <img src="${url}" loading="lazy" decoding="async" onerror="this.style.display='none'" />
                         ${rawBadge}
+                    </div>
+                    <div class="marker-preview">
+                        <img src="${url}" loading="lazy" decoding="async" />
+                        <div class="marker-preview-info">
+                            <div class="marker-preview-filename">${fileName}</div>
+                            ${dateTaken ? `<div class="marker-preview-date">${dateTaken.replace(/"/g, '')}</div>` : ''}
+                        </div>
                     </div>
                    </div>`,
             iconSize: [iconSize, iconSize],
@@ -691,6 +698,53 @@
     }
     :global(.marker-wrapper:hover .marker-dot) {
         transform: scale(1.1);
+    }
+    :global(.marker-preview) {
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        margin-bottom: 8px;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+        pointer-events: none;
+        z-index: 1000;
+    }
+    :global(.marker-wrapper:hover .marker-preview) {
+        opacity: 1;
+        visibility: visible;
+    }
+    :global(.marker-preview img) {
+        width: 280px;
+        height: 200px;
+        object-fit: cover;
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        border: 2px solid rgba(255, 255, 255, 0.9);
+        background: #1e293b;
+    }
+    :global(.marker-preview-info) {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 6px 8px;
+        background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+        border-radius: 0 0 6px 6px;
+        color: white;
+    }
+    :global(.marker-preview-filename) {
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    :global(.marker-preview-date) {
+        font-size: 10px;
+        opacity: 0.8;
+        margin-top: 2px;
     }
     :global(.marker-raw-badge) {
         position: absolute;
