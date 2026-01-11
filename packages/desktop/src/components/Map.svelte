@@ -449,19 +449,19 @@
     }
     :global(.marker-raw-badge) {
         position: absolute;
-        top: 2px;
-        right: 2px;
-        width: 14px;
-        height: 14px;
+        top: 6px;
+        right: 6px;
+        width: 12px;
+        height: 12px;
         background: #d97706;
         color: white;
-        font-size: 8px;
+        font-size: 7px;
         font-weight: bold;
-        border-radius: 3px;
+        border-radius: 2px;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
     :global(.marker-raw-info) {
         font-size: 9px;
