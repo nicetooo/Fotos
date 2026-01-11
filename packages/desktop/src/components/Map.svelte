@@ -73,6 +73,9 @@
         map = L.map(mapContainer, {
             zoomControl: false,
             attributionControl: false,
+            zoomDelta: 1,
+            zoomSnap: 0.5,
+            wheelPxPerZoomLevel: 8,
         }).setView([20, 0], 2);
 
         L.control.zoom({ position: "topright" }).addTo(map);
