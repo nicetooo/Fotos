@@ -2,6 +2,9 @@
     import { onMount, onDestroy } from "svelte";
     import * as L from "leaflet";
     import "leaflet/dist/leaflet.css";
+    import "leaflet.markercluster";
+    import "leaflet.markercluster/dist/MarkerCluster.css";
+    import "leaflet.markercluster/dist/MarkerCluster.Default.css";
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
 
@@ -187,6 +190,46 @@
             },
         ).addTo(map);
 
+        // Create marker cluster group with custom options
+        markerClusterGroup = L.markerClusterGroup({
+            maxClusterRadius: 60,
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false,
+            zoomToBoundsOnClick: true,
+            disableClusteringAtZoom: 18,
+            chunkedLoading: true,
+            animate: true,
+            // Don't cluster groups smaller than 20
+            iconCreateFunction: (cluster) => {
+                const count = cluster.getChildCount();
+
+                // For small clusters (< 20), show a mini indicator that auto-spiderfies on click
+                if (count < 20) {
+                    return L.divIcon({
+                        html: `<div class="cluster-mini"><span>${count}</span></div>`,
+                        className: 'marker-cluster-custom',
+                        iconSize: L.point(28, 28),
+                    });
+                }
+
+                let size = 'small';
+                let diameter = 40;
+                if (count >= 100) {
+                    size = 'large';
+                    diameter = 60;
+                } else if (count >= 20) {
+                    size = 'medium';
+                    diameter = 50;
+                }
+                return L.divIcon({
+                    html: `<div class="cluster-marker cluster-${size}"><span>${count}</span></div>`,
+                    className: 'marker-cluster-custom',
+                    iconSize: L.point(diameter, diameter),
+                });
+            },
+        });
+        map.addLayer(markerClusterGroup);
+
         // Delay timeline to next frame for smoother tab switch
         requestAnimationFrame(() => {
             isReady = true;
@@ -227,6 +270,10 @@
             resizeObserver.disconnect();
             resizeObserver = null;
         }
+        if (markerClusterGroup) {
+            markerClusterGroup.clearLayers();
+            markerClusterGroup = null;
+        }
         if (map) {
             map.remove();
             map = null;
@@ -245,6 +292,9 @@
 
     // Store all markers with their photo data for visibility toggling
     let allMarkers: Map<string, { marker: L.Marker; photo: any; date: Date | null }> = new Map();
+
+    // Marker cluster group
+    let markerClusterGroup: L.MarkerClusterGroup | null = null;
 
     // Photos that actually have markers (for TimelineSlider)
     let photosWithMarkers = $state<any[]>([]);
@@ -281,28 +331,33 @@
     $effect(() => {
         const currentMap = map;  // Read map to establish dependency
         const geo = geotaggedPhotos;
+        const clusterGroup = markerClusterGroup;
 
         // Clear old markers first
-        for (const { marker } of allMarkers.values()) {
-            marker.remove();
+        if (clusterGroup) {
+            clusterGroup.clearLayers();
         }
         allMarkers.clear();
         initialBoundsFit = false;
 
-        // Create new markers if we have map and photos
-        if (currentMap && geo.length > 0) {
+        // Create new markers if we have map, cluster group, and photos
+        if (currentMap && clusterGroup && geo.length > 0) {
             createAllMarkers(geo);
         }
     });
 
-    // Update visibility based on time filter (fast - just toggle opacity)
+    // Update visibility based on time filter (add/remove from cluster group)
     $effect(() => {
         // Read state values first to ensure proper dependency tracking
         const start = timeFilterStart;
         const end = timeFilterEnd;
         const currentMap = map;
+        const clusterGroup = markerClusterGroup;
 
-        if (!currentMap || allMarkers.size === 0) return;
+        if (!currentMap || !clusterGroup || allMarkers.size === 0) return;
+
+        const toAdd: L.Marker[] = [];
+        const toRemove: L.Marker[] = [];
 
         for (const { marker, date } of allMarkers.values()) {
             let visible = true;
@@ -310,11 +365,20 @@
                 visible = date >= start && date <= end;
             }
 
-            const el = marker.getElement();
-            if (el) {
-                el.style.opacity = visible ? '1' : '0';
-                el.style.pointerEvents = visible ? 'auto' : 'none';
+            const isInCluster = clusterGroup.hasLayer(marker);
+            if (visible && !isInCluster) {
+                toAdd.push(marker);
+            } else if (!visible && isInCluster) {
+                toRemove.push(marker);
             }
+        }
+
+        // Batch updates for performance
+        if (toRemove.length > 0) {
+            clusterGroup.removeLayers(toRemove);
+        }
+        if (toAdd.length > 0) {
+            clusterGroup.addLayers(toAdd);
         }
     });
 
@@ -369,7 +433,7 @@
     }
 
     function createMarker(photo: any, lat: number, lon: number): L.Marker | null {
-        if (!map) return null;
+        if (!map || !markerClusterGroup) return null;
 
         const iconSize = 48;
         const thumbPath = photo.thumb_path || photo.path;
@@ -392,12 +456,15 @@
             iconAnchor: [iconSize / 2, iconSize / 2],
         });
 
-        const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map);
+        const marker = L.marker([lat, lon], { icon: customIcon });
 
         // Add click handler for preview
         marker.on('click', () => {
             handleMarkerClick(photo);
         });
+
+        // Add to cluster group instead of directly to map
+        markerClusterGroup.addLayer(marker);
 
         return marker;
     }
@@ -658,5 +725,64 @@
     .box-select-mode :global(.leaflet-grab),
     .box-select-mode :global(.leaflet-dragging) {
         cursor: crosshair !important;
+    }
+
+    /* Marker cluster styles */
+    :global(.marker-cluster-custom) {
+        background: transparent !important;
+    }
+    :global(.cluster-marker) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.9), rgba(139, 92, 246, 0.9));
+        border: 3px solid rgba(255, 255, 255, 0.9);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 20px rgba(99, 102, 241, 0.3);
+        color: white;
+        font-weight: 700;
+        font-size: 14px;
+        transition: transform 0.2s ease;
+    }
+    :global(.cluster-marker:hover) {
+        transform: scale(1.1);
+    }
+    :global(.cluster-small) {
+        width: 40px;
+        height: 40px;
+        font-size: 12px;
+    }
+    :global(.cluster-medium) {
+        width: 50px;
+        height: 50px;
+        font-size: 14px;
+    }
+    :global(.cluster-large) {
+        width: 60px;
+        height: 60px;
+        font-size: 16px;
+    }
+    :global(.cluster-mini) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(30, 41, 59, 0.9);
+        border: 2px solid rgba(255, 255, 255, 0.7);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        color: white;
+        font-weight: 600;
+        font-size: 11px;
+        transition: transform 0.2s ease;
+    }
+    :global(.cluster-mini:hover) {
+        transform: scale(1.15);
+        background: rgba(99, 102, 241, 0.9);
+    }
+    /* Hide default MarkerCluster styles */
+    :global(.leaflet-cluster-anim .leaflet-marker-icon, .leaflet-cluster-anim .leaflet-marker-shadow) {
+        transition: transform 0.3s ease-out, opacity 0.3s ease-in;
     }
 </style>
