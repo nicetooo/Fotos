@@ -340,7 +340,7 @@
         pointer-events: none;
         transition: all 0.15s ease;
         z-index: 1000;
-        width: 160px;
+        width: 240px;
         background: rgba(0,0,0,0.9);
         border-radius: 8px;
         overflow: hidden;
@@ -352,7 +352,7 @@
     }
     :global(.marker-preview img) {
         width: 100%;
-        height: 120px;
+        height: 180px;
         object-fit: cover;
     }
     :global(.marker-info) {
