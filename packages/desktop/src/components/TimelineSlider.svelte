@@ -66,10 +66,7 @@
         const range = timeRange;
         const totalMs = range.max.getTime() - range.min.getTime();
         const dayMs = 24 * 60 * 60 * 1000;
-
-        if (totalMs <= dayMs) {
-            return formatTime(date);
-        } else if (totalMs <= 7 * dayMs) {
+        if (totalMs <= 7 * dayMs) {
             return `${formatDate(date)} ${formatTime(date)}`;
         }
         return formatDate(date);
@@ -105,22 +102,18 @@
         const deltaPercent = ((e.clientX - dragStartX) / rect.width) * 100;
 
         if (dragMode === 'left') {
-            // Drag left handle
             let newLeft = dragStartLeft + deltaPercent;
-            newLeft = Math.max(0, Math.min(newLeft, rightPercent - 1)); // Min 1% width
+            newLeft = Math.max(0, Math.min(newLeft, rightPercent - 1));
             leftPercent = newLeft;
         } else if (dragMode === 'right') {
-            // Drag right handle
             let newRight = dragStartRight + deltaPercent;
-            newRight = Math.max(leftPercent + 1, Math.min(newRight, 100)); // Min 1% width
+            newRight = Math.max(leftPercent + 1, Math.min(newRight, 100));
             rightPercent = newRight;
         } else if (dragMode === 'middle') {
-            // Drag middle to pan
             const width = dragStartRight - dragStartLeft;
             let newLeft = dragStartLeft + deltaPercent;
             let newRight = dragStartRight + deltaPercent;
 
-            // Clamp to bounds
             if (newLeft < 0) {
                 newLeft = 0;
                 newRight = width;
@@ -157,7 +150,6 @@
         if (totalMs === 0) return Array(NUM_BINS).fill(0);
 
         const bins = Array(NUM_BINS).fill(0);
-
         for (const p of photos) {
             const date = parsePhotoDate(p.metadata?.date_taken);
             if (!date) continue;
@@ -167,7 +159,6 @@
                 bins[binIndex]++;
             }
         }
-
         return bins;
     });
 
@@ -203,16 +194,16 @@
         </div>
     </div>
 
-    <!-- Slider track wrapper (allows handles to overflow) -->
+    <!-- Slider track wrapper -->
     <div class="relative h-12 mx-2">
-        <!-- Track background with overflow hidden -->
+        <!-- Track background -->
         <div
             bind:this={sliderTrack}
             class="absolute inset-0 bg-neutral-900 rounded-lg overflow-hidden"
         >
-            <!-- Density visualization (background) -->
+            <!-- Density visualization -->
             <div class="absolute inset-0 flex items-end">
-                {#each densityBins as count, i}
+                {#each densityBins as count}
                     <div
                         class="flex-1 bg-white/20"
                         style="height: {Math.max(2, (count / maxBinCount) * 100)}%"
@@ -239,47 +230,29 @@
             ></div>
         </div>
 
-        <!-- Draggable middle region (outside overflow) -->
+        <!-- Draggable middle region -->
         <div
             class="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing z-10"
             style="left: {leftPercent}%; right: {100 - rightPercent}%"
             onmousedown={(e) => handleMouseDown(e, 'middle')}
-            role="slider"
-            aria-label="Selected time range"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={(leftPercent + rightPercent) / 2}
-            tabindex="0"
         ></div>
 
-        <!-- Left handle (outside overflow) -->
+        <!-- Left handle -->
         <div
             class="absolute top-0 bottom-0 w-6 cursor-ew-resize flex items-center justify-center z-20"
             style="left: {leftPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'left')}
-            role="slider"
-            aria-label="Start time"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={leftPercent}
-            tabindex="0"
         >
             <div class="w-2 h-full bg-yellow-400 rounded-sm shadow-lg shadow-black/50 flex items-center justify-center">
                 <div class="w-0.5 h-5 bg-yellow-900/40 rounded-full"></div>
             </div>
         </div>
 
-        <!-- Right handle (outside overflow) -->
+        <!-- Right handle -->
         <div
             class="absolute top-0 bottom-0 w-6 cursor-ew-resize flex items-center justify-center z-20"
             style="left: {rightPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'right')}
-            role="slider"
-            aria-label="End time"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={rightPercent}
-            tabindex="0"
         >
             <div class="w-2 h-full bg-yellow-400 rounded-sm shadow-lg shadow-black/50 flex items-center justify-center">
                 <div class="w-0.5 h-5 bg-yellow-900/40 rounded-full"></div>
@@ -287,7 +260,7 @@
         </div>
     </div>
 
-    <!-- Full range labels -->
+    <!-- Range labels -->
     <div class="flex justify-between text-[10px] text-white/40 mt-1">
         <span>{formatDate(timeRange.min)}</span>
         <span>{formatDate(timeRange.max)}</span>
