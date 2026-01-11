@@ -381,20 +381,20 @@
         position: relative;
         width: 48px;
         height: 48px;
-        border-radius: 50%;
-        border: 2px solid white;
-        box-sizing: border-box;
-        background: #1e293b;
-        overflow: hidden;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
         transition: transform 0.15s ease;
     }
     :global(.marker-dot img) {
-        display: block;
         width: 44px;
         height: 44px;
+        border-radius: 50%;
+        border: 2px solid white;
         object-fit: cover;
         object-position: center;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        background: #1e293b;
     }
     :global(.marker-wrapper:hover .marker-dot) {
         transform: scale(1.1);
