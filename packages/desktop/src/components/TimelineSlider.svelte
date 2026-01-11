@@ -306,18 +306,18 @@
 
 <svelte:window on:mousemove={handleMouseMove} on:mouseup={handleMouseUp} />
 
-<div class="timeline-container bg-black/90 backdrop-blur-sm px-4 py-3">
+<div class="timeline-container theme-bg-overlay backdrop-blur-sm px-4 py-3">
     <!-- Header -->
     <div class="flex items-center justify-between mb-2">
-        <div class="text-xs text-white/60">
+        <div class="text-xs theme-text-secondary">
             {formatDateTime(viewWindow.start)} - {formatDateTime(viewWindow.end)}
         </div>
         <div class="flex items-center gap-3">
-            <span class="text-xs text-white/60">
+            <span class="text-xs theme-text-secondary">
                 {photosInWindow} / {photos.length}
             </span>
             {#if isZoomed}
-                <button onclick={resetSelection} class="text-xs text-yellow-400 hover:text-yellow-300">
+                <button onclick={resetSelection} class="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)]">
                     Reset
                 </button>
             {/if}
@@ -329,15 +329,15 @@
         <div class="mb-3">
             <!-- Duration selector -->
             <div class="flex items-center gap-2 mb-2">
-                <span class="text-[10px] text-white/40">Window:</span>
+                <span class="text-[10px] theme-text-muted">Window:</span>
                 <div class="flex gap-1">
                     {#each durationOptions as option}
                         <button
                             onclick={() => { selectedDuration = option.value; if (option.value === 0) windowPosition = 0; }}
                             class="px-2 py-0.5 text-[10px] rounded transition-colors
                                 {selectedDuration === option.value
-                                    ? 'bg-yellow-500 text-black'
-                                    : 'bg-white/10 text-white/60 hover:bg-white/20'}"
+                                    ? 'bg-[var(--accent)] text-black'
+                                    : 'theme-bg-secondary theme-text-muted hover:theme-bg-tertiary'}"
                         >
                             {option.label}
                         </button>
@@ -347,12 +347,12 @@
 
             <!-- Zoomed slider track -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div bind:this={zoomedTrack} class="relative h-10 bg-neutral-800 rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
+            <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
                 <!-- Density visualization -->
                 <div class="absolute inset-0 flex items-end">
                     {#each zoomedDensityBins as count}
                         <div
-                            class="flex-1 bg-yellow-400/30"
+                            class="flex-1 bg-[var(--accent)]/30"
                             style="height: {Math.max(2, (count / maxZoomedBinCount) * 100)}%"
                         ></div>
                     {/each}
@@ -361,13 +361,13 @@
                 <!-- Fixed window (draggable) -->
                 {#if selectedDuration !== 0}
                     <div
-                        class="absolute top-0 bottom-0 bg-yellow-400/20 border-2 border-yellow-400 rounded cursor-grab active:cursor-grabbing"
+                        class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded cursor-grab active:cursor-grabbing"
                         style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
                         onmousedown={(e) => handleMouseDown(e, 'window')}
                     >
                         <div class="absolute inset-0 flex items-center justify-center">
-                            <div class="w-8 h-4 bg-yellow-400 rounded-full flex items-center justify-center">
-                                <div class="w-4 h-0.5 bg-yellow-900/50 rounded"></div>
+                            <div class="w-8 h-4 bg-[var(--accent)] rounded-full flex items-center justify-center">
+                                <div class="w-4 h-0.5 bg-black/30 rounded"></div>
                             </div>
                         </div>
                     </div>
@@ -375,7 +375,7 @@
             </div>
 
             <!-- Zoomed range labels -->
-            <div class="flex justify-between text-[10px] text-white/40 mt-1">
+            <div class="flex justify-between text-[10px] theme-text-muted mt-1">
                 <span>{formatDate(new Date(selectedRange.startMs))}</span>
                 <span>{formatDate(new Date(selectedRange.endMs))}</span>
             </div>
@@ -388,25 +388,25 @@
         <!-- Track background -->
         <div
             bind:this={sliderTrack}
-            class="absolute inset-0 bg-neutral-900 rounded overflow-hidden"
+            class="absolute inset-0 theme-bg-primary rounded overflow-hidden"
         >
             <!-- Density visualization -->
             <div class="absolute inset-0 flex items-end">
                 {#each densityBins as count}
                     <div
-                        class="flex-1 bg-white/20"
-                        style="height: {Math.max(2, (count / maxBinCount) * 100)}%"
+                        class="flex-1 theme-text-muted opacity-30"
+                        style="height: {Math.max(2, (count / maxBinCount) * 100)}%; background-color: currentColor;"
                     ></div>
                 {/each}
             </div>
 
             <!-- Dimmed areas -->
-            <div class="absolute top-0 bottom-0 left-0 bg-black/70" style="width: {leftPercent}%"></div>
-            <div class="absolute top-0 bottom-0 right-0 bg-black/70" style="width: {100 - rightPercent}%"></div>
+            <div class="absolute top-0 bottom-0 left-0 bg-black/50 dark:bg-black/70" style="width: {leftPercent}%"></div>
+            <div class="absolute top-0 bottom-0 right-0 bg-black/50 dark:bg-black/70" style="width: {100 - rightPercent}%"></div>
 
             <!-- Selected region border -->
             <div
-                class="absolute top-0 bottom-0 border-y-2 border-yellow-400 pointer-events-none"
+                class="absolute top-0 bottom-0 border-y-2 border-[var(--accent)] pointer-events-none"
                 style="left: {leftPercent}%; right: {100 - rightPercent}%"
             ></div>
         </div>
@@ -424,7 +424,7 @@
             style="left: {leftPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'left')}
         >
-            <div class="w-1.5 h-full bg-yellow-400 rounded-sm shadow-lg"></div>
+            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg"></div>
         </div>
 
         <!-- Right handle -->
@@ -433,12 +433,12 @@
             style="left: {rightPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'right')}
         >
-            <div class="w-1.5 h-full bg-yellow-400 rounded-sm shadow-lg"></div>
+            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg"></div>
         </div>
     </div>
 
     <!-- Full range labels -->
-    <div class="flex justify-between text-[10px] text-white/40 mt-1 mx-2">
+    <div class="flex justify-between text-[10px] theme-text-muted mt-1 mx-2">
         <span>{formatDate(timeRange.min)}</span>
         <span>{formatDate(timeRange.max)}</span>
     </div>

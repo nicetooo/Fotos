@@ -32,6 +32,47 @@
     let sortOrder = $state<"asc" | "desc">("desc");
     let importMenuOpen = $state(false);
 
+    // Theme state
+    type Theme = "dark" | "light" | "system";
+    const THEME_KEY = "fotos-theme";
+    let theme = $state<Theme>((() => {
+        if (typeof localStorage !== "undefined") {
+            const saved = localStorage.getItem(THEME_KEY);
+            if (saved === "dark" || saved === "light" || saved === "system") {
+                return saved;
+            }
+        }
+        return "dark";
+    })());
+
+    // Apply theme to document
+    function applyTheme(t: Theme) {
+        const root = document.documentElement;
+        if (t === "system") {
+            const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+            root.classList.toggle("light", !prefersDark);
+        } else {
+            root.classList.toggle("light", t === "light");
+        }
+    }
+
+    // Watch for theme changes
+    $effect(() => {
+        applyTheme(theme);
+        if (typeof localStorage !== "undefined") {
+            localStorage.setItem(THEME_KEY, theme);
+        }
+    });
+
+    // Listen for system theme changes
+    $effect(() => {
+        if (theme !== "system") return;
+        const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+        const handler = () => applyTheme("system");
+        mediaQuery.addEventListener("change", handler);
+        return () => mediaQuery.removeEventListener("change", handler);
+    });
+
     // RAW file extensions
     const RAW_EXTENSIONS = new Set(["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"]);
     const JPEG_EXTENSIONS = new Set(["jpg", "jpeg"]);
@@ -242,6 +283,10 @@
                 showSettings = false;
                 return;
             }
+            if (showLibrary) {
+                showLibrary = false;
+                return;
+            }
         }
 
         // Preview navigation (zoom handled by ImagePreview component)
@@ -271,7 +316,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="fixed inset-0 flex flex-col bg-neutral-900 text-neutral-200 overflow-hidden">
+<main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
         <MapView photos={groupedPhotos} onOpenPreview={openPreview} />
@@ -283,7 +328,7 @@
                 <button
                     onclick={() => importMenuOpen = !importMenuOpen}
                     disabled={isScanning}
-                    class="w-10 h-10 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-white/80 hover:bg-black/90 hover:text-white disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                    class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
                     title="Import photos"
                 >
                     <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>
@@ -294,11 +339,11 @@
                         class="fixed inset-0 z-40"
                         onclick={() => importMenuOpen = false}
                     ></div>
-                    <div class="absolute left-0 top-full mt-2 py-1 bg-black/90 backdrop-blur-sm border border-white/20 rounded-lg shadow-lg z-50 min-w-[140px]">
+                    <div class="absolute left-0 top-full mt-2 py-1 theme-bg-overlay backdrop-blur-sm border theme-border rounded-lg shadow-lg z-50 min-w-[140px]">
                         <button
                             onclick={() => { importMenuOpen = false; handleScan("folder"); }}
                             disabled={isScanning}
-                            class="w-full px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2"
+                            class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
                         >
                             <i class="fa-solid fa-folder text-xs"></i>
                             Import Folder
@@ -306,7 +351,7 @@
                         <button
                             onclick={() => { importMenuOpen = false; handleScan("file"); }}
                             disabled={isScanning}
-                            class="w-full px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2"
+                            class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
                         >
                             <i class="fa-solid fa-file-image text-xs"></i>
                             Import File
@@ -318,7 +363,7 @@
             <!-- Library button -->
             <button
                 onclick={() => showLibrary = !showLibrary}
-                class="w-10 h-10 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-white/80 hover:bg-black/90 hover:text-white flex items-center justify-center shadow-lg transition-all {showLibrary ? 'bg-white/20 text-white' : ''}"
+                class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all {showLibrary ? 'theme-bg-secondary' : ''}"
                 title="Library"
             >
                 <i class="fa-solid fa-images"></i>
@@ -327,7 +372,7 @@
             <!-- Settings button -->
             <button
                 onclick={() => showSettings = true}
-                class="w-10 h-10 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-white/80 hover:bg-black/90 hover:text-white flex items-center justify-center shadow-lg transition-all"
+                class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all"
                 title="Settings"
             >
                 <i class="fa-solid fa-gear"></i>
@@ -336,21 +381,21 @@
 
         <!-- Library Drawer (right side) -->
         {#if showLibrary}
-            <div class="absolute top-0 right-0 bottom-0 w-80 bg-black/95 backdrop-blur-md border-l border-white/10 z-[1001] flex flex-col">
+            <div class="absolute top-0 right-0 bottom-0 min-w-[500px] w-1/2 max-w-[800px] theme-bg-overlay backdrop-blur-md border-l theme-border z-[1001] flex flex-col">
                 <!-- Header -->
-                <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                <div class="flex items-center justify-between px-4 py-3 border-b theme-border">
                     <div class="flex items-center gap-2">
-                        <i class="fa-solid fa-images text-white/60 text-sm"></i>
-                        <span class="text-white font-medium">
+                        <i class="fa-solid fa-images theme-text-muted text-sm"></i>
+                        <span class="theme-text-primary font-medium">
                             {sortedPhotos.length} Photos
                             {#if sortedPhotos.length !== photos.length}
-                                <span class="text-white/50 text-xs">({photos.length} files)</span>
+                                <span class="theme-text-muted text-xs">({photos.length} files)</span>
                             {/if}
                         </span>
                     </div>
                     <button
                         onclick={() => showLibrary = false}
-                        class="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                        class="p-1.5 rounded-lg hover:theme-bg-secondary theme-text-muted hover:theme-text-primary transition-colors"
                         title="Close"
                     >
                         <i class="fa-solid fa-xmark"></i>
@@ -358,10 +403,10 @@
                 </div>
 
                 <!-- Toolbar -->
-                <div class="flex items-center gap-2 px-3 py-2 border-b border-white/10">
+                <div class="flex items-center gap-2 px-3 py-2 border-b theme-border">
                     <select
                         bind:value={sortBy}
-                        class="flex-1 bg-white/10 text-white/80 text-xs px-2 py-1.5 rounded border border-white/10 focus:outline-none focus:border-white/30"
+                        class="flex-1 theme-bg-secondary theme-text-secondary text-xs px-2 py-1.5 rounded border theme-border focus:outline-none"
                     >
                         <option value="date">Date</option>
                         <option value="name">Name</option>
@@ -370,7 +415,7 @@
 
                     <button
                         onclick={() => (sortOrder = sortOrder === "asc" ? "desc" : "asc")}
-                        class="p-1.5 rounded bg-white/10 border border-white/10 text-white/60 hover:text-white hover:bg-white/20"
+                        class="p-1.5 rounded theme-bg-secondary border theme-border theme-text-muted hover:theme-text-primary"
                         title={sortOrder === "asc" ? "Ascending" : "Descending"}
                     >
                         <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
@@ -379,7 +424,7 @@
                     <button
                         onclick={() => { showLibrary = false; handleScan("folder"); }}
                         disabled={isScanning}
-                        class="p-1.5 rounded bg-white/10 border border-white/10 text-white/60 hover:text-white hover:bg-white/20 disabled:opacity-50"
+                        class="p-1.5 rounded theme-bg-secondary border theme-border theme-text-muted hover:theme-text-primary disabled:opacity-50"
                         title="Import folder"
                     >
                         <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-folder-plus'} text-xs"></i>
@@ -389,10 +434,10 @@
                 <!-- Photo Grid -->
                 <div class="flex-1 overflow-y-auto p-2">
                     {#if sortedPhotos.length > 0}
-                        <div class="grid grid-cols-3 gap-1">
+                        <div class="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-1.5">
                             {#each sortedPhotos as photo (photo.path)}
                                 <button
-                                    class="aspect-square relative overflow-hidden rounded bg-neutral-800 hover:ring-2 hover:ring-white/50 transition-all group"
+                                    class="aspect-square relative overflow-hidden rounded theme-bg-secondary hover:ring-2 hover:ring-[var(--accent)] transition-all group"
                                     onclick={() => openPreview(photo)}
                                     title={photo.path.split("/").pop()}
                                 >
@@ -466,25 +511,25 @@
 {#if showSettings}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
-        class="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-sm flex items-center justify-center"
+        class="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-center justify-center"
         onclick={() => showSettings = false}
     >
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
-            class="bg-neutral-900 border border-neutral-700 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden"
+            class="theme-bg-secondary border theme-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden"
             onclick={(e) => e.stopPropagation()}
         >
-            <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-800">
-                <h2 class="text-lg font-medium text-white">Settings</h2>
+            <div class="flex items-center justify-between px-6 py-4 border-b theme-border">
+                <h2 class="text-lg font-medium theme-text-primary">Settings</h2>
                 <button
                     onclick={() => showSettings = false}
-                    class="p-2 rounded-lg hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors"
+                    class="p-2 rounded-lg hover:theme-bg-tertiary theme-text-muted hover:theme-text-primary transition-colors"
                 >
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
             <div class="p-6 overflow-y-auto max-h-[calc(80vh-60px)]">
-                <Settings {dbPath} {thumbDir} {version} />
+                <Settings {dbPath} {thumbDir} {version} {theme} onThemeChange={(t) => theme = t} />
             </div>
         </div>
     </div>
@@ -492,29 +537,30 @@
 
 {#if previewPhoto}
     {@const currentIndex = navigationPhotos.findIndex(p => p.path === previewPhoto.path)}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
-        class="fixed inset-0 z-50 bg-black/95"
+        class="fixed inset-0 z-50 bg-black/90"
         onclick={closePreview}
     >
         <!-- Top bar -->
-        <div class="absolute top-0 left-0 right-64 h-12 flex items-center justify-between px-4 z-20">
+        <div class="absolute top-0 left-0 right-64 h-12 flex items-center justify-between px-4 z-20 theme-bg-overlay">
             <div class="flex items-center gap-3">
-                <span class="text-xs text-neutral-500">{currentIndex + 1} / {navigationPhotos.length}</span>
-                <span class="text-sm text-neutral-400 truncate">
+                <span class="text-xs theme-text-muted">{currentIndex + 1} / {navigationPhotos.length}</span>
+                <span class="text-sm theme-text-secondary truncate">
                     {previewPhoto.path.split("/").pop()}
                 </span>
             </div>
             <div class="flex items-center gap-2">
                 <button
                     onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
-                    class="p-2 rounded hover:bg-white/10 text-neutral-400 hover:text-white"
+                    class="p-2 rounded hover:theme-bg-secondary theme-text-muted hover:theme-text-primary"
                     title="Show in Finder"
                 >
                     <i class="fa-solid fa-folder-open text-sm"></i>
                 </button>
                 <button
                     onclick={closePreview}
-                    class="p-2 rounded hover:bg-white/10 text-neutral-400 hover:text-white"
+                    class="p-2 rounded hover:theme-bg-secondary theme-text-muted hover:theme-text-primary"
                 >
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
@@ -524,20 +570,21 @@
         <!-- Navigation buttons -->
         <button
             onclick={(e) => { e.stopPropagation(); navigatePreview("prev"); }}
-            class="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white z-20"
+            class="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary z-20"
             title="Previous (←)"
         >
             <i class="fa-solid fa-chevron-left"></i>
         </button>
         <button
             onclick={(e) => { e.stopPropagation(); navigatePreview("next"); }}
-            class="absolute right-72 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white z-20"
+            class="absolute right-72 top-1/2 -translate-y-1/2 p-3 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary z-20"
             title="Next (→)"
         >
             <i class="fa-solid fa-chevron-right"></i>
         </button>
 
         <!-- Image area -->
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
             class="absolute top-12 left-0 right-64 bottom-0"
             onclick={(e) => e.stopPropagation()}
@@ -548,34 +595,35 @@
         </div>
 
         <!-- Info Panel -->
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
-            class="absolute top-0 right-0 bottom-0 w-64 bg-neutral-900 border-l border-neutral-800 pt-12 px-4 py-4 overflow-y-auto text-sm"
+            class="absolute top-0 right-0 bottom-0 w-64 theme-bg-secondary border-l theme-border pt-12 px-4 py-4 overflow-y-auto text-sm"
             onclick={(e) => e.stopPropagation()}
         >
             <div class="space-y-3">
                 {#if previewPhoto.metadata.date_taken}
                     <div>
-                        <p class="text-neutral-500 text-xs">Date</p>
-                        <p class="text-neutral-200 font-mono text-xs">{previewPhoto.metadata.date_taken}</p>
+                        <p class="theme-text-muted text-xs">Date</p>
+                        <p class="theme-text-primary font-mono text-xs">{previewPhoto.metadata.date_taken}</p>
                     </div>
                 {/if}
 
                 <div>
-                    <p class="text-neutral-500 text-xs">Dimensions</p>
-                    <p class="text-neutral-200">{previewPhoto.metadata.width} × {previewPhoto.metadata.height}</p>
+                    <p class="theme-text-muted text-xs">Dimensions</p>
+                    <p class="theme-text-primary">{previewPhoto.metadata.width} × {previewPhoto.metadata.height}</p>
                 </div>
 
                 {#if previewPhoto.metadata.make || previewPhoto.metadata.model}
                     <div>
-                        <p class="text-neutral-500 text-xs">Camera</p>
-                        <p class="text-neutral-200">{previewPhoto.metadata.make || ""} {previewPhoto.metadata.model || ""}</p>
+                        <p class="theme-text-muted text-xs">Camera</p>
+                        <p class="theme-text-primary">{previewPhoto.metadata.make || ""} {previewPhoto.metadata.model || ""}</p>
                     </div>
                 {/if}
 
                 {#if previewPhoto.metadata.iso || previewPhoto.metadata.f_number || previewPhoto.metadata.exposure_time}
                     <div>
-                        <p class="text-neutral-500 text-xs">Exposure</p>
-                        <p class="text-neutral-200">
+                        <p class="theme-text-muted text-xs">Exposure</p>
+                        <p class="theme-text-primary">
                             {#if previewPhoto.metadata.iso}ISO {previewPhoto.metadata.iso}{/if}
                             {#if previewPhoto.metadata.f_number} f/{previewPhoto.metadata.f_number.toFixed(1)}{/if}
                             {#if previewPhoto.metadata.exposure_time} {previewPhoto.metadata.exposure_time}{/if}
@@ -585,16 +633,16 @@
 
                 {#if previewPhoto.metadata.lat && previewPhoto.metadata.lon}
                     <div>
-                        <p class="text-neutral-500 text-xs">GPS</p>
-                        <p class="text-neutral-200 font-mono text-xs">
+                        <p class="theme-text-muted text-xs">GPS</p>
+                        <p class="theme-text-primary font-mono text-xs">
                             {previewPhoto.metadata.lat.toFixed(6)}, {previewPhoto.metadata.lon.toFixed(6)}
                         </p>
                     </div>
                 {/if}
 
                 <div>
-                    <p class="text-neutral-500 text-xs">Path</p>
-                    <p class="text-neutral-200 text-xs font-mono break-all">{previewPhoto.path}</p>
+                    <p class="theme-text-muted text-xs">Path</p>
+                    <p class="theme-text-primary text-xs font-mono break-all">{previewPhoto.path}</p>
                 </div>
             </div>
         </div>

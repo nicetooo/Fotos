@@ -305,14 +305,14 @@
     }
 </script>
 
-<div class="w-full h-full bg-[#1e293b] relative flex flex-col">
+<div class="w-full h-full theme-bg-secondary relative flex flex-col">
     <div bind:this={mapContainer} class="flex-1 z-0 outline-none"></div>
 
     <!-- Time range indicator -->
     {#if timeRangeDisplay && hasGeotaggedPhotos}
         <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
-            <div class="px-5 py-2 bg-black/80 backdrop-blur-sm rounded-full text-white text-base font-medium shadow-lg flex items-center gap-2">
-                <i class="fa-regular fa-calendar text-yellow-400"></i>
+            <div class="px-5 py-2 theme-bg-card backdrop-blur-sm rounded-full theme-text-primary text-base font-medium shadow-lg flex items-center gap-2">
+                <i class="fa-regular fa-calendar text-[var(--accent)]"></i>
                 <span class="tabular-nums min-w-[200px] text-center">{timeRangeDisplay}</span>
             </div>
         </div>
@@ -320,18 +320,18 @@
 
     {#if photos.length > 0 && !hasGeotaggedPhotos}
         <div
-            class="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-[1000] pointer-events-none"
+            class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-[1000] pointer-events-none"
         >
             <div
-                class="text-center p-6 bg-slate-800 rounded-2xl border border-slate-700 shadow-xl"
+                class="text-center p-6 theme-bg-secondary rounded-2xl border theme-border shadow-xl"
             >
                 <i
-                    class="fa-solid fa-location-slash text-4xl text-slate-500 mb-4"
+                    class="fa-solid fa-location-slash text-4xl theme-text-muted mb-4"
                 ></i>
-                <h3 class="text-xl font-bold text-white mb-2">
+                <h3 class="text-xl font-bold theme-text-primary mb-2">
                     No Geotagged Photos
                 </h3>
-                <p class="text-slate-400 max-w-xs">
+                <p class="theme-text-secondary max-w-xs">
                     None of your imported photos have GPS data.
                 </p>
             </div>
