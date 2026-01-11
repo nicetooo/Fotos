@@ -5,7 +5,10 @@
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
 
-    let { photos } = $props<{ photos: any[] }>();
+    let { photos, onOpenPreview } = $props<{
+        photos: any[];
+        onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
+    }>();
 
     let mapContainer: HTMLDivElement;
     let map = $state<L.Map | null>(null);
@@ -150,10 +153,6 @@
     // Photos that actually have markers (for TimelineSlider)
     let photosWithMarkers = $state<any[]>([]);
 
-    // Preview state
-    let previewOpen = $state(false);
-    let previewIndex = $state(0);
-
     // Get visible photos sorted by time for navigation
     let visiblePhotosSorted = $derived.by(() => {
         const start = timeFilterStart;
@@ -176,41 +175,9 @@
         return visible.map(v => v.photo);
     });
 
-    let currentPreviewPhoto = $derived(visiblePhotosSorted[previewIndex] || null);
-
-    function openPreview(photo: any) {
-        const idx = visiblePhotosSorted.findIndex(p => p.path === photo.path);
-        if (idx >= 0) {
-            previewIndex = idx;
-            previewOpen = true;
-        }
-    }
-
-    function closePreview() {
-        previewOpen = false;
-    }
-
-    function nextPhoto() {
-        if (previewIndex < visiblePhotosSorted.length - 1) {
-            previewIndex++;
-        }
-    }
-
-    function prevPhoto() {
-        if (previewIndex > 0) {
-            previewIndex--;
-        }
-    }
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (!previewOpen) return;
-
-        if (e.key === 'Escape') {
-            closePreview();
-        } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-            nextPhoto();
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-            prevPhoto();
+    function handleMarkerClick(photo: any) {
+        if (onOpenPreview) {
+            onOpenPreview(photo, visiblePhotosSorted);
         }
     }
 
@@ -314,20 +281,12 @@
 
         // Add click handler for preview
         marker.on('click', () => {
-            openPreview(photo);
+            handleMarkerClick(photo);
         });
 
         return marker;
     }
-
-    // Get preview image URL (use raw preview for RAW files, otherwise original)
-    async function getPreviewUrl(photo: any): Promise<string> {
-        // For now, use the original file
-        return convertFileSrc(photo.path);
-    }
 </script>
-
-<svelte:window on:keydown={handleKeydown} />
 
 <div class="w-full h-full bg-[#1e293b] relative flex flex-col">
     <div bind:this={mapContainer} class="flex-1 z-0 outline-none"></div>
@@ -366,63 +325,6 @@
     {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0}
         <div class="z-[1000]">
             <TimelineSlider photos={photosWithMarkers} onTimeRangeChange={handleTimeRangeChange} />
-        </div>
-    {/if}
-
-    <!-- Photo preview overlay -->
-    {#if previewOpen && currentPreviewPhoto}
-        <div
-            class="fixed inset-0 z-[2000] bg-black/95 flex items-center justify-center"
-            onclick={(e) => { if (e.target === e.currentTarget) closePreview(); }}
-            role="dialog"
-        >
-            <!-- Close button -->
-            <button
-                onclick={closePreview}
-                class="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-            >
-                <i class="fa-solid fa-xmark text-xl"></i>
-            </button>
-
-            <!-- Photo counter -->
-            <div class="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/60 rounded-full text-white text-sm">
-                {previewIndex + 1} / {visiblePhotosSorted.length}
-            </div>
-
-            <!-- Previous button -->
-            {#if previewIndex > 0}
-                <button
-                    onclick={prevPhoto}
-                    class="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-                >
-                    <i class="fa-solid fa-chevron-left text-xl"></i>
-                </button>
-            {/if}
-
-            <!-- Next button -->
-            {#if previewIndex < visiblePhotosSorted.length - 1}
-                <button
-                    onclick={nextPhoto}
-                    class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-                >
-                    <i class="fa-solid fa-chevron-right text-xl"></i>
-                </button>
-            {/if}
-
-            <!-- Image -->
-            <img
-                src={convertFileSrc(currentPreviewPhoto.path)}
-                alt={currentPreviewPhoto.path.split('/').pop()}
-                class="max-w-[90vw] max-h-[85vh] object-contain"
-            />
-
-            <!-- Photo info -->
-            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/60 rounded-lg text-center">
-                <div class="text-white text-sm font-medium">{currentPreviewPhoto.path.split('/').pop()}</div>
-                {#if currentPreviewPhoto.metadata?.date_taken}
-                    <div class="text-white/60 text-xs mt-1">{currentPreviewPhoto.metadata.date_taken}</div>
-                {/if}
-            </div>
         </div>
     {/if}
 </div>

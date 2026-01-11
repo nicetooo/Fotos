@@ -27,6 +27,7 @@
     let thumbDir = $state("");
     let uniqueTs = $state(Date.now());
     let previewPhoto = $state<PhotoInfo | null>(null);
+    let previewPhotoList = $state<PhotoInfo[] | null>(null); // Custom list for map view
     let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
     let sortOrder = $state<"asc" | "desc">("desc");
     let importMenuOpen = $state(false);
@@ -139,13 +140,18 @@
         }
     }
 
-    function openPreview(photo: PhotoInfo) {
+    function openPreview(photo: PhotoInfo, customList?: PhotoInfo[]) {
         previewPhoto = photo;
+        previewPhotoList = customList || null;
     }
 
     function closePreview() {
         previewPhoto = null;
+        previewPhotoList = null;
     }
+
+    // Get the photo list to use for navigation
+    let navigationPhotos = $derived(previewPhotoList || sortedPhotos);
 
     function handleGridWheel(e: WheelEvent) {
         if (e.ctrlKey || e.metaKey) {
@@ -157,16 +163,17 @@
 
     function navigatePreview(direction: "prev" | "next") {
         if (!previewPhoto) return;
-        const currentIndex = sortedPhotos.findIndex(p => p.path === previewPhoto!.path);
+        const photoList = navigationPhotos;
+        const currentIndex = photoList.findIndex(p => p.path === previewPhoto!.path);
         if (currentIndex === -1) return;
 
         let newIndex: number;
         if (direction === "prev") {
-            newIndex = currentIndex > 0 ? currentIndex - 1 : sortedPhotos.length - 1;
+            newIndex = currentIndex > 0 ? currentIndex - 1 : photoList.length - 1;
         } else {
-            newIndex = currentIndex < sortedPhotos.length - 1 ? currentIndex + 1 : 0;
+            newIndex = currentIndex < photoList.length - 1 ? currentIndex + 1 : 0;
         }
-        previewPhoto = sortedPhotos[newIndex];
+        previewPhoto = photoList[newIndex];
     }
 
     function handleKeydown(e: KeyboardEvent) {
@@ -355,13 +362,13 @@
         {:else if currentView === "settings"}
             <Settings {dbPath} {thumbDir} {version} />
         {:else if currentView === "map"}
-            <Map {photos} />
+            <Map {photos} onOpenPreview={openPreview} />
         {/if}
     </section>
 </main>
 
 {#if previewPhoto}
-    {@const currentIndex = sortedPhotos.findIndex(p => p.path === previewPhoto.path)}
+    {@const currentIndex = navigationPhotos.findIndex(p => p.path === previewPhoto.path)}
     <div
         class="fixed inset-0 z-50 bg-black/95"
         onclick={closePreview}
@@ -369,7 +376,7 @@
         <!-- Top bar -->
         <div class="absolute top-0 left-0 right-64 h-12 flex items-center justify-between px-4 z-20">
             <div class="flex items-center gap-3">
-                <span class="text-xs text-neutral-500">{currentIndex + 1} / {sortedPhotos.length}</span>
+                <span class="text-xs text-neutral-500">{currentIndex + 1} / {navigationPhotos.length}</span>
                 <span class="text-sm text-neutral-400 truncate">
                     {previewPhoto.path.split("/").pop()}
                 </span>
