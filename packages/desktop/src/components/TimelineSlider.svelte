@@ -78,6 +78,19 @@
 
     let windowPosition = $state(0); // 0-100 percentage within selected range
 
+    // Reset selection when photos change (e.g., after import)
+    let prevPhotosLength = $state(0);
+    $effect(() => {
+        const len = photos.length;
+        if (len !== prevPhotosLength) {
+            // Reset to full range when photos are added/removed
+            leftPercent = 0;
+            rightPercent = 100;
+            windowPosition = 0;
+            prevPhotosLength = len;
+        }
+    });
+
     // Actual viewing window (what photos to show)
     let viewWindow = $derived.by(() => {
         if (!isZoomed || selectedDuration === 0) {

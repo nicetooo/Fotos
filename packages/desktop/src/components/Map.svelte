@@ -237,12 +237,8 @@
         if (!map) return;
 
         const bounds = new L.LatLngBounds([]);
-        const maxMarkers = 500;
-        const photosToShow = geotagged.length > maxMarkers
-            ? geotagged.slice(0, maxMarkers)
-            : geotagged;
 
-        for (const photo of photosToShow) {
+        for (const photo of geotagged) {
             const lat = photo.metadata.lat!;
             const lon = photo.metadata.lon!;
             const marker = createMarker(photo, lat, lon);
@@ -254,10 +250,10 @@
         }
 
         // Update photosWithMarkers for TimelineSlider
-        photosWithMarkers = photosToShow;
+        photosWithMarkers = geotagged;
 
         // Fit bounds on initial load
-        if (photosToShow.length > 0 && !initialBoundsFit) {
+        if (geotagged.length > 0 && !initialBoundsFit) {
             map.fitBounds(bounds, { padding: [50, 50] });
             initialBoundsFit = true;
         }
