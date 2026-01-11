@@ -292,6 +292,76 @@
         previewPhoto = photoList[newIndex];
     }
 
+    // Delete state
+    let deleteConfirmOpen = $state(false);
+    let deleteMode = $state<'app' | 'complete'>('app');
+    let deleteIncludeRaw = $state(true); // Whether to include RAW when deleting JPEG+RAW pair
+    let isDeleting = $state(false);
+
+    async function handleDeletePhoto(photo: PhotoInfo, mode: 'app' | 'complete', includeRaw: boolean = true) {
+        if (!photo.id) return;
+
+        isDeleting = true;
+        try {
+            const ids = [photo.id.id];
+            // Also include RAW file if present and user chose to delete both
+            if (includeRaw && photo.hasRaw && photo.rawPath) {
+                const rawPhoto = photos.find(p => p.path === photo.rawPath);
+                if (rawPhoto?.id) {
+                    ids.push(rawPhoto.id.id);
+                }
+            }
+
+            const command = mode === 'complete' ? 'delete_photos_completely' : 'delete_photos_from_app';
+            const result = await invoke(command, { ids, dbPath, thumbDir });
+            console.log('Delete result:', result);
+
+            // Remember the "next" photo's path before reload
+            // This works for both library view and map view
+            const currentList = navigationPhotos;
+            const currentIndex = currentList.findIndex(p => p.path === photo.path);
+            const nextPhoto = currentIndex < currentList.length - 1
+                ? currentList[currentIndex + 1]
+                : (currentIndex > 0 ? currentList[currentIndex - 1] : null);
+            const nextPhotoPath = nextPhoto?.path;
+
+            // Reload photos
+            await loadPhotos();
+
+            // Clear the custom list (map view list) since it's now stale
+            previewPhotoList = null;
+
+            // Find and show the next photo by path
+            if (nextPhotoPath) {
+                const foundPhoto = sortedPhotos.find(p => p.path === nextPhotoPath);
+                if (foundPhoto) {
+                    previewPhoto = foundPhoto;
+                } else if (sortedPhotos.length > 0) {
+                    // Photo not found (might have been filtered out), show first available
+                    previewPhoto = sortedPhotos[0];
+                } else {
+                    closePreview();
+                }
+            } else if (sortedPhotos.length > 0) {
+                previewPhoto = sortedPhotos[0];
+            } else {
+                closePreview();
+            }
+        } catch (e) {
+            console.error('Delete failed:', e);
+            error = 'Delete failed: ' + e;
+        } finally {
+            isDeleting = false;
+            deleteConfirmOpen = false;
+        }
+    }
+
+    function openDeleteConfirm(mode: 'app' | 'complete') {
+        deleteMode = mode;
+        deleteIncludeRaw = true; // Reset to default
+        deleteConfirmOpen = true;
+    }
+
     function handleKeydown(e: KeyboardEvent) {
         // Close modals with Escape
         if (e.key === "Escape") {
@@ -753,9 +823,111 @@
                     <p class="theme-text-muted text-xs">Path</p>
                     <p class="theme-text-primary text-xs font-mono break-all">{previewPhoto.path}</p>
                 </div>
+
+                <!-- Delete actions -->
+                <div class="pt-3 mt-3 border-t theme-border">
+                    <p class="theme-text-muted text-xs mb-2">Delete</p>
+                    <div class="flex flex-col gap-2">
+                        <button
+                            onclick={(e) => { e.stopPropagation(); openDeleteConfirm('app'); }}
+                            disabled={isDeleting}
+                            class="w-full px-3 py-2 rounded text-xs bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-database"></i>
+                            Remove from Library
+                        </button>
+                        <button
+                            onclick={(e) => { e.stopPropagation(); openDeleteConfirm('complete'); }}
+                            disabled={isDeleting}
+                            class="w-full px-3 py-2 rounded text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-trash"></i>
+                            Delete Original File
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- Delete Confirmation Modal -->
+    {#if deleteConfirmOpen}
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div
+            class="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center"
+            onclick={() => deleteConfirmOpen = false}
+        >
+            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+            <div
+                class="theme-bg-secondary border theme-border rounded-xl shadow-2xl w-full max-w-md p-6"
+                onclick={(e) => e.stopPropagation()}
+            >
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-full {deleteMode === 'complete' ? 'bg-red-500/20' : 'bg-amber-500/20'} flex items-center justify-center">
+                        <i class="fa-solid {deleteMode === 'complete' ? 'fa-trash text-red-400' : 'fa-database text-amber-400'}"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium theme-text-primary">
+                            {deleteMode === 'complete' ? 'Delete Photo' : 'Remove from Library'}
+                        </h3>
+                        <p class="text-sm theme-text-muted">
+                            {deleteMode === 'complete' ? 'This will permanently delete the original file' : 'Original file will be kept'}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="theme-bg-primary rounded-lg p-3 mb-4">
+                    <p class="text-xs theme-text-muted mb-1">File</p>
+                    <p class="text-sm theme-text-primary font-mono break-all">{previewPhoto.path.split('/').pop()}</p>
+                    {#if previewPhoto.hasRaw && deleteMode === 'complete'}
+                        <div class="mt-3 pt-3 border-t border-white/10">
+                            <p class="text-xs theme-text-muted mb-2">This photo has an associated RAW file:</p>
+                            <p class="text-xs text-amber-400 font-mono break-all mb-3">{previewPhoto.rawPath?.split('/').pop()}</p>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    bind:checked={deleteIncludeRaw}
+                                    class="w-4 h-4 rounded border-2 border-amber-500 bg-transparent checked:bg-amber-500"
+                                />
+                                <span class="text-sm text-amber-400">Also delete RAW file</span>
+                            </label>
+                        </div>
+                    {:else if previewPhoto.hasRaw}
+                        <p class="text-xs text-amber-400 mt-1">+ Associated RAW file will also be removed</p>
+                    {/if}
+                </div>
+
+                {#if deleteMode === 'complete'}
+                    <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
+                        <p class="text-xs text-red-400">
+                            <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                            Warning: This action cannot be undone. The original file will be permanently deleted from disk.
+                        </p>
+                    </div>
+                {/if}
+
+                <div class="flex gap-3">
+                    <button
+                        onclick={() => deleteConfirmOpen = false}
+                        disabled={isDeleting}
+                        class="flex-1 px-4 py-2 rounded-lg theme-bg-tertiary theme-text-secondary hover:theme-text-primary disabled:opacity-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onclick={() => handleDeletePhoto(previewPhoto!, deleteMode, deleteIncludeRaw)}
+                        disabled={isDeleting}
+                        class="flex-1 px-4 py-2 rounded-lg {deleteMode === 'complete' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'} text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                        {#if isDeleting}
+                            <i class="fa-solid fa-spinner fa-spin"></i>
+                        {/if}
+                        {deleteMode === 'complete' ? 'Delete' : 'Remove'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    {/if}
 {/if}
 
 <style>

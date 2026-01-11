@@ -132,12 +132,82 @@ impl PhotoIndex {
         }
     }
 
+    /// Get a photo by its ID.
+    pub fn get_by_id(&self, id: i64) -> Result<Option<PhotoInfo>, CoreError> {
+        let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT
+                id, path, hash, make, model, date_taken, width, height,
+                lat, lon, iso, f_number, exposure_time, orientation
+             FROM photos WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![id], |row| {
+            Ok(PhotoInfo {
+                id: PhotoId { id: row.get(0)? },
+                path: row.get(1)?,
+                hash: row.get(2)?,
+                metadata: PhotoMetadata {
+                    make: row.get(3)?,
+                    model: row.get(4)?,
+                    date_taken: row.get(5)?,
+                    width: row.get::<_, i64>(6)? as u32,
+                    height: row.get::<_, i64>(7)? as u32,
+                    lat: row.get(8)?,
+                    lon: row.get(9)?,
+                    iso: row.get::<_, Option<i64>>(10)?.map(|x| x as u32),
+                    f_number: row.get::<_, Option<f64>>(11)?.map(|x| x as f32),
+                    exposure_time: row.get(12)?,
+                    orientation: row.get::<_, i64>(13)? as u32,
+                },
+                thumb_path: None,
+                file_size: 0,
+                created_at: None,
+                modified_at: None,
+            })
+        })?;
+
+        if let Some(res) = rows.next() {
+            Ok(Some(res?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Delete a photo by its ID.
+    /// Returns the deleted photo's info (including path) if found, None if not found.
+    pub fn delete_by_id(&self, id: i64) -> Result<Option<PhotoInfo>, CoreError> {
+        // First get the photo info
+        let photo = self.get_by_id(id)?;
+
+        if photo.is_some() {
+            let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
+            conn.execute("DELETE FROM photos WHERE id = ?1", params![id])?;
+        }
+
+        Ok(photo)
+    }
+
+    /// Delete multiple photos by their IDs.
+    /// Returns the list of deleted photos' info.
+    pub fn delete_by_ids(&self, ids: Vec<i64>) -> Result<Vec<PhotoInfo>, CoreError> {
+        let mut deleted = Vec::new();
+
+        for id in ids {
+            if let Some(photo) = self.delete_by_id(id)? {
+                deleted.push(photo);
+            }
+        }
+
+        Ok(deleted)
+    }
+
     /// Returns a list of all photos in the index.
-    /// 
+    ///
     /// ### ⚠️ Performance & Scale Note
     /// Current implementation returns a full `Vec<PhotoInfo>` from the database.
     /// For very large databases, this may lead to significant memory spikes.
-    /// 
+    ///
     /// **Recommendations for Callers:**
     /// - Avoid calling this frequently on the full database if UI virtualization is not used.
     /// - Future versions may introduce `LIMIT/OFFSET` paging or an iterator API.

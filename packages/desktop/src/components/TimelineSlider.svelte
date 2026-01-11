@@ -97,17 +97,19 @@
 
     let windowPosition = $state(0); // 0-100 percentage within selected range
 
-    // Reset selection when photos change (e.g., after import)
+    // Reset selection only when photos are ADDED (e.g., after import)
+    // Don't reset when photos are removed (delete operation)
     let prevPhotosLength = $state(0);
     $effect(() => {
         const len = photos.length;
-        if (len !== prevPhotosLength) {
-            // Reset to full range when photos are added/removed
+        if (len > prevPhotosLength && prevPhotosLength > 0) {
+            // Reset to full range only when new photos are added
             leftPercent = 0;
             rightPercent = 100;
             windowPosition = 0;
-            prevPhotosLength = len;
+            displayTimeRange = null;
         }
+        prevPhotosLength = len;
     });
 
     // Handle external time range (from map box selection)

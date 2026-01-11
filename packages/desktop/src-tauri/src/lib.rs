@@ -156,6 +156,85 @@ async fn import_photos(
     Ok(result)
 }
 
+/// Delete result struct
+#[derive(serde::Serialize, Default)]
+struct DeleteResult {
+    deleted_count: usize,
+    deleted_paths: Vec<String>,
+    errors: Vec<String>,
+}
+
+/// Delete photos from app only (DB + thumbnails), keep original files
+#[tauri::command]
+async fn delete_photos_from_app(
+    ids: Vec<i64>,
+    db_path: String,
+    thumb_dir: String,
+) -> Result<DeleteResult, String> {
+    let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
+
+    let thumbnailer = fotos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
+    let spec = fotos_core::ThumbnailSpec { width: 256, height: 256 };
+
+    let mut result = DeleteResult::default();
+
+    // Delete each photo from DB and remove its thumbnail
+    let deleted_photos = index.delete_by_ids(ids).map_err(|e| e.to_string())?;
+
+    for photo in deleted_photos {
+        result.deleted_paths.push(photo.path.clone());
+        result.deleted_count += 1;
+
+        // Try to delete thumbnail
+        let source_path = std::path::Path::new(&photo.path);
+        if let Ok(Some(thumb_path)) = thumbnailer.get_cached_path(source_path, &spec) {
+            if let Err(e) = std::fs::remove_file(&thumb_path) {
+                result.errors.push(format!("Failed to delete thumbnail {}: {}", thumb_path.display(), e));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Delete photos completely (DB + thumbnails + original files)
+#[tauri::command]
+async fn delete_photos_completely(
+    ids: Vec<i64>,
+    db_path: String,
+    thumb_dir: String,
+) -> Result<DeleteResult, String> {
+    let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
+
+    let thumbnailer = fotos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
+    let spec = fotos_core::ThumbnailSpec { width: 256, height: 256 };
+
+    let mut result = DeleteResult::default();
+
+    // Delete each photo from DB and remove its thumbnail + original file
+    let deleted_photos = index.delete_by_ids(ids).map_err(|e| e.to_string())?;
+
+    for photo in deleted_photos {
+        result.deleted_paths.push(photo.path.clone());
+        result.deleted_count += 1;
+
+        // Try to delete thumbnail
+        let source_path = std::path::Path::new(&photo.path);
+        if let Ok(Some(thumb_path)) = thumbnailer.get_cached_path(source_path, &spec) {
+            if let Err(e) = std::fs::remove_file(&thumb_path) {
+                result.errors.push(format!("Failed to delete thumbnail {}: {}", thumb_path.display(), e));
+            }
+        }
+
+        // Delete original file
+        if let Err(e) = std::fs::remove_file(&photo.path) {
+            result.errors.push(format!("Failed to delete original {}: {}", photo.path, e));
+        }
+    }
+
+    Ok(result)
+}
+
 #[tauri::command]
 async fn clear_app_data(thumb_dir: String, db_path: String) -> Result<(), String> {
     // Clear thumbnails
@@ -314,7 +393,9 @@ pub fn run() {
             read_file_bytes,
             get_raw_preview,
             get_cached_tile,
-            download_tile
+            download_tile,
+            delete_photos_from_app,
+            delete_photos_completely
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

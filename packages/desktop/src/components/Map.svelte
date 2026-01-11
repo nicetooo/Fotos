@@ -105,9 +105,15 @@
         return convertFileSrc(path);
     }
 
+    // Track previous photo count to detect add vs remove
+    let prevPhotoCount = 0;
+
     // Create all markers for photos
     function createPhotoMarkers(photos: any[]) {
         if (!map) return;
+
+        const isInitialLoad = photoMarkers.size === 0;
+        const isAddingPhotos = photos.length > prevPhotoCount;
 
         // Clear existing markers
         for (const { marker } of photoMarkers.values()) {
@@ -183,11 +189,13 @@
             bounds.extend([lon, lat]);
         }
 
-        // Fit bounds
-        if (photos.length > 0) {
+        // Fit bounds only on initial load or when adding new photos
+        // Don't reset view when deleting photos
+        if (photos.length > 0 && (isInitialLoad || isAddingPhotos)) {
             map.fitBounds(bounds, { padding: 100, maxZoom: 15 });
         }
 
+        prevPhotoCount = photos.length;
         photosWithMarkers = photos;
     }
 
