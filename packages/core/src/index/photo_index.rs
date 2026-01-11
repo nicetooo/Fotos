@@ -38,29 +38,46 @@ impl PhotoIndex {
 
     pub fn insert(&self, path: String, hash: String, metadata: PhotoMetadata) -> Result<PhotoId, CoreError> {
         let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
-        
-        // 1. Check if path already exists
+
+        // 1. Check if path already exists (same file, no change needed)
         let mut stmt = conn.prepare("SELECT id FROM photos WHERE path = ?1")?;
         let mut rows = stmt.query_map(params![path], |row| row.get::<_, i64>(0))?;
-        
+
         if let Some(existing_id) = rows.next() {
             return Ok(PhotoId { id: existing_id? });
         }
+        drop(rows);
+        drop(stmt);
 
-        // 2. Insert new record
+        // 2. Check if hash already exists (same photo, different path - update path)
+        let mut stmt = conn.prepare("SELECT id FROM photos WHERE hash = ?1")?;
+        let mut rows = stmt.query_map(params![hash], |row| row.get::<_, i64>(0))?;
+
+        if let Some(existing_id) = rows.next() {
+            let id = existing_id?;
+            drop(rows);
+            drop(stmt);
+            // Update path to new location
+            conn.execute("UPDATE photos SET path = ?1 WHERE id = ?2", params![path, id])?;
+            return Ok(PhotoId { id });
+        }
+        drop(rows);
+        drop(stmt);
+
+        // 3. Insert new record
         conn.execute(
             "INSERT INTO photos (
-                path, hash, make, model, date_taken, width, height, 
+                path, hash, make, model, date_taken, width, height,
                 lat, lon, iso, f_number, exposure_time, orientation
-            ) 
+            )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
-                path, 
-                hash, 
-                metadata.make, 
-                metadata.model, 
-                metadata.date_taken, 
-                metadata.width, 
+                path,
+                hash,
+                metadata.make,
+                metadata.model,
+                metadata.date_taken,
+                metadata.width,
                 metadata.height,
                 metadata.lat,
                 metadata.lon,
@@ -203,21 +220,49 @@ mod tests {
 
         // Contract: Same path returns same ID
         assert_eq!(id1, id2);
-        
+
         let conn = index.conn.lock().unwrap();
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 1);
     }
 
     #[test]
+    fn test_hash_deduplication_updates_path() {
+        let index = setup_test_index();
+        let metadata = PhotoMetadata::default();
+        let hash = "same_hash".to_string();
+        let old_path = "/sdcard/photo.jpg".to_string();
+        let new_path = "/local/photo.jpg".to_string();
+
+        // Insert with old path
+        let id1 = index.insert(old_path.clone(), hash.clone(), metadata.clone()).expect("First insert failed");
+
+        // Insert same hash with new path - should update, not create new
+        let id2 = index.insert(new_path.clone(), hash.clone(), metadata).expect("Second insert failed");
+
+        // Contract: Same hash returns same ID
+        assert_eq!(id1, id2);
+
+        // Only one record in database
+        let conn = index.conn.lock().unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+
+        // Path should be updated to new location
+        let stored_path: String = conn.query_row("SELECT path FROM photos WHERE id = ?1", [id1.id], |r| r.get(0)).unwrap();
+        assert_eq!(stored_path, new_path);
+    }
+
+    #[test]
     fn test_index_scale_performance_degradation() {
         let index = setup_test_index();
         let metadata = PhotoMetadata::default();
-        
-        // Scale test: Insertion of many items
+
+        // Scale test: Insertion of many items (each with unique hash)
         for i in 0..1000 {
             let path = format!("/path/photo_{}.jpg", i);
-            index.insert(path, "hash".to_string(), metadata.clone()).expect("Bulk insert failed");
+            let hash = format!("hash_{}", i);
+            index.insert(path, hash, metadata.clone()).expect("Bulk insert failed");
         }
 
         let list = index.list().expect("List failed");
