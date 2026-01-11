@@ -28,8 +28,41 @@
     let uniqueTs = $state(Date.now());
     let previewPhoto = $state<PhotoInfo | null>(null);
     let previewPhotoList = $state<PhotoInfo[] | null>(null); // Custom list for map view
-    let sortBy = $state<"name" | "date" | "size" | "dimensions">("date");
-    let sortOrder = $state<"asc" | "desc">("desc");
+
+    // Sort state with localStorage persistence
+    const SORT_BY_KEY = "fotos-sort-by";
+    const SORT_ORDER_KEY = "fotos-sort-order";
+    let sortBy = $state<"name" | "date" | "size" | "dimensions">((() => {
+        if (typeof localStorage !== "undefined") {
+            const saved = localStorage.getItem(SORT_BY_KEY);
+            if (saved === "name" || saved === "date" || saved === "size" || saved === "dimensions") {
+                return saved;
+            }
+        }
+        return "date";
+    })());
+    let sortOrder = $state<"asc" | "desc">((() => {
+        if (typeof localStorage !== "undefined") {
+            const saved = localStorage.getItem(SORT_ORDER_KEY);
+            if (saved === "asc" || saved === "desc") {
+                return saved;
+            }
+        }
+        return "desc";
+    })());
+
+    // Save sort options when changed
+    $effect(() => {
+        if (typeof localStorage !== "undefined") {
+            localStorage.setItem(SORT_BY_KEY, sortBy);
+        }
+    });
+    $effect(() => {
+        if (typeof localStorage !== "undefined") {
+            localStorage.setItem(SORT_ORDER_KEY, sortOrder);
+        }
+    });
+
     let importMenuOpen = $state(false);
     let libraryImportMenuOpen = $state(false);
     let sortMenuOpen = $state(false);
