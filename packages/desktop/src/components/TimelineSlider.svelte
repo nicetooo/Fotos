@@ -179,7 +179,7 @@
 
         // Determine zoom direction (negative deltaY = scroll up = zoom in)
         const zoomIn = e.deltaY < 0;
-        const zoomAmount = 2; // percentage change per scroll (reduced for smoother control)
+        const zoomAmount = 1; // percentage change per scroll (reduced for smoother control)
 
         const currentWidth = rightPercent - leftPercent;
         const center = (leftPercent + rightPercent) / 2;
@@ -223,7 +223,7 @@
         if (selectedDuration === 0) return; // "All" mode, no window to move
 
         // Scroll to move window position (reduced sensitivity)
-        const delta = e.deltaY > 0 ? 2 : -2;
+        const delta = e.deltaY > 0 ? 1 : -1;
         windowPosition = Math.max(0, Math.min(100, windowPosition + delta));
     }
 
@@ -384,7 +384,7 @@
 
     <!-- === Overview (full timeline with handles) === -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="relative h-8 mx-2" onwheel={handleOverviewWheel}>
+    <div class="relative h-16 mx-2" onwheel={handleOverviewWheel}>
         <!-- Track background -->
         <div
             bind:this={sliderTrack}

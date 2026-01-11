@@ -188,10 +188,12 @@
 
     // Update visibility based on time filter (fast - just toggle opacity)
     $effect(() => {
-        if (!map || allMarkers.size === 0) return;
-
+        // Read state values first to ensure proper dependency tracking
         const start = timeFilterStart;
         const end = timeFilterEnd;
+        const currentMap = map;
+
+        if (!currentMap || allMarkers.size === 0) return;
 
         for (const { marker, date } of allMarkers.values()) {
             let visible = true;
@@ -209,11 +211,12 @@
 
     // Pan map to center of visible photos when time filter changes (keep zoom level)
     $effect(() => {
-        if (!map || allMarkers.size === 0) return;
-
+        // Read state values first to ensure proper dependency tracking
         const start = timeFilterStart;
         const end = timeFilterEnd;
-        if (!start || !end) return;
+        const currentMap = map;
+
+        if (!currentMap || allMarkers.size === 0 || !start || !end) return;
 
         // Collect visible photo positions
         const bounds = new L.LatLngBounds([]);
@@ -226,7 +229,7 @@
 
         // Pan to center of visible photos without changing zoom
         if (bounds.isValid()) {
-            map.panTo(bounds.getCenter(), { animate: true, duration: 0.3 });
+            currentMap.panTo(bounds.getCenter(), { animate: true, duration: 0.3 });
         }
     });
 
