@@ -1,0 +1,16 @@
+[package]
+name = "fotos-platform-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop platform implementation for Fotos"
+
+[dependencies]
+fotos-core = { path = "../core" }
+fotos-shared = { path = "../shared" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["fs", "sync"] }
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+opener = "0.7"

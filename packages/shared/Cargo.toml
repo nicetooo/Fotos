@@ -1,0 +1,12 @@
+[package]
+name = "fotos-shared"
+version = "0.1.0"
+edition = "2021"
+description = "Shared platform abstractions for Fotos"
+
+[dependencies]
+fotos-core = { path = "../core" }
+async-trait = "0.1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
