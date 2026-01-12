@@ -6,6 +6,11 @@ use crate::error::CoreError;
 /// Compute perceptual hash of an image.
 /// Optimized to use EXIF embedded thumbnail when available (much faster for camera photos).
 pub fn compute_hash(path: &Path) -> Result<String, CoreError> {
+    // For HEIC files, use file-based hash directly since image crate can't decode HEIC
+    if is_heic_file(path) {
+        return compute_file_hash(path);
+    }
+
     let hasher = HasherConfig::new()
         .hash_alg(HashAlg::Gradient)
         .hash_size(8, 8)
@@ -23,6 +28,17 @@ pub fn compute_hash(path: &Path) -> Result<String, CoreError> {
     // use file-based hash to avoid slow full image decode.
     // File hash is sufficient for deduplication (same file = same hash).
     compute_file_hash(path)
+}
+
+/// Check if file is HEIC/HEIF format
+fn is_heic_file(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_lowercase())
+            .as_deref(),
+        Some("heic" | "heif")
+    )
 }
 
 /// Compute a simple file-based hash for files that can't be decoded
@@ -129,22 +145,39 @@ fn find_jpeg_tiff_header_offset(path: &Path) -> Result<u64, CoreError> {
             return Err(CoreError::Io("invalid marker".into()));
         }
         if buf[1] == 0xE1 {
+            // APP1 - potential EXIF segment
             let mut len_buf = [0u8; 2];
             reader.read_exact(&mut len_buf).map_err(|_| CoreError::Io("read failed".into()))?;
+            let seg_len = u16::from_be_bytes(len_buf) as i64;
             let mut exif_id = [0u8; 6];
             reader.read_exact(&mut exif_id).map_err(|_| CoreError::Io("read failed".into()))?;
             if &exif_id == b"Exif\0\0" {
                 return reader.stream_position()
                     .map_err(|_| CoreError::Io("position failed".into()));
             }
+            // Not EXIF APP1, skip rest of segment
+            if seg_len > 8 {
+                reader.seek(std::io::SeekFrom::Current(seg_len - 8))
+                    .map_err(|_| CoreError::Io("seek failed".into()))?;
+            }
         } else if buf[1] == 0xD9 || buf[1] == 0xDA {
+            // EOI or SOS - no more segments to check
             break;
-        } else if buf[1] >= 0xE0 && buf[1] <= 0xEF || buf[1] == 0xFE {
+        } else if (buf[1] >= 0xD0 && buf[1] <= 0xD7) || buf[1] == 0x01 {
+            // RST markers (0xD0-0xD7) and TEM (0x01) have no length
+            continue;
+        } else if buf[1] == 0x00 {
+            // Stuffed byte (0xFF 0x00), skip
+            continue;
+        } else {
+            // All other markers have length field - skip them
             let mut len_buf = [0u8; 2];
             reader.read_exact(&mut len_buf).map_err(|_| CoreError::Io("read failed".into()))?;
             let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
-            reader.seek(std::io::SeekFrom::Current(seg_len))
-                .map_err(|_| CoreError::Io("seek failed".into()))?;
+            if seg_len > 0 {
+                reader.seek(std::io::SeekFrom::Current(seg_len))
+                    .map_err(|_| CoreError::Io("seek failed".into()))?;
+            }
         }
     }
 

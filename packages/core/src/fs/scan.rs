@@ -40,6 +40,8 @@ fn is_supported_image(path: &Path) -> bool {
             .map(|s| s.to_lowercase())
             .as_deref(),
         Some("jpg" | "jpeg" | "png" | "webp" |
+             // HEIC/HEIF (iOS photos)
+             "heic" | "heif" |
              // RAW formats
              "cr2" | "cr3" | "nef" | "nrw" | "arw" | "srf" | "sr2" |
              "dng" | "raf" | "orf" | "rw2" | "pef" | "raw")

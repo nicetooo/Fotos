@@ -9,33 +9,45 @@
 /* Begin PBXBuildFile section */
 		1096D2388CEBB749D638A092 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04E301E0725A16C38D714DC6 /* CoreGraphics.framework */; };
 		314F91FED706A3FBFA5D5B41 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DBE6D377CC287A77184CB7A /* MetalKit.framework */; };
+		3D32AD292737866D14F18BED /* PhotoPickerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DAB1630B0B428164D720C2 /* PhotoPickerManager.swift */; };
 		52FB333CD407951D6B1EC9C2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 51A48960AFC5EA0AD57EB6B3 /* Security.framework */; };
+		82EA490AB43AA5F5D682B62B /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 00E3006B0FEB64281C71C190 /* libapp.a */; };
+		8B074D9265146B9AC4ABF20C /* Photos.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9F2DC43D277745C23EAFAB25 /* Photos.framework */; };
 		92A8C1909FBB9E286E839775 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3030BC9C1B0B9C45FA9E38C2 /* main.mm */; };
 		9591258B224CDA7D5CF654B6 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E578EEBEB1EDC9A3EC60C48 /* libapp.a */; };
+		979C3DACB9ADD64CEBEDC682 /* TauriPhotoBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56DFB02BAC2E008091800C29 /* TauriPhotoBridge.swift */; };
 		A738B4477258FCDB1B6135AE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 98E2FC3A3B82B82191998928 /* Assets.xcassets */; };
 		B8FD8F9EBEF1F5E39237EB6B /* assets in Resources */ = {isa = PBXBuildFile; fileRef = A31A64BC2F6536DD3BCD8038 /* assets */; };
 		BBB1F6482F25ADC14CBCBBDF /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5969D1669CF8B99FCCD89CF2 /* QuartzCore.framework */; };
 		C279C454B31DE7A2012EE5AE /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B2A846D88D9326C025A20A12 /* WebKit.framework */; };
+		D17C093E4F716C298FBAF504 /* PhotosUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B898BD63DCD60C51833AD206 /* PhotosUI.framework */; };
 		D689E99EC707C11759F72855 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 39BD283D2792647FC43C508C /* Metal.framework */; };
 		DA907C691ED8A5EA53EBC8A2 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = CA0ABF6716F0612EA2B28FDF /* LaunchScreen.storyboard */; };
 		E2052EBF414977AA70235732 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 79A80F9E41F9563EE06D0C5F /* UIKit.framework */; };
+		F62AF68DE74D7438ECCEEA29 /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6F253471BD911E17A575F8F1 /* CoreLocation.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		00E3006B0FEB64281C71C190 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		04E301E0725A16C38D714DC6 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		0E578EEBEB1EDC9A3EC60C48 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		15931E437FCEF89B33A07D06 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		3030BC9C1B0B9C45FA9E38C2 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		39BD283D2792647FC43C508C /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		51A48960AFC5EA0AD57EB6B3 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		56DFB02BAC2E008091800C29 /* TauriPhotoBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TauriPhotoBridge.swift; sourceTree = "<group>"; };
 		587F814CBA220A2F6ED3745C /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		5969D1669CF8B99FCCD89CF2 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		6990EFBD2AC37A5F785855EC /* fotos_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = fotos_iOS.entitlements; sourceTree = "<group>"; };
+		6F253471BD911E17A575F8F1 /* CoreLocation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreLocation.framework; path = System/Library/Frameworks/CoreLocation.framework; sourceTree = SDKROOT; };
 		79A80F9E41F9563EE06D0C5F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		8DBE6D377CC287A77184CB7A /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		98E2FC3A3B82B82191998928 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9F2DC43D277745C23EAFAB25 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
+		A1DAB1630B0B428164D720C2 /* PhotoPickerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPickerManager.swift; sourceTree = "<group>"; };
 		A31A64BC2F6536DD3BCD8038 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		B2A846D88D9326C025A20A12 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		B898BD63DCD60C51833AD206 /* PhotosUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PhotosUI.framework; path = System/Library/Frameworks/PhotosUI.framework; sourceTree = SDKROOT; };
 		C5E02A9FE619668C3A25B409 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		CA0ABF6716F0612EA2B28FDF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		DA31FB09C86C2CE835FD75AA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -55,6 +67,9 @@
 				52FB333CD407951D6B1EC9C2 /* Security.framework in Frameworks */,
 				E2052EBF414977AA70235732 /* UIKit.framework in Frameworks */,
 				C279C454B31DE7A2012EE5AE /* WebKit.framework in Frameworks */,
+				8B074D9265146B9AC4ABF20C /* Photos.framework in Frameworks */,
+				D17C093E4F716C298FBAF504 /* PhotosUI.framework in Frameworks */,
+				F62AF68DE74D7438ECCEEA29 /* CoreLocation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -64,6 +79,7 @@
 		065D21FE657A7B64F2C190C1 /* Externals */ = {
 			isa = PBXGroup;
 			children = (
+				FD666768172CFC1D05CB0D34 /* arm64 */,
 			);
 			path = Externals;
 			sourceTree = "<group>";
@@ -73,6 +89,7 @@
 			children = (
 				3030BC9C1B0B9C45FA9E38C2 /* main.mm */,
 				0FF47BAEA356D782B66A0E07 /* bindings */,
+				D57BAB3DE4F3152C88E564E2 /* PhotoPicker */,
 			);
 			path = fotos;
 			sourceTree = "<group>";
@@ -83,6 +100,14 @@
 				15931E437FCEF89B33A07D06 /* bindings.h */,
 			);
 			path = bindings;
+			sourceTree = "<group>";
+		};
+		18AEAB1EBFBFBFF188F53F6B /* release */ = {
+			isa = PBXGroup;
+			children = (
+				00E3006B0FEB64281C71C190 /* libapp.a */,
+			);
+			path = release;
 			sourceTree = "<group>";
 		};
 		41FC575454E7F7BB750A9B93 /* Products */ = {
@@ -112,13 +137,25 @@
 			path = fotos_iOS;
 			sourceTree = "<group>";
 		};
+		D57BAB3DE4F3152C88E564E2 /* PhotoPicker */ = {
+			isa = PBXGroup;
+			children = (
+				A1DAB1630B0B428164D720C2 /* PhotoPickerManager.swift */,
+				56DFB02BAC2E008091800C29 /* TauriPhotoBridge.swift */,
+			);
+			path = PhotoPicker;
+			sourceTree = "<group>";
+		};
 		D5BF8AF055C8EAAFBD84CFCF /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				04E301E0725A16C38D714DC6 /* CoreGraphics.framework */,
+				6F253471BD911E17A575F8F1 /* CoreLocation.framework */,
 				0E578EEBEB1EDC9A3EC60C48 /* libapp.a */,
 				39BD283D2792647FC43C508C /* Metal.framework */,
 				8DBE6D377CC287A77184CB7A /* MetalKit.framework */,
+				9F2DC43D277745C23EAFAB25 /* Photos.framework */,
+				B898BD63DCD60C51833AD206 /* PhotosUI.framework */,
 				5969D1669CF8B99FCCD89CF2 /* QuartzCore.framework */,
 				51A48960AFC5EA0AD57EB6B3 /* Security.framework */,
 				79A80F9E41F9563EE06D0C5F /* UIKit.framework */,
@@ -148,6 +185,21 @@
 				0C36E278EA3B62D6F5E54127 /* fotos */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		FD666768172CFC1D05CB0D34 /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+				18AEAB1EBFBFBFF188F53F6B /* release */,
+			);
+			path = arm64;
+			sourceTree = "<group>";
+		};
+		"TEMP_0BDCA8F8-5DFD-4355-81A8-32AF9B532357" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -209,6 +261,7 @@
 				A738B4477258FCDB1B6135AE /* Assets.xcassets in Resources */,
 				DA907C691ED8A5EA53EBC8A2 /* LaunchScreen.storyboard in Resources */,
 				B8FD8F9EBEF1F5E39237EB6B /* assets in Resources */,
+				82EA490AB43AA5F5D682B62B /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -243,6 +296,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3D32AD292737866D14F18BED /* PhotoPickerManager.swift in Sources */,
+				979C3DACB9ADD64CEBEDC682 /* TauriPhotoBridge.swift in Sources */,
 				92A8C1909FBB9E286E839775 /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

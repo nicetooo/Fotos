@@ -5,10 +5,11 @@
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
 
-    let { photos, onOpenPreview, theme = "dark" } = $props<{
+    let { photos, onOpenPreview, theme = "dark", tileConfig } = $props<{
         photos: any[];
         onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
         theme?: "dark" | "light";
+        tileConfig?: { tiles: string[]; tileSize: number };
     }>();
 
     let mapContainer: HTMLDivElement;
@@ -137,12 +138,38 @@
             // Create marker element
             const el = document.createElement('div');
             el.className = 'photo-marker';
-            el.innerHTML = `
-                <div class="marker-thumb">
-                    <img src="${url}" alt="" loading="lazy" />
-                    ${photo.hasRaw ? '<span class="raw-badge">R</span>' : ''}
-                </div>
-            `;
+
+            // Create marker with image element for proper error handling
+            const markerThumb = document.createElement('div');
+            markerThumb.className = 'marker-thumb';
+
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = '';
+            img.loading = 'lazy';
+
+            // Handle image load errors - try original path if thumbnail fails
+            img.onerror = () => {
+                // If thumbnail failed, try original image path
+                if (photo.thumb_path && img.src !== getThumbnailUrl(photo.path)) {
+                    img.src = getThumbnailUrl(photo.path);
+                } else {
+                    // Show placeholder if all fails
+                    img.style.display = 'none';
+                    markerThumb.classList.add('error');
+                }
+            };
+
+            markerThumb.appendChild(img);
+
+            if (photo.hasRaw) {
+                const badge = document.createElement('span');
+                badge.className = 'raw-badge';
+                badge.textContent = 'R';
+                markerThumb.appendChild(badge);
+            }
+
+            el.appendChild(markerThumb);
 
             // Create marker
             const marker = new maplibregl.Marker({ element: el })
@@ -163,10 +190,12 @@
 
                 const rawBadge = photo.hasRaw ? '<div class="popup-raw-badge">RAW</div>' : '';
                 const dateInfo = dateTaken ? `<div class="popup-date">${dateTaken}</div>` : '';
+                const originalUrl = getThumbnailUrl(photo.path);
+                const popupId = `popup-img-${photo.id || Date.now()}`;
 
                 const html = `
                     <div class="photo-popup">
-                        <img src="${url}" alt="${filename}" />
+                        <img id="${popupId}" src="${url}" alt="${filename}" onerror="this.onerror=null; this.src='${originalUrl}';" />
                         <div class="popup-info">
                             <div class="popup-filename">${filename}</div>
                             ${dateInfo}
@@ -275,8 +304,33 @@
         map.fitBounds(bounds, { padding: 100, maxZoom: 15, duration: 300 });
     }
 
-    // Map style based on theme
+    // Map style based on theme and tile config
     function getMapStyle(isDark: boolean): maplibregl.StyleSpecification {
+        // Use provided tileConfig or default to CARTO
+        if (tileConfig) {
+            return {
+                version: 8,
+                sources: {
+                    'tiles': {
+                        type: 'raster',
+                        tiles: tileConfig.tiles,
+                        tileSize: tileConfig.tileSize,
+                        attribution: '&copy; OpenStreetMap contributors'
+                    }
+                },
+                layers: [
+                    {
+                        id: 'tiles-layer',
+                        type: 'raster',
+                        source: 'tiles',
+                        minzoom: 0,
+                        maxzoom: 19
+                    }
+                ]
+            };
+        }
+
+        // Default: CARTO tiles with theme support
         const tileType = isDark ? 'dark_all' : 'light_all';
         const sourceId = isDark ? 'carto-dark' : 'carto-light';
         return {
@@ -317,6 +371,12 @@
             zoom: 2,
             attributionControl: false
         });
+
+        setupMapControls();
+    });
+
+    function setupMapControls() {
+        if (!map) return;
 
         // Add controls
         map.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -405,7 +465,7 @@
 
         // Map move event - sync to timeline
         map.on('moveend', handleMapMove);
-    });
+    }
 
     onDestroy(() => {
         // Clear all markers
@@ -743,9 +803,31 @@
         background: #1e293b;
         will-change: auto;
     }
+    :global(.marker-thumb.error) {
+        background: #374151;
+        border-radius: 50%;
+        border: 2px solid white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    :global(.marker-thumb.error::after) {
+        content: '\f03e';
+        font-family: 'Font Awesome 6 Free';
+        font-weight: 400;
+        font-size: 20px;
+        color: #6b7280;
+    }
     :global(:root.light .marker-thumb img) {
         border-color: #1e293b;
         background: #f1f5f9;
+    }
+    :global(:root.light .marker-thumb.error) {
+        background: #e5e7eb;
+        border-color: #1e293b;
+    }
+    :global(:root.light .marker-thumb.error::after) {
+        color: #9ca3af;
     }
     :global(.marker-thumb .raw-badge) {
         position: absolute;

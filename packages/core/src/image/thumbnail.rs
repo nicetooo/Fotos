@@ -92,6 +92,17 @@ pub fn is_raw_file(path: &Path) -> bool {
     )
 }
 
+/// Check if file is HEIC/HEIF format based on extension
+pub fn is_heic_file(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_lowercase())
+            .as_deref(),
+        Some("heic" | "heif")
+    )
+}
+
 /// Extract the embedded JPEG preview from a RAW file.
 /// Returns the full-resolution preview JPEG bytes with orientation correction applied.
 /// Scans the entire RAW file to find the largest embedded JPEG preview by file size.
@@ -512,9 +523,10 @@ fn find_jpeg_tiff_header_offset(source: &Path) -> Result<u64, ThumbnailError> {
             return Err(ThumbnailError::DecodeError("Invalid JPEG marker".to_string()));
         }
         if buf[1] == 0xE1 {
-            // APP1 found, read length
+            // APP1 - potential EXIF segment
             let mut len_buf = [0u8; 2];
             reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            let seg_len = u16::from_be_bytes(len_buf) as i64;
             // Check for "Exif\0\0"
             let mut exif_id = [0u8; 6];
             reader.read_exact(&mut exif_id).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
@@ -522,15 +534,27 @@ fn find_jpeg_tiff_header_offset(source: &Path) -> Result<u64, ThumbnailError> {
                 // TIFF header starts here
                 return reader.stream_position().map_err(|e| ThumbnailError::DecodeError(e.to_string()));
             }
+            // Not EXIF APP1, skip rest of segment
+            if seg_len > 8 {
+                reader.seek(std::io::SeekFrom::Current(seg_len - 8)).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            }
         } else if buf[1] == 0xD9 || buf[1] == 0xDA {
             // EOI or SOS - no EXIF found
             break;
-        } else if buf[1] >= 0xE0 && buf[1] <= 0xEF || buf[1] == 0xFE {
-            // Other APP or COM segment, skip it
+        } else if (buf[1] >= 0xD0 && buf[1] <= 0xD7) || buf[1] == 0x01 {
+            // RST markers (0xD0-0xD7) and TEM (0x01) have no length
+            continue;
+        } else if buf[1] == 0x00 {
+            // Stuffed byte (0xFF 0x00), skip
+            continue;
+        } else {
+            // All other markers have length field - skip them
             let mut len_buf = [0u8; 2];
             reader.read_exact(&mut len_buf).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
             let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
-            reader.seek(std::io::SeekFrom::Current(seg_len)).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            if seg_len > 0 {
+                reader.seek(std::io::SeekFrom::Current(seg_len)).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+            }
         }
     }
 
