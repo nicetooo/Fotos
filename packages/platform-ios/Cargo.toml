@@ -1,0 +1,11 @@
+[package]
+name = "fotos-platform-ios"
+version = "0.1.0"
+edition = "2021"
+description = "iOS platform implementation for Fotos"
+
+[dependencies]
+fotos-core = { path = "../core" }
+fotos-shared = { path = "../shared" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["fs", "sync"] }

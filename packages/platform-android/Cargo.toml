@@ -1,0 +1,15 @@
+[package]
+name = "fotos-platform-android"
+version = "0.1.0"
+edition = "2021"
+description = "Android platform implementation for Fotos"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fotos-core = { path = "../core" }
+fotos-shared = { path = "../shared" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["fs", "sync"] }
+jni = "0.21"
