@@ -342,6 +342,27 @@ async fn get_raw_preview(path: String, cache_dir: String) -> Result<String, Stri
     Ok(preview_path.to_string_lossy().to_string())
 }
 
+/// Request photo library access on iOS
+/// This is a stub that needs native Swift implementation
+#[tauri::command]
+async fn request_photo_library_access(
+    _db_path: String,
+    _thumb_dir: String,
+) -> Result<u32, String> {
+    #[cfg(target_os = "ios")]
+    {
+        // TODO: Implement native iOS photo picker via Swift
+        // 1. Request PHPhotoLibrary authorization
+        // 2. Present PHPickerViewController
+        // 3. Process selected photos through fotos-core
+        Err("Photo library access requires native iOS implementation. Use Xcode to add Swift code for PHPickerViewController.".to_string())
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        Err("Photo library access is only available on iOS. Use folder/file import on desktop.".to_string())
+    }
+}
+
 #[tauri::command]
 async fn get_cached_tile(cache_dir: String, z: u32, x: u32, y: u32) -> Result<Option<String>, String> {
     let tile_path = std::path::PathBuf::from(&cache_dir)
@@ -388,6 +409,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_core_version,
@@ -401,7 +423,8 @@ pub fn run() {
             get_cached_tile,
             download_tile,
             delete_photos_from_app,
-            delete_photos_completely
+            delete_photos_completely,
+            request_photo_library_access
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

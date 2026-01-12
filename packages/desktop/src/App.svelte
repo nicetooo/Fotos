@@ -5,6 +5,11 @@
     import { revealItemInDir } from "@tauri-apps/plugin-opener";
     import { appDataDir, join } from "@tauri-apps/api/path";
     import { listen } from "@tauri-apps/api/event";
+    import { platform } from "@tauri-apps/plugin-os";
+
+    // Platform detection
+    let currentPlatform = $state<string>("unknown");
+    let isMobile = $derived(currentPlatform === "ios" || currentPlatform === "android");
     import Settings from "./components/Settings.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
     import MapView from "./components/Map.svelte";
@@ -239,6 +244,10 @@
 
     onMount(async () => {
         try {
+            // Detect platform
+            currentPlatform = await platform();
+            console.log("Platform:", currentPlatform);
+
             version = await invoke("get_core_version");
             const appData = await appDataDir();
             dbPath = await join(appData, "fotos.db");
@@ -316,6 +325,27 @@
             await invoke("cancel_import");
         } catch (e) {
             console.error("Failed to cancel import:", e);
+        }
+    }
+
+    async function handlePhotoLibraryAccess() {
+        try {
+            // On iOS, this will trigger the native photo picker
+            // The actual implementation needs Swift code via Tauri plugin
+            isScanning = true;
+            error = "";
+
+            const result = await invoke("request_photo_library_access", {
+                dbPath,
+                thumbDir,
+            });
+
+            await loadPhotos();
+        } catch (e) {
+            error = "Photo library access: " + String(e);
+            console.log("Photo library not yet implemented - needs native iOS code");
+        } finally {
+            isScanning = false;
         }
     }
 
@@ -493,23 +523,34 @@
                         class="fixed inset-0 z-40"
                         onclick={() => importMenuOpen = false}
                     ></div>
-                    <div class="absolute left-0 top-full mt-2 py-1 theme-bg-overlay backdrop-blur-sm border theme-border rounded-lg shadow-lg z-50 min-w-[140px]">
-                        <button
-                            onclick={() => { importMenuOpen = false; handleScan("folder"); }}
-                            disabled={isScanning}
-                            class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
-                        >
-                            <i class="fa-solid fa-folder text-xs"></i>
-                            Import Folder
-                        </button>
-                        <button
-                            onclick={() => { importMenuOpen = false; handleScan("file"); }}
-                            disabled={isScanning}
-                            class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
-                        >
-                            <i class="fa-solid fa-file-image text-xs"></i>
-                            Import File
-                        </button>
+                    <div class="absolute left-0 top-full mt-2 py-1 theme-bg-overlay backdrop-blur-sm border theme-border rounded-lg shadow-lg z-50 min-w-[160px]">
+                        {#if isMobile}
+                            <button
+                                onclick={() => { importMenuOpen = false; handlePhotoLibraryAccess(); }}
+                                disabled={isScanning}
+                                class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
+                            >
+                                <i class="fa-solid fa-images text-xs"></i>
+                                Photo Library
+                            </button>
+                        {:else}
+                            <button
+                                onclick={() => { importMenuOpen = false; handleScan("folder"); }}
+                                disabled={isScanning}
+                                class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
+                            >
+                                <i class="fa-solid fa-folder text-xs"></i>
+                                Import Folder
+                            </button>
+                            <button
+                                onclick={() => { importMenuOpen = false; handleScan("file"); }}
+                                disabled={isScanning}
+                                class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
+                            >
+                                <i class="fa-solid fa-file-image text-xs"></i>
+                                Import File
+                            </button>
+                        {/if}
                     </div>
                 {/if}
             </div>

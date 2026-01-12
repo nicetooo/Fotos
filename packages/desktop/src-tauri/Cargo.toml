@@ -24,4 +24,5 @@ fotos-core = { path = "../../core" }
 fotos-shared = { path = "../../shared" }
 fotos-platform-desktop = { path = "../../platform-desktop" }
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+tauri-plugin-os = "2.3.2"
 
