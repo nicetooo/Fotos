@@ -208,13 +208,38 @@
         onMapRangeConsumed?.();
     }
 
+    function handleTouchStart(e: TouchEvent, mode: DragMode) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.touches.length !== 1) return;
+
+        dragMode = mode;
+        dragStartX = e.touches[0].clientX;
+        dragStartLeft = leftPercent;
+        dragStartRight = rightPercent;
+        dragStartWindow = windowPosition;
+
+        // User is interacting with timeline - stop map sync
+        onMapRangeConsumed?.();
+    }
+
     function handleMouseMove(e: MouseEvent) {
         if (dragMode === 'none') return;
+        handleDragMove(e.clientX);
+    }
 
+    function handleTouchMove(e: TouchEvent) {
+        if (dragMode === 'none') return;
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        handleDragMove(e.touches[0].clientX);
+    }
+
+    function handleDragMove(clientX: number) {
         if (dragMode === 'window' && zoomedTrack) {
             // Drag fixed window in zoomed view (1:1 mouse tracking)
             const rect = zoomedTrack.getBoundingClientRect();
-            const deltaPercent = ((e.clientX - dragStartX) / rect.width) * 100;
+            const deltaPercent = ((clientX - dragStartX) / rect.width) * 100;
             // Convert to windowPosition space (compensate for window size)
             const maxMovement = 100 - windowWidthPercent;
             if (maxMovement > 0) {
@@ -225,7 +250,7 @@
         } else if (sliderTrack) {
             // Drag handles in overview
             const rect = sliderTrack.getBoundingClientRect();
-            const deltaPercent = ((e.clientX - dragStartX) / rect.width) * 100;
+            const deltaPercent = ((clientX - dragStartX) / rect.width) * 100;
 
             if (dragMode === 'left') {
                 let newLeft = dragStartLeft + deltaPercent;
@@ -250,6 +275,10 @@
     }
 
     function handleMouseUp() {
+        dragMode = 'none';
+    }
+
+    function handleTouchEnd() {
         dragMode = 'none';
     }
 
@@ -405,7 +434,7 @@
     });
 </script>
 
-<svelte:window on:mousemove={handleMouseMove} on:mouseup={handleMouseUp} />
+<svelte:window on:mousemove={handleMouseMove} on:mouseup={handleMouseUp} on:touchmove={handleTouchMove} on:touchend={handleTouchEnd} />
 
 <div class="timeline-container theme-bg-overlay backdrop-blur-sm px-4 py-3">
     <!-- Header -->
@@ -465,6 +494,7 @@
                         class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded cursor-grab active:cursor-grabbing"
                         style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
                         onmousedown={(e) => handleMouseDown(e, 'window')}
+                        ontouchstart={(e) => handleTouchStart(e, 'window')}
                     >
                         <div class="absolute inset-0 flex items-center justify-center">
                             <div class="w-8 h-4 bg-[var(--accent)] rounded-full flex items-center justify-center">
@@ -517,6 +547,7 @@
             class="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing z-10"
             style="left: {leftPercent}%; right: {100 - rightPercent}%"
             onmousedown={(e) => handleMouseDown(e, 'middle')}
+            ontouchstart={(e) => handleTouchStart(e, 'middle')}
         ></div>
 
         <!-- Left handle -->
@@ -524,6 +555,7 @@
             class="absolute top-0 bottom-0 w-5 cursor-ew-resize flex items-center justify-center z-20"
             style="left: {leftPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'left')}
+            ontouchstart={(e) => handleTouchStart(e, 'left')}
         >
             <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg"></div>
         </div>
@@ -533,6 +565,7 @@
             class="absolute top-0 bottom-0 w-5 cursor-ew-resize flex items-center justify-center z-20"
             style="left: {rightPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'right')}
+            ontouchstart={(e) => handleTouchStart(e, 'right')}
         >
             <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg"></div>
         </div>
