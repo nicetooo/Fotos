@@ -726,7 +726,7 @@
     <div class="flex-1 relative">
         <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} />
 
-        <!-- Floating action buttons (top-left) -->
+        <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
             <!-- Import button -->
             <button

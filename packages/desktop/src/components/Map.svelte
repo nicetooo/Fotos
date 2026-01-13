@@ -386,8 +386,8 @@
     function setupMapControls() {
         if (!map) return;
 
-        // Add controls
-        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+        // Add controls - Mobile: bottom-right, Desktop: top-right
+        map.addControl(new maplibregl.NavigationControl(), isMobile ? 'bottom-right' : 'top-right');
 
         // Custom box select control
         class BoxSelectControl {
@@ -433,12 +433,14 @@
         }
 
         const boxSelectControl = new BoxSelectControl();
-        map.addControl(boxSelectControl as any, 'top-right');
+        // Mobile: controls at bottom-right, Desktop: top-right
+        map.addControl(boxSelectControl as any, isMobile ? 'bottom-right' : 'top-right');
 
         // Store reference to update control state
         (window as any).__boxSelectControl = boxSelectControl;
 
-        map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+        // Attribution at bottom-left on mobile to not overlap with controls
+        map.addControl(new maplibregl.AttributionControl({ compact: true }), isMobile ? 'bottom-left' : 'bottom-right');
 
         // Handle resize
         resizeObserver = new ResizeObserver(() => {
@@ -646,14 +648,15 @@
             bind:this={mapContainer}
             class="absolute inset-0 map-container"
             class:box-select-mode={isBoxSelectMode}
+            class:mobile-map={isMobile}
         ></div>
 
         <!-- Time range indicator -->
         {#if timeRangeDisplay && hasGeotaggedPhotos}
-            <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
-                <div class="{isMobile ? 'px-3 py-1.5 text-xs' : 'px-5 py-2 text-base'} theme-bg-card backdrop-blur-sm rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-2">
-                    <i class="fa-regular fa-calendar text-[var(--accent)] {isMobile ? 'text-[10px]' : ''}"></i>
-                    <span class="tabular-nums text-center">{timeRangeDisplay}</span>
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none {isMobile ? 'max-w-[95%]' : ''}">
+                <div class="{isMobile ? 'px-3 py-1.5 text-[11px]' : 'px-5 py-2 text-base'} theme-bg-card backdrop-blur-sm rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-1.5">
+                    <i class="fa-regular fa-calendar text-[var(--accent)] {isMobile ? 'text-[10px]' : ''} flex-shrink-0"></i>
+                    <span class="tabular-nums whitespace-nowrap">{timeRangeDisplay}</span>
                 </div>
             </div>
         {/if}
@@ -935,5 +938,11 @@
     .box-select-mode :global(.maplibregl-canvas-container),
     .box-select-mode :global(.maplibregl-canvas) {
         cursor: crosshair !important;
+    }
+
+    /* Mobile: move bottom-right controls up above attribution */
+    .mobile-map :global(.maplibregl-ctrl-bottom-right) {
+        bottom: 30px !important;
+        right: 10px !important;
     }
 </style>
