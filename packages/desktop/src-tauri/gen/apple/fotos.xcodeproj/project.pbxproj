@@ -11,13 +11,13 @@
 		314F91FED706A3FBFA5D5B41 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DBE6D377CC287A77184CB7A /* MetalKit.framework */; };
 		3D32AD292737866D14F18BED /* PhotoPickerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DAB1630B0B428164D720C2 /* PhotoPickerManager.swift */; };
 		52FB333CD407951D6B1EC9C2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 51A48960AFC5EA0AD57EB6B3 /* Security.framework */; };
-		82EA490AB43AA5F5D682B62B /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 00E3006B0FEB64281C71C190 /* libapp.a */; };
 		8B074D9265146B9AC4ABF20C /* Photos.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9F2DC43D277745C23EAFAB25 /* Photos.framework */; };
 		92A8C1909FBB9E286E839775 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3030BC9C1B0B9C45FA9E38C2 /* main.mm */; };
 		9591258B224CDA7D5CF654B6 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E578EEBEB1EDC9A3EC60C48 /* libapp.a */; };
 		979C3DACB9ADD64CEBEDC682 /* TauriPhotoBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56DFB02BAC2E008091800C29 /* TauriPhotoBridge.swift */; };
 		A738B4477258FCDB1B6135AE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 98E2FC3A3B82B82191998928 /* Assets.xcassets */; };
 		B8FD8F9EBEF1F5E39237EB6B /* assets in Resources */ = {isa = PBXBuildFile; fileRef = A31A64BC2F6536DD3BCD8038 /* assets */; };
+		B936CF4085625DAB392F40B2 /* FotosBridgeSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275600A633184A68909F2186 /* FotosBridgeSetup.swift */; };
 		BBB1F6482F25ADC14CBCBBDF /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5969D1669CF8B99FCCD89CF2 /* QuartzCore.framework */; };
 		C279C454B31DE7A2012EE5AE /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B2A846D88D9326C025A20A12 /* WebKit.framework */; };
 		D17C093E4F716C298FBAF504 /* PhotosUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B898BD63DCD60C51833AD206 /* PhotosUI.framework */; };
@@ -28,10 +28,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		00E3006B0FEB64281C71C190 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		04E301E0725A16C38D714DC6 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		0E578EEBEB1EDC9A3EC60C48 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		15931E437FCEF89B33A07D06 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		275600A633184A68909F2186 /* FotosBridgeSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FotosBridgeSetup.swift; sourceTree = "<group>"; };
 		3030BC9C1B0B9C45FA9E38C2 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		39BD283D2792647FC43C508C /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		51A48960AFC5EA0AD57EB6B3 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -76,14 +76,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		065D21FE657A7B64F2C190C1 /* Externals */ = {
-			isa = PBXGroup;
-			children = (
-				FD666768172CFC1D05CB0D34 /* arm64 */,
-			);
-			path = Externals;
-			sourceTree = "<group>";
-		};
 		0C36E278EA3B62D6F5E54127 /* fotos */ = {
 			isa = PBXGroup;
 			children = (
@@ -100,14 +92,6 @@
 				15931E437FCEF89B33A07D06 /* bindings.h */,
 			);
 			path = bindings;
-			sourceTree = "<group>";
-		};
-		18AEAB1EBFBFBFF188F53F6B /* release */ = {
-			isa = PBXGroup;
-			children = (
-				00E3006B0FEB64281C71C190 /* libapp.a */,
-			);
-			path = release;
 			sourceTree = "<group>";
 		};
 		41FC575454E7F7BB750A9B93 /* Products */ = {
@@ -140,6 +124,7 @@
 		D57BAB3DE4F3152C88E564E2 /* PhotoPicker */ = {
 			isa = PBXGroup;
 			children = (
+				275600A633184A68909F2186 /* FotosBridgeSetup.swift */,
 				A1DAB1630B0B428164D720C2 /* PhotoPickerManager.swift */,
 				56DFB02BAC2E008091800C29 /* TauriPhotoBridge.swift */,
 			);
@@ -170,7 +155,6 @@
 				A31A64BC2F6536DD3BCD8038 /* assets */,
 				98E2FC3A3B82B82191998928 /* Assets.xcassets */,
 				CA0ABF6716F0612EA2B28FDF /* LaunchScreen.storyboard */,
-				065D21FE657A7B64F2C190C1 /* Externals */,
 				AB2BDEFDA8B50E1A2D7EFC8B /* fotos_iOS */,
 				F6CA488EF5BA3EE56B655F2B /* Sources */,
 				501C1789DA72C8F11FE1587A /* src */,
@@ -185,21 +169,6 @@
 				0C36E278EA3B62D6F5E54127 /* fotos */,
 			);
 			path = Sources;
-			sourceTree = "<group>";
-		};
-		FD666768172CFC1D05CB0D34 /* arm64 */ = {
-			isa = PBXGroup;
-			children = (
-				18AEAB1EBFBFBFF188F53F6B /* release */,
-			);
-			path = arm64;
-			sourceTree = "<group>";
-		};
-		"TEMP_0BDCA8F8-5DFD-4355-81A8-32AF9B532357" /* x86_64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -261,7 +230,6 @@
 				A738B4477258FCDB1B6135AE /* Assets.xcassets in Resources */,
 				DA907C691ED8A5EA53EBC8A2 /* LaunchScreen.storyboard in Resources */,
 				B8FD8F9EBEF1F5E39237EB6B /* assets in Resources */,
-				82EA490AB43AA5F5D682B62B /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -296,6 +264,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B936CF4085625DAB392F40B2 /* FotosBridgeSetup.swift in Sources */,
 				3D32AD292737866D14F18BED /* PhotoPickerManager.swift in Sources */,
 				979C3DACB9ADD64CEBEDC682 /* TauriPhotoBridge.swift in Sources */,
 				92A8C1909FBB9E286E839775 /* main.mm in Sources */,

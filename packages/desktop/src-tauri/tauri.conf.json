@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https://*.basemaps.cartocdn.com data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.basemaps.cartocdn.com",
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' asset: http://asset.localhost https://*.openstreetmap.org https://*.basemaps.cartocdn.com https://demotiles.maplibre.org data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.openstreetmap.org https://*.basemaps.cartocdn.com https://demotiles.maplibre.org; worker-src 'self' blob:; child-src 'self' blob:; font-src 'self' https://demotiles.maplibre.org",
       "assetProtocol": {
         "enable": true,
         "scope": {

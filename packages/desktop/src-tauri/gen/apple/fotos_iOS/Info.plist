@@ -41,7 +41,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Fotos needs access to your photo library to import and organize your photos on the map.</string>
+	<string>Fotos needs access to your photo library to import and manage your photos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Fotos needs permission to save photos to your library.</string>
 </dict>

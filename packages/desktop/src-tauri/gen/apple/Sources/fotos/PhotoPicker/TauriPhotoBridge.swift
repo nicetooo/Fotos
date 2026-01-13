@@ -43,19 +43,93 @@ import WebKit
         // Check authorization first
         let status = PhotoPickerManager.shared.checkAuthorizationStatus()
 
-        if status == 0 { // Not determined
+        // Status: 0=notDetermined, 1=restricted, 2=denied, 3=authorized, 4=limited
+        switch status {
+        case 0: // Not determined - request permission
             PhotoPickerManager.shared.requestAuthorization { [weak self] granted in
                 if granted {
-                    self?.presentPicker(from: rootVC)
+                    // After granting, check the actual status and handle accordingly
+                    let newStatus = PhotoPickerManager.shared.checkAuthorizationStatus()
+                    if newStatus == 4 { // Limited
+                        self?.showLimitedAccessAlert(from: rootVC)
+                    } else {
+                        self?.presentPicker(from: rootVC)
+                    }
                 } else {
                     self?.sendErrorToWebView("Photo library access denied")
                 }
             }
-        } else if status == 2 { // Denied
-            sendErrorToWebView("Photo library access denied. Please enable in Settings.")
-        } else {
+        case 1: // Restricted
+            sendErrorToWebView("Photo library access is restricted on this device")
+        case 2: // Denied
+            showDeniedAccessAlert(from: rootVC)
+        case 3: // Full access - just show picker
+            presentPicker(from: rootVC)
+        case 4: // Limited access - show options
+            showLimitedAccessAlert(from: rootVC)
+        default:
             presentPicker(from: rootVC)
         }
+    }
+
+    /// Show alert for limited access - let user choose more photos or go to settings
+    private func showLimitedAccessAlert(from viewController: UIViewController) {
+        let alert = UIAlertController(
+            title: "照片访问受限",
+            message: "您只授权了部分照片访问权限。您可以选择更多照片或在设置中允许访问所有照片。",
+            preferredStyle: .actionSheet
+        )
+
+        // Option 1: Select more photos to authorize
+        alert.addAction(UIAlertAction(title: "选择更多照片", style: .default) { [weak self] _ in
+            if #available(iOS 14, *) {
+                PhotoPickerManager.shared.presentLimitedLibraryPicker(from: viewController)
+            }
+        })
+
+        // Option 2: Continue with current selection (use PHPicker which works regardless of authorization)
+        alert.addAction(UIAlertAction(title: "从相册选择", style: .default) { [weak self] _ in
+            self?.presentPicker(from: viewController)
+        })
+
+        // Option 3: Go to Settings to grant full access
+        alert.addAction(UIAlertAction(title: "前往设置", style: .default) { _ in
+            if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(settingsUrl)
+            }
+        })
+
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+
+        // For iPad support
+        if let popoverController = alert.popoverPresentationController {
+            popoverController.sourceView = viewController.view
+            popoverController.sourceRect = CGRect(x: viewController.view.bounds.midX, y: viewController.view.bounds.midY, width: 0, height: 0)
+            popoverController.permittedArrowDirections = []
+        }
+
+        viewController.present(alert, animated: true)
+    }
+
+    /// Show alert for denied access - guide user to settings
+    private func showDeniedAccessAlert(from viewController: UIViewController) {
+        let alert = UIAlertController(
+            title: "无法访问照片",
+            message: "请在设置中允许 Fotos 访问您的照片库。",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "前往设置", style: .default) { _ in
+            if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(settingsUrl)
+            }
+        })
+
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { [weak self] _ in
+            self?.sendErrorToWebView("Photo library access denied")
+        })
+
+        viewController.present(alert, animated: true)
     }
 
     private func presentPicker(from viewController: UIViewController) {
@@ -164,6 +238,169 @@ import WebKit
 
         PhotoPickerManager.shared.presentLimitedLibraryPicker(from: rootVC)
     }
+
+    /// Request permission and import all authorized photos
+    /// This is the main entry point for iOS import - handles both full and limited access
+    @objc public func requestAndImportPhotos() {
+        let status = PhotoPickerManager.shared.checkAuthorizationStatus()
+
+        // Status: 0=notDetermined, 1=restricted, 2=denied, 3=authorized, 4=limited
+        switch status {
+        case 0: // Not determined - request permission
+            PhotoPickerManager.shared.requestAuthorization { [weak self] granted in
+                if granted {
+                    // Check what level of access we got
+                    let newStatus = PhotoPickerManager.shared.checkAuthorizationStatus()
+                    self?.handlePermissionResult(status: newStatus)
+                } else {
+                    self?.sendPermissionDenied()
+                }
+            }
+        case 1: // Restricted
+            sendErrorToWebView("Photo library access is restricted on this device")
+        case 2: // Denied
+            sendPermissionDenied()
+        case 3, 4: // Authorized or Limited - import all accessible photos
+            importAllAuthorizedPhotos()
+        default:
+            sendErrorToWebView("Unknown permission status")
+        }
+    }
+
+    /// Auto-sync photos on app launch if user has granted full access
+    /// This silently imports any new photos since last launch
+    @objc public func syncPhotosIfFullAccess() {
+        let status = PhotoPickerManager.shared.checkAuthorizationStatus()
+
+        // Only auto-sync if user has granted full access (status == 3)
+        // For limited access, user should manually trigger import via + button
+        if status == 3 {
+            print("[PhotoPicker] Full access granted, auto-syncing photos...")
+            importAllAuthorizedPhotos()
+        } else {
+            // Send event to notify frontend about permission status
+            DispatchQueue.main.async { [weak self] in
+                let script = "window.dispatchEvent(new CustomEvent('ios-sync-skipped', { detail: { status: \(status) } }));"
+                self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+            }
+        }
+    }
+
+    private func handlePermissionResult(status: Int) {
+        switch status {
+        case 3: // Full access
+            DispatchQueue.main.async { [weak self] in
+                let script = "window.dispatchEvent(new CustomEvent('ios-permission-granted', { detail: { type: 'full' } }));"
+                self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+            }
+            importAllAuthorizedPhotos()
+        case 4: // Limited access
+            DispatchQueue.main.async { [weak self] in
+                let script = "window.dispatchEvent(new CustomEvent('ios-permission-granted', { detail: { type: 'limited' } }));"
+                self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+            }
+            importAllAuthorizedPhotos()
+        default:
+            sendPermissionDenied()
+        }
+    }
+
+    private func sendPermissionDenied() {
+        DispatchQueue.main.async { [weak self] in
+            let script = """
+            window.dispatchEvent(new CustomEvent('ios-permission-denied', {
+                detail: { message: 'Photo library access denied. Please enable in Settings.' }
+            }));
+            """
+            self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+        }
+    }
+
+    /// Import all authorized photos
+    @objc public func importAllAuthorizedPhotos() {
+        // Send start event
+        DispatchQueue.main.async { [weak self] in
+            let script = "window.dispatchEvent(new CustomEvent('ios-import-started', { detail: {} }));"
+            self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+        }
+
+        // Export all photos to temp files
+        PhotoPickerManager.shared.exportAllAuthorizedPhotos(
+            progressCallback: { [weak self] current, total in
+                // Send export progress
+                DispatchQueue.main.async {
+                    let script = """
+                    window.dispatchEvent(new CustomEvent('ios-export-progress', {
+                        detail: { current: \(current), total: \(total), phase: 'exporting' }
+                    }));
+                    """
+                    self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+                }
+            },
+            completion: { [weak self] paths in
+                guard let self = self else { return }
+
+                if paths.isEmpty {
+                    self.sendResultToWebView(success: true, count: 0, message: "No photos to import")
+                    return
+                }
+
+                // Send paths to JavaScript for Tauri import
+                // Process photos one by one via Tauri invoke
+                DispatchQueue.main.async {
+                    let pathsJson = paths.map { "\"\($0)\"" }.joined(separator: ",")
+                    let script = """
+                    (async function() {
+                        const paths = [\(pathsJson)];
+                        const total = paths.length;
+                        let success = 0;
+                        let duplicates = 0;
+                        let failure = 0;
+
+                        for (let i = 0; i < paths.length; i++) {
+                            try {
+                                const result = await window.__TAURI_INTERNALS__?.invoke('import_photos', {
+                                    rootPath: 'file://' + paths[i],
+                                    dbPath: '\(self.dbPath)',
+                                    thumbDir: '\(self.thumbDir)'
+                                });
+                                if (result) {
+                                    success += result.success || 0;
+                                    duplicates += result.duplicates || 0;
+                                    failure += result.failure || 0;
+                                }
+                            } catch (err) {
+                                console.error('Import error:', err);
+                                failure++;
+                            }
+
+                            // Send progress
+                            window.dispatchEvent(new CustomEvent('ios-import-progress', {
+                                detail: {
+                                    current: i + 1,
+                                    total: total,
+                                    success: success,
+                                    duplicates: duplicates,
+                                    failure: failure,
+                                    phase: 'importing'
+                                }
+                            }));
+                        }
+
+                        // Send completion
+                        window.dispatchEvent(new CustomEvent('ios-import-complete', {
+                            detail: { success: success, duplicates: duplicates, failure: failure, total: total }
+                        }));
+
+                        // Reload photos
+                        window.dispatchEvent(new CustomEvent('reload-photos', { detail: {} }));
+                    })();
+                    """
+                    self.webView?.evaluateJavaScript(script, completionHandler: nil)
+                }
+            }
+        )
+    }
 }
 
 // MARK: - WKScriptMessageHandler for receiving commands from JavaScript
@@ -192,6 +429,22 @@ extension TauriPhotoBridge: WKScriptMessageHandler {
                 let count = PhotoPickerManager.shared.getAuthorizedPhotoCount()
                 let script = "window.dispatchEvent(new CustomEvent('ios-authorized-count', { detail: { count: \(count) } }));"
                 webView?.evaluateJavaScript(script, completionHandler: nil)
+
+            case "importAllAuthorized":
+                dbPath = body["dbPath"] as? String ?? dbPath
+                thumbDir = body["thumbDir"] as? String ?? thumbDir
+                importAllAuthorizedPhotos()
+
+            case "requestAndImport":
+                dbPath = body["dbPath"] as? String ?? dbPath
+                thumbDir = body["thumbDir"] as? String ?? thumbDir
+                requestAndImportPhotos()
+
+            case "syncIfFullAccess":
+                // Auto-sync photos on app launch if user has granted full access
+                dbPath = body["dbPath"] as? String ?? dbPath
+                thumbDir = body["thumbDir"] as? String ?? thumbDir
+                syncPhotosIfFullAccess()
 
             default:
                 print("Unknown command: \(command)")

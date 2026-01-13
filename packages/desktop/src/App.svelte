@@ -12,7 +12,7 @@
     let isMobile = $derived(currentPlatform === "ios" || currentPlatform === "android");
     import Settings from "./components/Settings.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
-    import MapView from "./components/Map.svelte";
+    import MapView from "./components/MapView.svelte";
     import type { PhotoInfo } from "./types";
 
     let version = $state("...");
@@ -21,6 +21,7 @@
     let importStatus = $state({
         success: 0,
         failure: 0,
+        duplicates: 0,
         current: 0,
         total: 0,
         lastPath: "",
@@ -33,6 +34,7 @@
     let uniqueTs = $state(Date.now());
     let previewPhoto = $state<PhotoInfo | null>(null);
     let previewPhotoList = $state<PhotoInfo[] | null>(null); // Custom list for map view
+    let iosBridgeReady = $state(false); // iOS Swift bridge ready state
 
     // Sort state with localStorage persistence
     const SORT_BY_KEY = "fotos-sort-by";
@@ -68,7 +70,6 @@
         }
     });
 
-    let importMenuOpen = $state(false);
     let libraryImportMenuOpen = $state(false);
     let sortMenuOpen = $state(false);
 
@@ -259,6 +260,7 @@
                     ...importStatus,
                     success: payload.success,
                     failure: payload.failure,
+                    duplicates: payload.duplicates || 0,
                     current: payload.current,
                     total: payload.total,
                     lastPath: payload.last_path,
@@ -274,7 +276,75 @@
             });
 
             await listen("reload-photos", () => loadPhotos());
+
+            // iOS import events (for "import all authorized" feature)
+            window.addEventListener("ios-import-progress", ((e: CustomEvent) => {
+                const detail = e.detail;
+                importStatus = {
+                    ...importStatus,
+                    success: detail.success || 0,
+                    failure: detail.failure || 0,
+                    duplicates: detail.duplicates || 0,
+                    current: detail.current,
+                    total: detail.total,
+                    lastPath: detail.phase || "",
+                };
+            }) as EventListener);
+
+            window.addEventListener("ios-export-progress", ((e: CustomEvent) => {
+                const detail = e.detail;
+                importStatus = {
+                    ...importStatus,
+                    current: detail.current,
+                    total: detail.total,
+                    lastPath: "Exporting...",
+                };
+            }) as EventListener);
+
+            window.addEventListener("ios-import-complete", ((e: CustomEvent) => {
+                const detail = e.detail;
+                console.log("[iOS Import] Complete:", detail);
+                isScanning = false;
+                loadPhotos();
+            }) as EventListener);
+
+            window.addEventListener("ios-import-started", (() => {
+                isScanning = true;
+                importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "Starting..." };
+            }) as EventListener);
+
+            // iOS permission events
+            window.addEventListener("ios-permission-granted", ((e: CustomEvent) => {
+                const detail = e.detail;
+                console.log("[iOS] Permission granted:", detail.type);
+                // Import will start automatically after permission is granted
+            }) as EventListener);
+
+            window.addEventListener("ios-permission-denied", ((e: CustomEvent) => {
+                const detail = e.detail;
+                console.log("[iOS] Permission denied:", detail.message);
+                error = detail.message || "Photo library access denied";
+                isScanning = false;
+            }) as EventListener);
+
+            // iOS Swift bridge ready event
+            window.addEventListener("fotos-bridge-ready", (() => {
+                console.log("[iOS] Swift bridge is ready");
+                iosBridgeReady = true;
+            }) as EventListener);
+
+            // Check if bridge is already ready (in case event fired before we listened)
+            if ((window as any).__FOTOS_BRIDGE_READY__) {
+                console.log("[iOS] Swift bridge was already ready");
+                iosBridgeReady = true;
+            }
+
             await loadPhotos();
+
+            // iOS: Auto-sync photos if user has granted full access
+            if (currentPlatform === "ios") {
+                syncIOSPhotosIfFullAccess();
+            }
         } catch (e) {
             error = "Failed to initialize: " + e;
         }
@@ -328,25 +398,176 @@
         }
     }
 
-    async function handlePhotoLibraryAccess() {
+    // Import handler - different behavior for iOS vs Desktop
+    // iOS: Request permission and import all authorized photos directly
+    // Desktop: Show file/folder picker
+    async function handleImport() {
+        console.log("[Import] Starting import, platform:", currentPlatform);
+
+        if (currentPlatform === "ios") {
+            // iOS: Try native Swift bridge first, fall back to invoke
+            await handleIOSImport();
+            return;
+        }
+
+        // Desktop: Use file picker
+        await handleDesktopImport();
+    }
+
+    // iOS: Auto-sync photos on app launch if user has full access
+    async function syncIOSPhotosIfFullAccess() {
+        console.log("[iOS Sync] Checking for full access to auto-sync...");
+
+        const webkit = (window as any).webkit;
+        if (webkit?.messageHandlers?.fotosPhotoPicker) {
+            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+                command: "syncIfFullAccess",
+                dbPath: dbPath,
+                thumbDir: thumbDir
+            });
+        } else {
+            console.log("[iOS Sync] Bridge not ready, will sync on next launch");
+        }
+    }
+
+    // iOS-specific import: request permission and import all authorized photos
+    async function handleIOSImport() {
+        console.log("[iOS Import] Starting iOS import, bridge ready:", iosBridgeReady);
+
+        // Check if bridge is ready
+        const webkit = (window as any).webkit;
+        const bridgeAvailable = webkit?.messageHandlers?.fotosPhotoPicker || (window as any).__FOTOS_BRIDGE_READY__;
+
+        if (bridgeAvailable) {
+            console.log("[iOS Import] Using webkit message handler");
+            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+                command: "requestAndImport",
+                dbPath: dbPath,
+                thumbDir: thumbDir
+            });
+            return;
+        }
+
+        // Bridge not ready - wait a bit and retry
+        console.log("[iOS Import] Bridge not ready, waiting...");
+        isScanning = true;
+        importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "Initializing..." };
+
+        // Wait for bridge with timeout
+        const maxWait = 3000; // 3 seconds
+        const startTime = Date.now();
+
+        const waitForBridge = () => {
+            return new Promise<boolean>((resolve) => {
+                const check = () => {
+                    const webkit = (window as any).webkit;
+                    if (webkit?.messageHandlers?.fotosPhotoPicker) {
+                        resolve(true);
+                        return;
+                    }
+                    if (Date.now() - startTime > maxWait) {
+                        resolve(false);
+                        return;
+                    }
+                    setTimeout(check, 100);
+                };
+                check();
+            });
+        };
+
+        const ready = await waitForBridge();
+
+        if (ready) {
+            console.log("[iOS Import] Bridge became ready, proceeding");
+            const webkit = (window as any).webkit;
+            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+                command: "requestAndImport",
+                dbPath: dbPath,
+                thumbDir: thumbDir
+            });
+        } else {
+            console.error("[iOS Import] Bridge not available after timeout");
+            error = "Photo import not available. Please restart the app.";
+            isScanning = false;
+        }
+    }
+
+    // Desktop import: show file picker
+    async function handleDesktopImport() {
         try {
-            // On iOS, this will trigger the native photo picker
-            // The actual implementation needs Swift code via Tauri plugin
             isScanning = true;
             error = "";
+            importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
 
-            const result = await invoke("request_photo_library_access", {
-                dbPath,
-                thumbDir,
+            const selected = await open({
+                multiple: true,
+                directory: false,
+                filters: [{
+                    name: "Images",
+                    extensions: ["jpg", "jpeg", "png", "heic", "heif", "webp", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"]
+                }]
             });
 
+            console.log("[Import] Selected paths:", selected);
+
+            if (!selected) {
+                console.log("[Import] No selection made");
+                isScanning = false;
+                return;
+            }
+
+            const paths = Array.isArray(selected) ? selected : [selected];
+            console.log("[Import] Processing", paths.length, "paths");
+
+            let totalSuccess = 0;
+            let totalDuplicates = 0;
+            let totalFailure = 0;
+
+            for (let i = 0; i < paths.length; i++) {
+                const path = paths[i];
+                console.log("[Import] Importing path:", path);
+                try {
+                    const result: any = await invoke("import_photos", {
+                        rootPath: path,
+                        dbPath,
+                        thumbDir,
+                    });
+                    console.log("[Import] Result for", path, ":", result);
+                    totalSuccess += result.success || 0;
+                    totalDuplicates += result.duplicates || 0;
+                    totalFailure += result.failure || 0;
+
+                    // Update status
+                    importStatus = {
+                        success: totalSuccess,
+                        failure: totalFailure,
+                        duplicates: totalDuplicates,
+                        current: i + 1,
+                        total: paths.length,
+                        lastPath: path.split('/').pop() || path,
+                    };
+                } catch (e) {
+                    console.error("[Import] Failed to import:", path, e);
+                    totalFailure++;
+                }
+            }
+
             await loadPhotos();
+            console.log("[Import] Photos loaded, count:", photos.length);
         } catch (e) {
-            error = "Photo library access: " + String(e);
-            console.log("Photo library not yet implemented - needs native iOS code");
+            console.error("[Import] Error:", e);
+            error = "Import failed: " + String(e);
         } finally {
             isScanning = false;
         }
+    }
+
+    // Platform-specific UI visibility
+    const mobilePlatforms = new Set(["ios", "android"]);
+    let showLibraryButton = $derived(!mobilePlatforms.has(currentPlatform));
+
+    function handleLibrary() {
+        showLibrary = !showLibrary;
     }
 
     async function handleShowInFinder(path: string, e: MouseEvent) {
@@ -508,57 +729,20 @@
         <!-- Floating action buttons (top-left) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
             <!-- Import button -->
-            <div class="relative">
-                <button
-                    onclick={() => importMenuOpen = !importMenuOpen}
-                    disabled={isScanning}
-                    class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
-                    title="Import photos"
-                >
-                    <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>
-                </button>
-                {#if importMenuOpen}
-                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                    <div
-                        class="fixed inset-0 z-40"
-                        onclick={() => importMenuOpen = false}
-                    ></div>
-                    <div class="absolute left-0 top-full mt-2 py-1 theme-bg-overlay backdrop-blur-sm border theme-border rounded-lg shadow-lg z-50 min-w-[160px]">
-                        {#if isMobile}
-                            <button
-                                onclick={() => { importMenuOpen = false; handlePhotoLibraryAccess(); }}
-                                disabled={isScanning}
-                                class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
-                            >
-                                <i class="fa-solid fa-images text-xs"></i>
-                                Photo Library
-                            </button>
-                        {:else}
-                            <button
-                                onclick={() => { importMenuOpen = false; handleScan("folder"); }}
-                                disabled={isScanning}
-                                class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
-                            >
-                                <i class="fa-solid fa-folder text-xs"></i>
-                                Import Folder
-                            </button>
-                            <button
-                                onclick={() => { importMenuOpen = false; handleScan("file"); }}
-                                disabled={isScanning}
-                                class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-bg-secondary flex items-center gap-2"
-                            >
-                                <i class="fa-solid fa-file-image text-xs"></i>
-                                Import File
-                            </button>
-                        {/if}
-                    </div>
-                {/if}
-            </div>
-
-            <!-- Library button -->
             <button
-                onclick={() => showLibrary = !showLibrary}
+                onclick={() => handleImport()}
+                disabled={isScanning}
+                class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                title="Import photos"
+            >
+                <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>
+            </button>
+
+            <!-- Library button (desktop only) -->
+            <button
+                onclick={() => handleLibrary()}
                 class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all {showLibrary ? 'theme-bg-secondary' : ''}"
+                class:hidden={!showLibraryButton}
                 title="Library"
             >
                 <i class="fa-solid fa-images"></i>
@@ -752,6 +936,9 @@
                 <i class="fa-solid fa-spinner fa-spin text-xs"></i>
                 {#if importStatus.total > 0}
                     <span>{importStatus.current} / {importStatus.total}</span>
+                    {#if importStatus.duplicates > 0}
+                        <span class="text-yellow-400" title="Already imported">({importStatus.duplicates} dup)</span>
+                    {/if}
                 {:else}
                     <span>Scanning...</span>
                 {/if}

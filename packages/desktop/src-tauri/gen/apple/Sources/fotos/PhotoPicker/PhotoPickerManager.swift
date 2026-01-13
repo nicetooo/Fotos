@@ -138,6 +138,82 @@ import UIKit
         }
     }
 
+    /// Export all authorized photos to temp files and return their paths
+    /// This is the main function for "import all authorized photos" feature
+    @objc public func exportAllAuthorizedPhotos(
+        progressCallback: @escaping (Int, Int) -> Void,
+        completion: @escaping ([String]) -> Void
+    ) {
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        fetchOptions.includeHiddenAssets = false
+
+        let results = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        let total = results.count
+
+        if total == 0 {
+            completion([])
+            return
+        }
+
+        var exportedPaths: [String] = []
+        let queue = DispatchQueue(label: "photo.export", qos: .userInitiated)
+        let group = DispatchGroup()
+
+        // Get cache directory for temp files
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+
+        var processed = 0
+        let lock = NSLock()
+
+        results.enumerateObjects { asset, index, _ in
+            group.enter()
+
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+            options.isSynchronous = false
+
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, info in
+                defer {
+                    lock.lock()
+                    processed += 1
+                    let current = processed
+                    lock.unlock()
+
+                    DispatchQueue.main.async {
+                        progressCallback(current, total)
+                    }
+                    group.leave()
+                }
+
+                guard let imageData = data else { return }
+
+                // Determine file extension
+                let resources = PHAssetResource.assetResources(for: asset)
+                var filename = resources.first?.originalFilename ?? "photo_\(asset.localIdentifier)"
+
+                // Sanitize filename (remove invalid characters)
+                filename = filename.replacingOccurrences(of: "/", with: "_")
+
+                let tempPath = cacheDir.appendingPathComponent(filename)
+
+                do {
+                    try imageData.write(to: tempPath)
+                    lock.lock()
+                    exportedPaths.append(tempPath.path)
+                    lock.unlock()
+                } catch {
+                    print("[PhotoPicker] Failed to write temp file: \(error)")
+                }
+            }
+        }
+
+        group.notify(queue: .main) {
+            completion(exportedPaths)
+        }
+    }
+
     /// Load photo data from PHAsset
     private func loadPhotoData(from asset: PHAsset, completion: @escaping (PhotoData?) -> Void) {
         let options = PHImageRequestOptions()

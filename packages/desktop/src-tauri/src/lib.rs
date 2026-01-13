@@ -210,20 +210,29 @@ async fn import_photos(
         }
 
         // Use a block to ensure we can handle errors per-file
-        let file_result = (|| -> Result<(), String> {
-            println!("[Import] Reading metadata for: {}", path_str);
-            let metadata = fotos_core::read_metadata(&path).map_err(|e| {
-                println!("[Import] Metadata error: {}", e);
-                e.to_string()
-            })?;
-            println!("[Import] Metadata: {:?}", metadata);
-
+        // Returns: Ok(true) = new photo, Ok(false) = duplicate, Err = failure
+        let file_result = (|| -> Result<bool, String> {
             println!("[Import] Computing hash...");
             let hash = fotos_core::compute_hash(&path).map_err(|e| {
                 println!("[Import] Hash error: {}", e);
                 e.to_string()
             })?;
             println!("[Import] Hash: {}", &hash[..hash.len().min(16)]);
+
+            // Check if this photo already exists (by hash)
+            if index.exists_by_hash(&hash).unwrap_or(false) {
+                println!("[Import] DUPLICATE (already imported): {}", path_str);
+                // Clean up the copied file since we don't need it
+                let _ = std::fs::remove_file(&path);
+                return Ok(false); // Duplicate
+            }
+
+            println!("[Import] Reading metadata for: {}", path_str);
+            let metadata = fotos_core::read_metadata(&path).map_err(|e| {
+                println!("[Import] Metadata error: {}", e);
+                e.to_string()
+            })?;
+            println!("[Import] Metadata: {:?}", metadata);
 
             // Thumbnail generation may fail if no EXIF thumbnail - that's OK, frontend uses original
             println!("[Import] Generating thumbnail...");
@@ -235,13 +244,17 @@ async fn import_photos(
                 println!("[Import] DB insert error: {}", e);
                 e.to_string()
             })?;
-            Ok(())
+            Ok(true) // New photo
         })();
 
         match file_result {
-            Ok(_) => {
+            Ok(true) => {
                 println!("[Import] SUCCESS: {}", path_str);
                 result.success += 1;
+            },
+            Ok(false) => {
+                // Duplicate - already counted above
+                result.duplicates += 1;
             },
             Err(e) => {
                 println!("[Import] FAILED: {} - {}", path_str, e);
@@ -256,6 +269,7 @@ async fn import_photos(
             "total": total,
             "success": result.success,
             "failure": result.failure,
+            "duplicates": result.duplicates,
             "last_path": path_str
         }));
     }
@@ -590,8 +604,44 @@ pub fn run() {
             delete_photos_from_app,
             delete_photos_completely,
             request_photo_library_access,
-            process_ios_photo
+            process_ios_photo,
+            import_all_ios_photos
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Import all authorized photos from iOS photo library
+/// This is the iOS-specific implementation that uses PhotoKit directly
+#[tauri::command]
+async fn import_all_ios_photos(
+    window: tauri::Window,
+    db_path: String,
+    thumb_dir: String,
+) -> Result<ImportResult, String> {
+    #[cfg(target_os = "ios")]
+    {
+        use std::process::Command;
+
+        // On iOS, we need to use the native PhotoKit API
+        // For now, emit an event to trigger Swift code via JavaScript injection
+        use tauri::Emitter;
+        window.emit("trigger-ios-import-all", serde_json::json!({
+            "dbPath": db_path,
+            "thumbDir": thumb_dir
+        })).map_err(|e| e.to_string())?;
+
+        // Return a pending result - actual results come via events
+        Ok(ImportResult {
+            success: 0,
+            failure: 0,
+            duplicates: 0,
+        })
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (window, db_path, thumb_dir);
+        Err("This command is only available on iOS".to_string())
+    }
 }

@@ -9,6 +9,7 @@ pub struct PhotoId {
 pub struct ImportResult {
     pub success: u32,
     pub failure: u32,
+    pub duplicates: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]

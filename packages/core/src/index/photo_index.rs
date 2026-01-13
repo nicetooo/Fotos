@@ -132,6 +132,18 @@ impl PhotoIndex {
         }
     }
 
+    /// Check if a photo with the given hash already exists.
+    /// Returns true if exists, false otherwise.
+    pub fn exists_by_hash(&self, hash: &str) -> Result<bool, CoreError> {
+        let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM photos WHERE hash = ?1",
+            params![hash],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
     /// Get a photo by its ID.
     pub fn get_by_id(&self, id: i64) -> Result<Option<PhotoInfo>, CoreError> {
         let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
