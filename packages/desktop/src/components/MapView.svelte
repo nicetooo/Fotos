@@ -47,14 +47,17 @@
         },
     };
 
+    let isMobile = $state(false);
+
     onMount(async () => {
         const currentPlatform = await platform();
         tileConfig = tileConfigs[currentPlatform] ?? tileConfigs.macos;
+        isMobile = currentPlatform === "ios" || currentPlatform === "android";
     });
 </script>
 
 {#if tileConfig}
-    <Map {photos} {onOpenPreview} {theme} {tileConfig} />
+    <Map {photos} {onOpenPreview} {theme} {tileConfig} {isMobile} />
 {:else}
     <div class="w-full h-full flex items-center justify-center theme-bg-secondary">
         <i class="fa-solid fa-spinner fa-spin text-2xl theme-text-muted"></i>

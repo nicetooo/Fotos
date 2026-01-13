@@ -5,11 +5,12 @@
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
 
-    let { photos, onOpenPreview, theme = "dark", tileConfig } = $props<{
+    let { photos, onOpenPreview, theme = "dark", tileConfig, isMobile = false } = $props<{
         photos: any[];
         onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
         theme?: "dark" | "light";
         tileConfig?: { tiles: string[]; tileSize: number };
+        isMobile?: boolean;
     }>();
 
     let mapContainer: HTMLDivElement;
@@ -675,6 +676,7 @@
                     onExternalRangeConsumed={() => { boxSelectedTimeRange = null; }}
                     onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
                     onShowAll={handleShowAllPhotos}
+                    {isMobile}
                 />
             {/if}
         </div>

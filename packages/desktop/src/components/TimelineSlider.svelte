@@ -6,7 +6,8 @@
         onTimeRangeChange,
         onExternalRangeConsumed,
         onMapRangeConsumed,
-        onShowAll
+        onShowAll,
+        isMobile = false
     } = $props<{
         photos: any[];
         externalTimeRange?: { start: Date; end: Date } | null;
@@ -15,6 +16,7 @@
         onExternalRangeConsumed?: () => void;
         onMapRangeConsumed?: () => void;
         onShowAll?: () => void;
+        isMobile?: boolean;
     }>();
 
     // Parse dates from photos
@@ -322,8 +324,16 @@
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
+    function formatDateShort(date: Date): string {
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+    }
+
     function formatDateTime(date: Date): string {
         return `${formatDate(date)} ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    function formatDateTimeShort(date: Date): string {
+        return `${formatDateShort(date)} ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
     }
 
     function resetSelection() {
@@ -402,16 +412,16 @@
 <div class="timeline-container theme-bg-overlay backdrop-blur-sm px-4 py-3">
     <!-- Header -->
     <div class="flex items-center justify-between mb-2">
-        <div class="text-xs theme-text-secondary">
-            {formatDateTime(viewWindow.start)} - {formatDateTime(viewWindow.end)}
+        <div class="{isMobile ? 'text-[10px]' : 'text-xs'} theme-text-secondary">
+            {isMobile ? formatDateTimeShort(viewWindow.start) : formatDateTime(viewWindow.start)} - {isMobile ? formatDateTimeShort(viewWindow.end) : formatDateTime(viewWindow.end)}
         </div>
-        <div class="flex items-center gap-3">
-            <span class="text-xs theme-text-secondary">
-                {photosInWindow} / {photos.length}
+        <div class="flex items-center gap-2">
+            <span class="{isMobile ? 'text-[10px]' : 'text-xs'} theme-text-secondary">
+                {photosInWindow}/{photos.length}
             </span>
             {#if isZoomed || isMapConstrained}
-                <button onclick={resetSelection} class="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)]">
-                    {isMapConstrained ? 'Show All' : 'Reset'}
+                <button onclick={resetSelection} class="{isMobile ? 'text-[10px]' : 'text-xs'} text-[var(--accent)] hover:text-[var(--accent-hover)]">
+                    {isMapConstrained ? 'All' : 'Reset'}
                 </button>
             {/if}
         </div>
