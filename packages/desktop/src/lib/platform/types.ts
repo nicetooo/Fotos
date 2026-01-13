@@ -92,4 +92,7 @@ export interface IOSPlatformService extends PlatformService {
 
     /** 显示有限权限选择器 */
     showLimitedLibraryPicker(): void;
+
+    /** 订阅权限状态变化 */
+    onPermissionChange(callback: (hasFullAccess: boolean) => void): () => void;
 }

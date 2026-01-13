@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+    import { listen } from "@tauri-apps/api/event";
     import { revealItemInDir } from "@tauri-apps/plugin-opener";
     import { appDataDir, join } from "@tauri-apps/api/path";
 
@@ -185,6 +186,9 @@
             platformService.onImportComplete(() => {
                 loadPhotos();
             });
+
+            // Listen for reload-photos event (e.g., after clear cache)
+            await listen("reload-photos", () => loadPhotos());
 
             await loadPhotos();
         } catch (e) {

@@ -30,6 +30,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     private progressCallbacks = new Set<(p: ImportProgress) => void>();
     private completeCallbacks = new Set<(r: ImportResult) => void>();
     private scanningCallbacks = new Set<(s: boolean) => void>();
+    private permissionCallbacks = new Set<(hasFullAccess: boolean) => void>();
     private eventListeners: EventHandler[] = [];
     private dbPath = '';
     private thumbDir = '';
@@ -96,6 +97,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             const detail = e.detail;
             console.log("[iOS] Permission granted:", detail.type);
             this._hasFullAccess = detail.type === "full";
+            this.permissionCallbacks.forEach(cb => cb(this._hasFullAccess));
         });
 
         // iOS 权限拒绝事件
@@ -103,6 +105,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             const detail = e.detail;
             console.log("[iOS] Permission denied:", detail.message);
             this._hasFullAccess = false;
+            this.permissionCallbacks.forEach(cb => cb(false));
             this.scanningCallbacks.forEach(cb => cb(false));
         });
 
@@ -111,6 +114,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             const status = e.detail.status;
             console.log("[iOS] Permission status:", status);
             this._hasFullAccess = status === 3; // 3 = authorized (full access)
+            this.permissionCallbacks.forEach(cb => cb(this._hasFullAccess));
         });
 
         // iOS 同步跳过事件
@@ -118,6 +122,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             const status = e.detail.status;
             console.log("[iOS] Sync skipped, status:", status);
             this._hasFullAccess = status === 3;
+            this.permissionCallbacks.forEach(cb => cb(this._hasFullAccess));
         });
 
         // iOS Swift 桥接就绪事件
@@ -218,6 +223,11 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
                 command: "showLimitedLibraryPicker"
             });
         }
+    }
+
+    onPermissionChange(callback: (hasFullAccess: boolean) => void): () => void {
+        this.permissionCallbacks.add(callback);
+        return () => this.permissionCallbacks.delete(callback);
     }
 
     private async waitForBridge(maxWait: number): Promise<boolean> {
