@@ -66,18 +66,25 @@
     }
 
     // Format time range for display
-    function formatTimeRange(start: Date | null, end: Date | null): string {
+    function formatTimeRange(start: Date | null, end: Date | null, short: boolean = false): string {
         if (!start || !end) return '';
         const sameDay = start.toDateString() === end.toDateString();
-        const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const formatDate = (d: Date) => d.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: short ? '2-digit' : 'numeric'
+        });
+        const formatTime = (d: Date) => d.toLocaleTimeString('en-US', {
+            hour: short ? 'numeric' : '2-digit',
+            minute: '2-digit'
+        });
         if (sameDay) {
             return `${formatDate(start)} ${formatTime(start)} - ${formatTime(end)}`;
         }
         return `${formatDate(start)} - ${formatDate(end)}`;
     }
 
-    let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd));
+    let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd, isMobile));
 
     // Photos with markers for TimelineSlider
     let photosWithMarkers = $state<any[]>([]);
@@ -644,9 +651,9 @@
         <!-- Time range indicator -->
         {#if timeRangeDisplay && hasGeotaggedPhotos}
             <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
-                <div class="px-5 py-2 theme-bg-card backdrop-blur-sm rounded-full theme-text-primary text-base font-medium shadow-lg flex items-center gap-2">
-                    <i class="fa-regular fa-calendar text-[var(--accent)]"></i>
-                    <span class="tabular-nums min-w-[200px] text-center">{timeRangeDisplay}</span>
+                <div class="{isMobile ? 'px-3 py-1.5 text-xs' : 'px-5 py-2 text-base'} theme-bg-card backdrop-blur-sm rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-2">
+                    <i class="fa-regular fa-calendar text-[var(--accent)] {isMobile ? 'text-[10px]' : ''}"></i>
+                    <span class="tabular-nums text-center">{timeRangeDisplay}</span>
                 </div>
             </div>
         {/if}
