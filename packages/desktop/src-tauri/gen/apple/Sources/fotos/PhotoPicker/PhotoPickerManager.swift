@@ -144,6 +144,8 @@ import UIKit
         progressCallback: @escaping (Int, Int) -> Void,
         completion: @escaping ([String]) -> Void
     ) {
+        NSLog("[PhotoPicker] exportAllAuthorizedPhotos started")
+
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.includeHiddenAssets = false
@@ -151,13 +153,15 @@ import UIKit
         let results = PHAsset.fetchAssets(with: .image, options: fetchOptions)
         let total = results.count
 
+        NSLog("[PhotoPicker] Found %d photos to export", total)
+
         if total == 0 {
+            NSLog("[PhotoPicker] No photos, calling completion")
             completion([])
             return
         }
 
         var exportedPaths: [String] = []
-        let queue = DispatchQueue(label: "photo.export", qos: .userInitiated)
         let group = DispatchGroup()
 
         // Get cache directory for temp files
@@ -165,16 +169,41 @@ import UIKit
 
         var processed = 0
         let lock = NSLock()
+        var completionCalled = false
+        let completionLock = NSLock()
+
+        // Safety timeout - complete after 30 seconds max
+        let timeoutWorkItem = DispatchWorkItem { [weak self] in
+            completionLock.lock()
+            let alreadyCalled = completionCalled
+            if !alreadyCalled {
+                completionCalled = true
+            }
+            completionLock.unlock()
+
+            if !alreadyCalled {
+                NSLog("[PhotoPicker] Export timeout triggered, processed \(processed)/\(total)")
+                lock.lock()
+                let paths = exportedPaths
+                lock.unlock()
+                completion(paths)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeoutWorkItem)
 
         results.enumerateObjects { asset, index, _ in
             group.enter()
+            NSLog("[PhotoPicker] Processing asset \(index + 1)/\(total)")
 
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
             options.isNetworkAccessAllowed = true
             options.isSynchronous = false
+            options.version = .current
 
             PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, info in
+                NSLog("[PhotoPicker] Got callback for asset \(index + 1), data: \(data != nil)")
+
                 defer {
                     lock.lock()
                     processed += 1
@@ -184,10 +213,14 @@ import UIKit
                     DispatchQueue.main.async {
                         progressCallback(current, total)
                     }
+                    NSLog("[PhotoPicker] Leaving group for asset \(index + 1), processed: \(current)/\(total)")
                     group.leave()
                 }
 
-                guard let imageData = data else { return }
+                guard let imageData = data else {
+                    NSLog("[PhotoPicker] No data for asset \(index + 1)")
+                    return
+                }
 
                 // Determine file extension
                 let resources = PHAssetResource.assetResources(for: asset)
@@ -199,18 +232,37 @@ import UIKit
                 let tempPath = cacheDir.appendingPathComponent(filename)
 
                 do {
+                    // Overwrite if exists
+                    if FileManager.default.fileExists(atPath: tempPath.path) {
+                        try FileManager.default.removeItem(at: tempPath)
+                    }
                     try imageData.write(to: tempPath)
                     lock.lock()
                     exportedPaths.append(tempPath.path)
                     lock.unlock()
+                    NSLog("[PhotoPicker] Exported: \(filename)")
                 } catch {
-                    print("[PhotoPicker] Failed to write temp file: \(error)")
+                    NSLog("[PhotoPicker] Failed to write temp file: \(error)")
                 }
             }
         }
 
         group.notify(queue: .main) {
-            completion(exportedPaths)
+            timeoutWorkItem.cancel()
+
+            completionLock.lock()
+            let alreadyCalled = completionCalled
+            if !alreadyCalled {
+                completionCalled = true
+            }
+            completionLock.unlock()
+
+            if !alreadyCalled {
+                NSLog("[PhotoPicker] Export completed normally, \(exportedPaths.count) photos exported")
+                completion(exportedPaths)
+            } else {
+                NSLog("[PhotoPicker] Export group notified but completion already called")
+            }
         }
     }
 

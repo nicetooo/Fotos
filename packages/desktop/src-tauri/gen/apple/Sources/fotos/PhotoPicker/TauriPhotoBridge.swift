@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import WebKit
+import Photos
 
 /// Bridge between Tauri WebView and native photo picker
 @objc public class TauriPhotoBridge: NSObject {
@@ -17,8 +18,26 @@ import WebKit
     /// Thumbnail directory
     private var thumbDir: String = ""
 
+    /// Flag to track if we're waiting for photo library changes
+    private var waitingForLibraryChange = false
+
+    /// Flag to track if import is in progress
+    private var isImporting = false
+
     private override init() {
         super.init()
+    }
+
+    /// Register for photo library changes
+    private func registerForPhotoLibraryChanges() {
+        waitingForLibraryChange = true
+        PHPhotoLibrary.shared().register(self)
+    }
+
+    /// Unregister from photo library changes
+    private func unregisterForPhotoLibraryChanges() {
+        waitingForLibraryChange = false
+        PHPhotoLibrary.shared().unregisterChangeObserver(self)
     }
 
     /// Configure with app paths
@@ -32,10 +51,23 @@ import WebKit
         self.webView = webView
     }
 
-    /// Show photo picker
-    @objc public func showPhotoPicker() {
+    /// Get the topmost view controller for presenting
+    private func getTopmostViewController() -> UIViewController? {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let rootVC = windowScene.windows.first?.rootViewController else {
+            return nil
+        }
+
+        var topVC = rootVC
+        while let presented = topVC.presentedViewController {
+            topVC = presented
+        }
+        return topVC
+    }
+
+    /// Show photo picker
+    @objc public func showPhotoPicker() {
+        guard let rootVC = getTopmostViewController() else {
             sendErrorToWebView("Unable to find root view controller")
             return
         }
@@ -83,6 +115,8 @@ import WebKit
         // Option 1: Select more photos to authorize
         alert.addAction(UIAlertAction(title: "选择更多照片", style: .default) { [weak self] _ in
             if #available(iOS 14, *) {
+                // Register for photo library changes to detect when user finishes selecting
+                self?.registerForPhotoLibraryChanges()
                 PhotoPickerManager.shared.presentLimitedLibraryPicker(from: viewController)
             }
         })
@@ -230,12 +264,27 @@ import WebKit
 
     /// Show Limited Library Picker
     @objc public func showLimitedLibraryPicker() {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first?.rootViewController else {
+        guard let rootVC = getTopmostViewController() else {
             sendErrorToWebView("Unable to find root view controller")
             return
         }
 
+        PhotoPickerManager.shared.presentLimitedLibraryPicker(from: rootVC)
+    }
+
+    /// Show Limited Library Picker and import after user selection
+    @objc public func showLimitedLibraryPickerAndImport() {
+        guard let rootVC = getTopmostViewController() else {
+            sendErrorToWebView("Unable to find root view controller")
+            return
+        }
+
+        NSLog("[PhotoPicker] Showing limited library picker for user to select more photos")
+
+        // Register for photo library changes to detect when user adds photos
+        registerForPhotoLibraryChanges()
+
+        // Show the limited library picker
         PhotoPickerManager.shared.presentLimitedLibraryPicker(from: rootVC)
     }
 
@@ -260,8 +309,10 @@ import WebKit
             sendErrorToWebView("Photo library access is restricted on this device")
         case 2: // Denied
             sendPermissionDenied()
-        case 3, 4: // Authorized or Limited - import all accessible photos
+        case 3: // Full access - just import all photos
             importAllAuthorizedPhotos()
+        case 4: // Limited access - show picker to select more photos
+            showLimitedLibraryPickerAndImport()
         default:
             sendErrorToWebView("Unknown permission status")
         }
@@ -281,7 +332,7 @@ import WebKit
         // Only auto-sync if user has granted full access (status == 3)
         // For limited access, user should manually trigger import via + button
         if status == 3 {
-            print("[PhotoPicker] Full access granted, auto-syncing photos...")
+            NSLog("[PhotoPicker] Full access granted, auto-syncing photos...")
             importAllAuthorizedPhotos()
         }
     }
@@ -318,13 +369,28 @@ import WebKit
 
     /// Import all authorized photos
     @objc public func importAllAuthorizedPhotos() {
+        NSLog("[PhotoPicker] importAllAuthorizedPhotos called, isImporting: \(isImporting)")
+
+        // Prevent overlapping imports
+        guard !isImporting else {
+            NSLog("[PhotoPicker] Import already in progress, skipping")
+            return
+        }
+        isImporting = true
+
         // Send start event
         DispatchQueue.main.async { [weak self] in
+            NSLog("[PhotoPicker] Sending ios-import-started event")
             let script = "window.dispatchEvent(new CustomEvent('ios-import-started', { detail: {} }));"
-            self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+            self?.webView?.evaluateJavaScript(script) { _, error in
+                if let error = error {
+                    NSLog("[PhotoPicker] Error sending start event: \(error)")
+                }
+            }
         }
 
         // Export all photos to temp files
+        NSLog("[PhotoPicker] Starting exportAllAuthorizedPhotos")
         PhotoPickerManager.shared.exportAllAuthorizedPhotos(
             progressCallback: { [weak self] current, total in
                 // Send export progress
@@ -338,65 +404,72 @@ import WebKit
                 }
             },
             completion: { [weak self] paths in
-                guard let self = self else { return }
-
-                if paths.isEmpty {
-                    self.sendResultToWebView(success: true, count: 0, message: "No photos to import")
+                NSLog("[PhotoPicker] Export completed, paths count: \(paths.count)")
+                guard let self = self else {
+                    NSLog("[PhotoPicker] Self is nil in completion")
                     return
                 }
 
-                // Send paths to JavaScript for Tauri import
-                // Process photos one by one via Tauri invoke
-                DispatchQueue.main.async {
-                    let pathsJson = paths.map { "\"\($0)\"" }.joined(separator: ",")
-                    let script = """
-                    (async function() {
-                        const paths = [\(pathsJson)];
-                        const total = paths.length;
-                        let success = 0;
-                        let duplicates = 0;
-                        let failure = 0;
-
-                        for (let i = 0; i < paths.length; i++) {
-                            try {
-                                const result = await window.__TAURI_INTERNALS__?.invoke('import_photos', {
-                                    rootPath: 'file://' + paths[i],
-                                    dbPath: '\(self.dbPath)',
-                                    thumbDir: '\(self.thumbDir)'
-                                });
-                                if (result) {
-                                    success += result.success || 0;
-                                    duplicates += result.duplicates || 0;
-                                    failure += result.failure || 0;
-                                }
-                            } catch (err) {
-                                console.error('Import error:', err);
-                                failure++;
-                            }
-
-                            // Send progress
-                            window.dispatchEvent(new CustomEvent('ios-import-progress', {
-                                detail: {
-                                    current: i + 1,
-                                    total: total,
-                                    success: success,
-                                    duplicates: duplicates,
-                                    failure: failure,
-                                    phase: 'importing'
-                                }
-                            }));
-                        }
-
-                        // Send completion
+                if paths.isEmpty {
+                    NSLog("[PhotoPicker] No paths, sending complete event")
+                    self.isImporting = false
+                    // Send import complete event even if no photos
+                    DispatchQueue.main.async {
+                        let script = """
                         window.dispatchEvent(new CustomEvent('ios-import-complete', {
-                            detail: { success: success, duplicates: duplicates, failure: failure, total: total }
+                            detail: { success: 0, duplicates: 0, failure: 0, total: 0 }
                         }));
+                        """
+                        self.webView?.evaluateJavaScript(script) { _, error in
+                            if let error = error {
+                                NSLog("[PhotoPicker] Error sending complete event: \(error)")
+                            } else {
+                                NSLog("[PhotoPicker] Complete event sent successfully")
+                            }
+                        }
+                    }
+                    return
+                }
 
-                        // Reload photos
-                        window.dispatchEvent(new CustomEvent('reload-photos', { detail: {} }));
+                NSLog("[PhotoPicker] Processing \(paths.count) paths")
+
+                // Call global function on frontend - more reliable than dispatchEvent
+                DispatchQueue.main.async {
+                    self.isImporting = false
+
+                    let pathsJson = paths.map { path in
+                        let escaped = path
+                            .replacingOccurrences(of: "\\", with: "\\\\")
+                            .replacingOccurrences(of: "\"", with: "\\\"")
+                        return "\"\(escaped)\""
+                    }.joined(separator: ",")
+
+                    let dbPathEscaped = self.dbPath
+                        .replacingOccurrences(of: "\\", with: "\\\\")
+                        .replacingOccurrences(of: "'", with: "\\'")
+                    let thumbDirEscaped = self.thumbDir
+                        .replacingOccurrences(of: "\\", with: "\\\\")
+                        .replacingOccurrences(of: "'", with: "\\'")
+
+                    // Call global function directly instead of using dispatchEvent
+                    let script = """
+                    (function() {
+                        if (window.__handleIOSImportPaths) {
+                            window.__handleIOSImportPaths([\(pathsJson)], '\(dbPathEscaped)', '\(thumbDirEscaped)');
+                            return 'called';
+                        } else {
+                            return 'not_found';
+                        }
                     })();
                     """
-                    self.webView?.evaluateJavaScript(script, completionHandler: nil)
+
+                    self.webView?.evaluateJavaScript(script) { result, error in
+                        if let error = error {
+                            NSLog("[PhotoPicker] Error calling import function: \(error)")
+                        } else {
+                            NSLog("[PhotoPicker] Import function result: \(String(describing: result)), paths: \(paths.count)")
+                        }
+                    }
                 }
             }
         )
@@ -448,6 +521,23 @@ extension TauriPhotoBridge: WKScriptMessageHandler {
 
             default:
                 print("Unknown command: \(command)")
+            }
+        }
+    }
+}
+
+// MARK: - PHPhotoLibraryChangeObserver
+extension TauriPhotoBridge: PHPhotoLibraryChangeObserver {
+    public func photoLibraryDidChange(_ changeInstance: PHChange) {
+        // Only handle if we're waiting for a change (after user selects more photos)
+        guard waitingForLibraryChange else { return }
+
+        // Unregister and trigger import
+        DispatchQueue.main.async { [weak self] in
+            self?.unregisterForPhotoLibraryChanges()
+            // Small delay to ensure picker is fully dismissed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self?.importAllAuthorizedPhotos()
             }
         }
     }

@@ -310,9 +310,32 @@
             }) as EventListener);
 
             window.addEventListener("ios-import-started", (() => {
+                console.log("[iOS Import] Started event received");
                 isScanning = true;
                 importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "Starting..." };
             }) as EventListener);
+
+            window.addEventListener("ios-import-js-started", (() => {
+                console.log("[iOS Import] JS execution started");
+            }) as EventListener);
+
+            // iOS paths received - expose global function for Swift to call
+            (window as any).__handleIOSImportPaths = (paths: string[], db: string, thumb: string) => {
+                // Immediate visual feedback - set error to show function was called
+                error = `Importing ${paths?.length || 0} photos...`;
+
+                console.log("[iOS Import] Received paths via global function:", paths?.length);
+
+                if (!paths || paths.length === 0) {
+                    console.log("[iOS Import] No paths to import");
+                    isScanning = false;
+                    error = "";
+                    return;
+                }
+
+                // Process imports asynchronously
+                processIOSImport(paths, db || dbPath, thumb || thumbDir);
+            };
 
             // iOS permission events
             window.addEventListener("ios-permission-granted", ((e: CustomEvent) => {
@@ -377,6 +400,62 @@
         }
     }
 
+    // iOS import processing function - called from event handler
+    // Use a flag to prevent re-entrance
+    let iosImportRunning = false;
+
+    async function processIOSImport(paths: string[], db: string, thumb: string) {
+        // Prevent re-entrance
+        if (iosImportRunning) {
+            console.log("[iOS Import] Already running, queuing...");
+            // Queue this import for later
+            setTimeout(() => processIOSImport(paths, db, thumb), 1000);
+            return;
+        }
+
+        iosImportRunning = true;
+        console.log("[iOS Import] Processing", paths.length, "paths");
+        error = ""; // Clear any previous error
+
+        // Make sure scanning state is visible
+        isScanning = true;
+        importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: paths.length, lastPath: "Starting..." };
+
+        let totalSuccess = 0;
+        let totalDuplicates = 0;
+        let totalFailure = 0;
+
+        for (let i = 0; i < paths.length; i++) {
+            try {
+                const result: any = await invoke("import_photos", {
+                    rootPath: "file://" + paths[i],
+                    dbPath: db,
+                    thumbDir: thumb,
+                });
+                totalSuccess += result.success || 0;
+                totalDuplicates += result.duplicates || 0;
+                totalFailure += result.failure || 0;
+            } catch (err) {
+                console.error("[iOS Import] Failed to import:", paths[i], err);
+                totalFailure++;
+            }
+
+            importStatus = {
+                success: totalSuccess,
+                failure: totalFailure,
+                duplicates: totalDuplicates,
+                current: i + 1,
+                total: paths.length,
+                lastPath: paths[i].split('/').pop() || paths[i],
+            };
+        }
+
+        console.log("[iOS Import] Complete:", { totalSuccess, totalDuplicates, totalFailure });
+        isScanning = false;
+        iosImportRunning = false;
+        await loadPhotos();
+    }
+
     async function handleScan(mode: "folder" | "file" = "folder") {
         try {
             const selected = await open({
@@ -435,15 +514,38 @@
     async function syncIOSPhotosIfFullAccess() {
         console.log("[iOS Sync] Checking for full access to auto-sync...");
 
-        const webkit = (window as any).webkit;
-        if (webkit?.messageHandlers?.fotosPhotoPicker) {
+        // Wait for bridge to be ready
+        const maxWait = 3000;
+        const startTime = Date.now();
+
+        const waitForBridge = (): Promise<boolean> => {
+            return new Promise((resolve) => {
+                const check = () => {
+                    const webkit = (window as any).webkit;
+                    if (webkit?.messageHandlers?.fotosPhotoPicker) {
+                        resolve(true);
+                        return;
+                    }
+                    if (Date.now() - startTime > maxWait) {
+                        resolve(false);
+                        return;
+                    }
+                    setTimeout(check, 100);
+                };
+                check();
+            });
+        };
+
+        const ready = await waitForBridge();
+        if (ready) {
+            const webkit = (window as any).webkit;
             webkit.messageHandlers.fotosPhotoPicker.postMessage({
                 command: "syncIfFullAccess",
                 dbPath: dbPath,
                 thumbDir: thumbDir
             });
         } else {
-            console.log("[iOS Sync] Bridge not ready, will sync on next launch");
+            console.log("[iOS Sync] Bridge not ready after timeout");
         }
     }
 
