@@ -35,6 +35,7 @@
     let previewPhoto = $state<PhotoInfo | null>(null);
     let previewPhotoList = $state<PhotoInfo[] | null>(null); // Custom list for map view
     let iosBridgeReady = $state(false); // iOS Swift bridge ready state
+    let iosHasFullAccess = $state(false); // iOS full photo library access
 
     // Sort state with localStorage persistence
     const SORT_BY_KEY = "fotos-sort-by";
@@ -317,6 +318,7 @@
             window.addEventListener("ios-permission-granted", ((e: CustomEvent) => {
                 const detail = e.detail;
                 console.log("[iOS] Permission granted:", detail.type);
+                iosHasFullAccess = detail.type === "full";
                 // Import will start automatically after permission is granted
             }) as EventListener);
 
@@ -325,6 +327,21 @@
                 console.log("[iOS] Permission denied:", detail.message);
                 error = detail.message || "Photo library access denied";
                 isScanning = false;
+                iosHasFullAccess = false;
+            }) as EventListener);
+
+            // iOS permission status check result
+            window.addEventListener("ios-permission-status", ((e: CustomEvent) => {
+                const status = e.detail.status;
+                console.log("[iOS] Permission status:", status);
+                iosHasFullAccess = status === 3; // 3 = authorized (full access)
+            }) as EventListener);
+
+            // iOS sync skipped event (returns current permission status)
+            window.addEventListener("ios-sync-skipped", ((e: CustomEvent) => {
+                const status = e.detail.status;
+                console.log("[iOS] Sync skipped, status:", status);
+                iosHasFullAccess = status === 3;
             }) as EventListener);
 
             // iOS Swift bridge ready event
@@ -728,11 +745,12 @@
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
-            <!-- Import button -->
+            <!-- Import button (hidden on iOS with full access since auto-sync handles it) -->
             <button
                 onclick={() => handleImport()}
                 disabled={isScanning}
                 class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                class:hidden={isMobile && iosHasFullAccess}
                 title="Import photos"
             >
                 <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>

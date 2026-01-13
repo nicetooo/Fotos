@@ -272,17 +272,17 @@ import WebKit
     @objc public func syncPhotosIfFullAccess() {
         let status = PhotoPickerManager.shared.checkAuthorizationStatus()
 
+        // Send permission status to frontend
+        DispatchQueue.main.async { [weak self] in
+            let script = "window.dispatchEvent(new CustomEvent('ios-permission-status', { detail: { status: \(status) } }));"
+            self?.webView?.evaluateJavaScript(script, completionHandler: nil)
+        }
+
         // Only auto-sync if user has granted full access (status == 3)
         // For limited access, user should manually trigger import via + button
         if status == 3 {
             print("[PhotoPicker] Full access granted, auto-syncing photos...")
             importAllAuthorizedPhotos()
-        } else {
-            // Send event to notify frontend about permission status
-            DispatchQueue.main.async { [weak self] in
-                let script = "window.dispatchEvent(new CustomEvent('ios-sync-skipped', { detail: { status: \(status) } }));"
-                self?.webView?.evaluateJavaScript(script, completionHandler: nil)
-            }
         }
     }
 
