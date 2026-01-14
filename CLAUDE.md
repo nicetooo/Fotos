@@ -101,6 +101,10 @@ pnpm desktop                              # 启动桌面开发
 cd packages/core && cargo test            # Rust 测试
 cd packages/desktop && pnpm tauri build   # 构建发布
 
+# iOS 开发（模拟器，默认 iPhone 14 Pro）
+cd packages/desktop
+pnpm tauri ios dev "iPhone 14 Pro"
+
 # Android 打包（必须用 tauri 命令，assets 嵌入在 Rust native library 里）
 cd packages/desktop
 pnpm tauri android build --debug --target aarch64
