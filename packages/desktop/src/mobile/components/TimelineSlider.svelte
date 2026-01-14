@@ -435,7 +435,7 @@
 
             <!-- Zoomed slider track -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
+            <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden touch-none" onwheel={handleZoomedWheel}>
                 <!-- Density visualization -->
                 <div class="absolute inset-0 flex items-end">
                     {#each zoomedDensityBins as count}
@@ -449,7 +449,7 @@
                 <!-- Fixed window (draggable) -->
                 {#if selectedDuration !== 0}
                     <div
-                        class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded cursor-grab active:cursor-grabbing"
+                        class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded-lg cursor-grab active:cursor-grabbing touch-none"
                         style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
                         onmousedown={(e) => handleMouseDown(e, 'window')}
                         ontouchstart={(e) => handleTouchStart(e, 'window')}
@@ -473,7 +473,7 @@
 
     <!-- === Overview (full timeline with handles) === -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="relative h-16 mx-2" onwheel={handleOverviewWheel}>
+    <div class="relative h-16 mx-2 touch-none" onwheel={handleOverviewWheel}>
         <!-- Track background -->
         <div
             bind:this={sliderTrack}
@@ -502,7 +502,7 @@
 
         <!-- Draggable middle -->
         <div
-            class="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing z-10"
+            class="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing z-10 touch-none"
             style="left: {leftPercent}%; right: {100 - rightPercent}%"
             onmousedown={(e) => handleMouseDown(e, 'middle')}
             ontouchstart={(e) => handleTouchStart(e, 'middle')}
@@ -510,22 +510,22 @@
 
         <!-- Left handle -->
         <div
-            class="absolute top-0 bottom-0 w-5 cursor-ew-resize flex items-center justify-center z-20"
+            class="absolute top-0 bottom-0 w-10 cursor-ew-resize flex items-center justify-center z-20 touch-none"
             style="left: {leftPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'left')}
             ontouchstart={(e) => handleTouchStart(e, 'left')}
         >
-            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg"></div>
+            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg transition-transform duration-100 {dragMode === 'left' ? 'scale-x-[2] scale-y-110' : ''}"></div>
         </div>
 
         <!-- Right handle -->
         <div
-            class="absolute top-0 bottom-0 w-5 cursor-ew-resize flex items-center justify-center z-20"
+            class="absolute top-0 bottom-0 w-10 cursor-ew-resize flex items-center justify-center z-20 touch-none"
             style="left: {rightPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'right')}
             ontouchstart={(e) => handleTouchStart(e, 'right')}
         >
-            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg"></div>
+            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg transition-transform duration-100 {dragMode === 'right' ? 'scale-x-[2] scale-y-110' : ''}"></div>
         </div>
     </div>
 
