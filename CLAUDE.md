@@ -86,6 +86,13 @@ src/
 | 运行时权限 | ✗ | ✓ | ✓ |
 | 文件管理器显示 | ✓ | ✗ | ✗ |
 
+## 环境变量
+
+```bash
+export JAVA_HOME=/opt/homebrew/Cellar/openjdk@17/17.0.17/libexec/openjdk.jdk/Contents/Home
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+```
+
 ## 常用命令
 
 ```bash
@@ -93,6 +100,11 @@ pnpm install                              # 安装依赖
 pnpm desktop                              # 启动桌面开发
 cd packages/core && cargo test            # Rust 测试
 cd packages/desktop && pnpm tauri build   # 构建发布
+
+# Android 打包（必须用 tauri 命令，assets 嵌入在 Rust native library 里）
+cd packages/desktop
+pnpm tauri android build --debug --target aarch64
+/opt/homebrew/share/android-commandlinetools/platform-tools/adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 ```
 
 ## 数据库

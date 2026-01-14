@@ -21,11 +21,6 @@
     let timeFilterStart = $state<Date | null>(null);
     let timeFilterEnd = $state<Date | null>(null);
 
-    // Box selection state
-    let isBoxSelectMode = $state(false);
-    let isDrawingBox = $state(false);
-    let boxStart: { x: number; y: number } | null = null;
-    let selectionBox: HTMLDivElement | null = null;
 
     // Sync mode: prevent circular updates
     let syncSource = $state<'map' | 'timeline' | null>(null);
@@ -388,8 +383,8 @@
         // Add controls at bottom-right for mobile
         map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
-        // Custom box select control
-        class BoxSelectControl {
+        // Show All Photos control
+        class ShowAllControl {
             _container: HTMLDivElement | undefined;
             _button: HTMLButtonElement | undefined;
 
@@ -399,13 +394,12 @@
 
                 this._button = document.createElement('button');
                 this._button.type = 'button';
-                this._button.className = 'maplibregl-ctrl-box-select';
-                this._button.title = 'Box select photos';
-                this._button.innerHTML = '<i class="fa-solid fa-vector-square"></i>';
+                this._button.className = 'maplibregl-ctrl-show-all';
+                this._button.title = 'Show all photos';
+                this._button.innerHTML = '<i class="fa-solid fa-expand"></i>';
                 this._button.onclick = (e) => {
                     e.stopPropagation();
-                    toggleBoxSelectMode();
-                    this._updateStyle();
+                    handleShowAllPhotos();
                 };
 
                 this._container.appendChild(this._button);
@@ -415,27 +409,10 @@
             onRemove() {
                 this._container?.parentNode?.removeChild(this._container);
             }
-
-            _updateStyle() {
-                if (this._button) {
-                    if (isBoxSelectMode) {
-                        this._button.classList.add('active');
-                    } else {
-                        this._button.classList.remove('active');
-                    }
-                }
-            }
-
-            update() {
-                this._updateStyle();
-            }
         }
 
-        const boxSelectControl = new BoxSelectControl();
-        map.addControl(boxSelectControl as any, 'bottom-right');
-
-        // Store reference to update control state
-        (window as any).__boxSelectControl = boxSelectControl;
+        const showAllControl = new ShowAllControl();
+        map.addControl(showAllControl as any, 'bottom-right');
 
         // Attribution at bottom-left to not overlap with controls
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
@@ -529,123 +506,14 @@
         updateMarkerVisibility(start, end);
     });
 
-    // === Box Selection ===
-    function toggleBoxSelectMode() {
-        isBoxSelectMode = !isBoxSelectMode;
-        if (!isBoxSelectMode) {
-            cleanupBoxSelection();
-        }
-        // Update control button state
-        (window as any).__boxSelectControl?.update();
-    }
-
-    function cleanupBoxSelection() {
-        if (selectionBox && selectionBox.parentNode) {
-            selectionBox.parentNode.removeChild(selectionBox);
-        }
-        selectionBox = null;
-        isDrawingBox = false;
-        boxStart = null;
-    }
-
-    let boxSelectedTimeRange = $state<{ start: Date; end: Date } | null>(null);
-
-    function handleGlobalMouseDown(e: MouseEvent) {
-        if (!isBoxSelectMode || !map || !mapContainer) return;
-
-        const rect = mapContainer.getBoundingClientRect();
-        if (e.clientX < rect.left || e.clientX > rect.right ||
-            e.clientY < rect.top || e.clientY > rect.bottom) return;
-
-        e.preventDefault();
-        isDrawingBox = true;
-        boxStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-
-        selectionBox = document.createElement('div');
-        selectionBox.className = 'selection-box';
-        selectionBox.style.left = `${boxStart.x}px`;
-        selectionBox.style.top = `${boxStart.y}px`;
-        selectionBox.style.width = '0px';
-        selectionBox.style.height = '0px';
-        mapContainer.appendChild(selectionBox);
-
-        // Disable map drag
-        map.dragPan.disable();
-    }
-
-    function handleGlobalMouseMove(e: MouseEvent) {
-        if (!isDrawingBox || !boxStart || !selectionBox || !mapContainer) return;
-
-        const rect = mapContainer.getBoundingClientRect();
-        const currentX = e.clientX - rect.left;
-        const currentY = e.clientY - rect.top;
-
-        const minX = Math.min(boxStart.x, currentX);
-        const minY = Math.min(boxStart.y, currentY);
-        const width = Math.abs(currentX - boxStart.x);
-        const height = Math.abs(currentY - boxStart.y);
-
-        selectionBox.style.left = `${minX}px`;
-        selectionBox.style.top = `${minY}px`;
-        selectionBox.style.width = `${width}px`;
-        selectionBox.style.height = `${height}px`;
-    }
-
-    function handleGlobalMouseUp(e: MouseEvent) {
-        if (!isDrawingBox || !boxStart || !map || !mapContainer) return;
-
-        const rect = mapContainer.getBoundingClientRect();
-        const endX = e.clientX - rect.left;
-        const endY = e.clientY - rect.top;
-
-        // Get bounds from pixel coordinates
-        const sw = map.unproject([Math.min(boxStart.x, endX), Math.max(boxStart.y, endY)]);
-        const ne = map.unproject([Math.max(boxStart.x, endX), Math.min(boxStart.y, endY)]);
-        const bounds = new maplibregl.LngLatBounds(sw, ne);
-
-        // Find photos within bounds
-        const photosInBounds: Date[] = [];
-        for (const { marker, date } of photoMarkers.values()) {
-            const lngLat = marker.getLngLat();
-            if (bounds.contains(lngLat) && date) {
-                photosInBounds.push(date);
-            }
-        }
-
-        if (photosInBounds.length > 0) {
-            photosInBounds.sort((a, b) => a.getTime() - b.getTime());
-            boxSelectedTimeRange = {
-                start: photosInBounds[0],
-                end: photosInBounds[photosInBounds.length - 1]
-            };
-
-            // Fit map to selected bounds
-            map.fitBounds(bounds, { padding: 100, animate: true });
-        }
-
-        // Cleanup
-        cleanupBoxSelection();
-        map.dragPan.enable();
-        isBoxSelectMode = false;
-        // Update control button state
-        (window as any).__boxSelectControl?.update();
-    }
 </script>
 
-<svelte:window
-    onmousedown={handleGlobalMouseDown}
-    onmousemove={handleGlobalMouseMove}
-    onmouseup={handleGlobalMouseUp}
-/>
-
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="w-full h-full theme-bg-secondary flex flex-col overflow-hidden" style:cursor={isBoxSelectMode ? 'crosshair' : 'auto'}>
+<div class="w-full h-full theme-bg-secondary flex flex-col overflow-hidden">
     <!-- Map area -->
     <div class="flex-1 min-h-0 relative">
         <div
             bind:this={mapContainer}
             class="absolute inset-0 map-container mobile-map"
-            class:box-select-mode={isBoxSelectMode}
         ></div>
 
         <!-- Time range indicator -->
@@ -677,10 +545,8 @@
             {#if map && isReady && photosWithMarkers.length > 0}
                 <TimelineSlider
                     photos={photosWithMarkers}
-                    externalTimeRange={boxSelectedTimeRange}
                     mapViewTimeRange={mapVisibleTimeRange}
                     onTimeRangeChange={handleTimeRangeChange}
-                    onExternalRangeConsumed={() => { boxSelectedTimeRange = null; }}
                     onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
                     onShowAll={handleShowAllPhotos}
                 />
@@ -758,8 +624,8 @@
         filter: none;
     }
 
-    /* Box select control */
-    :global(.maplibregl-ctrl-box-select) {
+    /* Show all control */
+    :global(.maplibregl-ctrl-show-all) {
         width: 29px;
         height: 29px;
         display: flex;
@@ -769,15 +635,11 @@
         cursor: pointer;
         transition: all 0.15s ease;
     }
-    :global(:root.light .maplibregl-ctrl-box-select) {
+    :global(:root.light .maplibregl-ctrl-show-all) {
         color: #475569;
     }
-    :global(.maplibregl-ctrl-box-select:hover) {
+    :global(.maplibregl-ctrl-show-all:hover) {
         color: var(--accent);
-    }
-    :global(.maplibregl-ctrl-box-select.active) {
-        background-color: var(--accent) !important;
-        color: black !important;
     }
 
     /* Photo marker styles - optimized for smooth map movement */
@@ -917,23 +779,6 @@
         font-weight: bold;
         padding: 2px 6px;
         border-radius: 4px;
-    }
-
-    /* Box selection styles */
-    :global(.selection-box) {
-        position: absolute;
-        border: 2px dashed var(--accent);
-        background-color: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
-        pointer-events: none;
-        z-index: 1000;
-    }
-
-    /* Force crosshair cursor in box select mode */
-    .box-select-mode,
-    .box-select-mode :global(*),
-    .box-select-mode :global(.maplibregl-canvas-container),
-    .box-select-mode :global(.maplibregl-canvas) {
-        cursor: crosshair !important;
     }
 
     /* Mobile: move bottom-right controls up above attribution */
