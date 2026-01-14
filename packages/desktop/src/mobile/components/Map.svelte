@@ -638,8 +638,13 @@
     :global(:root.light .maplibregl-ctrl-show-all) {
         color: #475569;
     }
-    :global(.maplibregl-ctrl-show-all:hover) {
-        color: var(--accent);
+    :global(.maplibregl-ctrl-show-all:active) {
+        transform: scale(0.9);
+        opacity: 0.7;
+    }
+    :global(.maplibregl-ctrl-show-all:focus) {
+        outline: none;
+        box-shadow: none;
     }
 
     /* Photo marker styles - optimized for smooth map movement */
