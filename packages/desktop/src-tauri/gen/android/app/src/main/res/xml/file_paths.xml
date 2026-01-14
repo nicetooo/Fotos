@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- App internal files directory -->
+    <files-path name="files" path="." />
+
+    <!-- App cache directory -->
+    <cache-path name="cache" path="." />
+
+    <!-- Photo imports cache -->
+    <cache-path name="photo_imports" path="photo_imports/" />
+
+    <!-- MediaStore sync cache -->
+    <cache-path name="mediastore_sync" path="mediastore_sync/" />
+
+    <!-- Thumbnails directory -->
+    <files-path name="thumbnails" path="thumbnails/" />
+
+    <!-- External files (for sharing) -->
+    <external-files-path name="external" path="." />
+</paths>
