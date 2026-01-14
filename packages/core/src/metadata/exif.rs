@@ -128,10 +128,28 @@ fn get_gps_coord(exif: &exif::Exif, tag: Tag, ref_tag: Tag) -> Option<f64> {
 
     if let Value::Rational(v) = value {
         if v.len() >= 3 {
+            // Debug: log the raw rational values
+            println!("[EXIF GPS] Raw values: {:?}/{:?}, {:?}/{:?}, {:?}/{:?}, ref={}",
+                v[0].num, v[0].denom, v[1].num, v[1].denom, v[2].num, v[2].denom, ref_val);
+
             let deg = v[0].to_f64();
             let min = v[1].to_f64();
             let sec = v[2].to_f64();
+
+            // Check for NaN values (can happen with zero denominators)
+            if deg.is_nan() || min.is_nan() || sec.is_nan() {
+                println!("[EXIF GPS] NaN detected: deg={}, min={}, sec={}", deg, min, sec);
+                return None;
+            }
+
             let res = deg + min / 60.0 + sec / 3600.0;
+
+            // Final NaN check
+            if res.is_nan() {
+                println!("[EXIF GPS] Final result is NaN");
+                return None;
+            }
+
             if ref_val == "S" || ref_val == "W" {
                 return Some(-res);
             }
