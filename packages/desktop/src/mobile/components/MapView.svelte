@@ -18,10 +18,4 @@
     });
 </script>
 
-{#if tileConfig}
-    <Map {photos} {onOpenPreview} {theme} {tileConfig} />
-{:else}
-    <div class="w-full h-full flex items-center justify-center theme-bg-secondary">
-        <i class="fa-solid fa-spinner fa-spin text-2xl theme-text-muted"></i>
-    </div>
-{/if}
+<Map {photos} {onOpenPreview} {theme} {tileConfig} />

@@ -474,13 +474,23 @@
     });
 
     // Update map style when theme changes
-    let prevTheme = theme;
+    let prevTheme: string | null = null;
     $effect(() => {
+        const currentTheme = theme; // Read prop to track as dependency
         if (!map || !mapLoaded) return;
-        if (theme === prevTheme) return;
-        prevTheme = theme;
+        if (currentTheme === prevTheme) return;
+        prevTheme = currentTheme;
 
-        map.setStyle(getMapStyle(theme === 'dark'));
+        console.log('[Map] Theme changed to:', currentTheme, 'isDark:', currentTheme === 'dark');
+        const newStyle = getMapStyle(currentTheme === 'dark');
+        console.log('[Map] New style source:', Object.keys(newStyle.sources)[0]);
+
+        try {
+            map.setStyle(newStyle);
+            console.log('[Map] setStyle called successfully');
+        } catch (e) {
+            console.error('[Map] setStyle error:', e);
+        }
     });
 
     // Update map data when photos change

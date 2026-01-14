@@ -362,12 +362,9 @@ class AndroidPlatformService implements PlatformService {
         return () => this.scanningCallbacks.delete(callback);
     }
 
-    getMapTileConfig(): MapTileConfig {
-        // Use OpenStreetMap for mobile (simpler, less bandwidth)
-        return {
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-            tileSize: 256
-        };
+    getMapTileConfig(): MapTileConfig | null {
+        // Return null to use default CARTO tiles with dark/light theme support
+        return null;
     }
 }
 

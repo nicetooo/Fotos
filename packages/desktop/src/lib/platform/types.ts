@@ -78,8 +78,8 @@ export interface PlatformService {
     /** 订阅扫描状态变化 */
     onScanningChange(callback: (isScanning: boolean) => void): () => void;
 
-    /** 获取地图瓦片配置 */
-    getMapTileConfig(): MapTileConfig;
+    /** 获取地图瓦片配置，返回 null 则使用默认 CARTO 瓦片 */
+    getMapTileConfig(): MapTileConfig | null;
 }
 
 /** iOS 扩展接口 */
