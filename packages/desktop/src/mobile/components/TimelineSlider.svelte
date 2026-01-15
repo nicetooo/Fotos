@@ -245,6 +245,133 @@
         dragMode = 'none';
     }
 
+    // Smart touch handler for overview track - determines which handle to drag based on touch position
+    function handleTrackTouch(e: TouchEvent) {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const touch = e.touches[0];
+        const rect = sliderTrack.getBoundingClientRect();
+        const touchPercent = ((touch.clientX - rect.left) / rect.width) * 100;
+
+        // Calculate distances to handles
+        const distToLeft = Math.abs(touchPercent - leftPercent);
+        const distToRight = Math.abs(touchPercent - rightPercent);
+
+        // Determine which handle is closer, with bias towards the nearest one
+        let mode: DragMode;
+        if (distToLeft < distToRight) {
+            mode = 'left';
+        } else if (distToRight < distToLeft) {
+            mode = 'right';
+        } else {
+            // Equal distance - prefer moving the selection
+            mode = 'middle';
+        }
+
+        // If touch is clearly inside the selection (not near handles), drag the whole selection
+        const handleThreshold = 15; // percentage threshold for handle detection
+        if (touchPercent > leftPercent + handleThreshold && touchPercent < rightPercent - handleThreshold) {
+            mode = 'middle';
+        }
+
+        dragMode = mode;
+        dragStartX = touch.clientX;
+        dragStartLeft = leftPercent;
+        dragStartRight = rightPercent;
+        dragStartWindow = windowPosition;
+
+        onMapRangeConsumed?.();
+    }
+
+    // Tap on track to jump selection or drag middle (for touch devices)
+    function handleTrackTap(e: TouchEvent) {
+        if (e.touches.length !== 1) return;
+
+        const touch = e.touches[0];
+        const rect = sliderTrack.getBoundingClientRect();
+        const touchPercent = ((touch.clientX - rect.left) / rect.width) * 100;
+
+        // Calculate handle hot zone in percentage (25px / track width * 100)
+        // Left handle: 20px outside + 5px inside, Right handle: 5px inside + 20px outside
+        const outsideOffset = (20 / rect.width) * 100;  // 20px outside
+        const insideOffset = (5 / rect.width) * 100;    // 5px inside
+
+        // Check if touch is within handle hot zones (asymmetric: more outside, less inside)
+        const nearLeftHandle = touchPercent >= leftPercent - outsideOffset && touchPercent <= leftPercent + insideOffset;
+        const nearRightHandle = touchPercent >= rightPercent - insideOffset && touchPercent <= rightPercent + outsideOffset;
+
+        // If near a handle, let the handle's own event handler deal with it
+        if (nearLeftHandle || nearRightHandle) {
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        // If tap is outside current selection, move selection to that position
+        if (touchPercent < leftPercent || touchPercent > rightPercent) {
+            const width = rightPercent - leftPercent;
+            const halfWidth = width / 2;
+
+            let newLeft = touchPercent - halfWidth;
+            let newRight = touchPercent + halfWidth;
+
+            // Clamp to bounds
+            if (newLeft < 0) {
+                newLeft = 0;
+                newRight = width;
+            }
+            if (newRight > 100) {
+                newRight = 100;
+                newLeft = 100 - width;
+            }
+
+            leftPercent = newLeft;
+            rightPercent = newRight;
+            onMapRangeConsumed?.();
+            return;
+        }
+
+        // Touch is inside selection but not near handles - drag the whole selection
+        dragMode = 'middle';
+        dragStartX = touch.clientX;
+        dragStartLeft = leftPercent;
+        dragStartRight = rightPercent;
+        dragStartWindow = windowPosition;
+        onMapRangeConsumed?.();
+    }
+
+    // Click on track to jump selection (for mouse)
+    function handleTrackClick(e: MouseEvent) {
+        const rect = sliderTrack.getBoundingClientRect();
+        const clickPercent = ((e.clientX - rect.left) / rect.width) * 100;
+
+        // If click is outside current selection, move selection to that position
+        if (clickPercent < leftPercent || clickPercent > rightPercent) {
+            const width = rightPercent - leftPercent;
+            const halfWidth = width / 2;
+
+            let newLeft = clickPercent - halfWidth;
+            let newRight = clickPercent + halfWidth;
+
+            // Clamp to bounds
+            if (newLeft < 0) {
+                newLeft = 0;
+                newRight = width;
+            }
+            if (newRight > 100) {
+                newRight = 100;
+                newLeft = 100 - width;
+            }
+
+            leftPercent = newLeft;
+            rightPercent = newRight;
+            onMapRangeConsumed?.();
+        }
+    }
+
     // === Mouse wheel handlers ===
     function handleOverviewWheel(e: WheelEvent) {
         e.preventDefault();
@@ -543,11 +670,13 @@
 
     <!-- === Overview (full timeline with handles) === -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="relative h-16 mx-2 touch-none" onwheel={handleOverviewWheel}>
-        <!-- Track background -->
+    <div class="relative h-16 mx-2" onwheel={handleOverviewWheel}>
+        <!-- Track background with smart touch handling -->
         <div
             bind:this={sliderTrack}
-            class="absolute inset-0 theme-bg-primary rounded overflow-hidden"
+            class="absolute inset-0 theme-bg-primary rounded-lg overflow-hidden"
+            onclick={handleTrackClick}
+            ontouchstart={handleTrackTap}
         >
             <!-- Photo lines (canvas) -->
             <canvas bind:this={overviewCanvas} class="absolute inset-0 w-full h-full"></canvas>
@@ -556,39 +685,31 @@
             <div class="absolute top-0 bottom-0 left-0 bg-black/50 dark:bg-black/70" style="width: {leftPercent}%"></div>
             <div class="absolute top-0 bottom-0 right-0 bg-black/50 dark:bg-black/70" style="width: {100 - rightPercent}%"></div>
 
-            <!-- Selected region border -->
+            <!-- Selected region border (4 sides) -->
             <div
-                class="absolute top-0 bottom-0 border-y-2 border-[var(--accent)] pointer-events-none"
+                class="absolute top-0 bottom-0 border-2 border-[var(--accent)] rounded pointer-events-none"
                 style="left: {leftPercent}%; right: {100 - rightPercent}%"
             ></div>
         </div>
 
-        <!-- Draggable middle -->
+        <!-- Left handle (hot zone: 20px outside + 5px inside = 25px total) -->
         <div
-            class="absolute top-0 bottom-0 cursor-grab active:cursor-grabbing z-10 touch-none"
-            style="left: {leftPercent}%; right: {100 - rightPercent}%"
-            onmousedown={(e) => handleMouseDown(e, 'middle')}
-            ontouchstart={(e) => handleTouchStart(e, 'middle')}
-        ></div>
-
-        <!-- Left handle -->
-        <div
-            class="absolute top-0 bottom-0 w-10 cursor-ew-resize flex items-center justify-center z-20 touch-none"
-            style="left: {leftPercent}%; transform: translateX(-50%)"
+            class="absolute top-0 bottom-0 w-[25px] cursor-ew-resize flex items-center justify-center z-20"
+            style="left: {leftPercent}%; transform: translateX(-80%)"
             onmousedown={(e) => handleMouseDown(e, 'left')}
-            ontouchstart={(e) => handleTouchStart(e, 'left')}
+            ontouchstart={(e) => { e.stopPropagation(); handleTouchStart(e, 'left'); }}
         >
-            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg transition-transform duration-100 {dragMode === 'left' ? 'scale-x-[2] scale-y-110' : ''}"></div>
+            <div class="w-1.5 h-[85%] bg-[var(--accent)] rounded-full shadow-lg transition-all duration-100 {dragMode === 'left' ? 'w-2 bg-white shadow-[0_0_6px_var(--accent)]' : ''}"></div>
         </div>
 
-        <!-- Right handle -->
+        <!-- Right handle (hot zone: 5px inside + 20px outside = 25px total) -->
         <div
-            class="absolute top-0 bottom-0 w-10 cursor-ew-resize flex items-center justify-center z-20 touch-none"
-            style="left: {rightPercent}%; transform: translateX(-50%)"
+            class="absolute top-0 bottom-0 w-[25px] cursor-ew-resize flex items-center justify-center z-20"
+            style="left: {rightPercent}%; transform: translateX(-20%)"
             onmousedown={(e) => handleMouseDown(e, 'right')}
-            ontouchstart={(e) => handleTouchStart(e, 'right')}
+            ontouchstart={(e) => { e.stopPropagation(); handleTouchStart(e, 'right'); }}
         >
-            <div class="w-1.5 h-full bg-[var(--accent)] rounded-sm shadow-lg transition-transform duration-100 {dragMode === 'right' ? 'scale-x-[2] scale-y-110' : ''}"></div>
+            <div class="w-1.5 h-[85%] bg-[var(--accent)] rounded-full shadow-lg transition-all duration-100 {dragMode === 'right' ? 'w-2 bg-white shadow-[0_0_6px_var(--accent)]' : ''}"></div>
         </div>
     </div>
 
