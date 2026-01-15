@@ -396,6 +396,90 @@
         const width = windowWidthPercent;
         return (windowPosition / 100) * (100 - width);
     });
+
+    // Canvas refs
+    let overviewCanvas: HTMLCanvasElement;
+    let zoomedCanvas: HTMLCanvasElement;
+
+    // Get accent color from CSS variable
+    function getAccentColor(): string {
+        if (typeof document === 'undefined') return '#fbbf24';
+        return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#fbbf24';
+    }
+
+    // Draw photo lines on canvas
+    function drawPhotoLines(canvas: HTMLCanvasElement | undefined, positions: number[]) {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+
+        ctx.clearRect(0, 0, rect.width, rect.height);
+        ctx.strokeStyle = getAccentColor();
+        ctx.globalAlpha = 0.7;
+        ctx.lineWidth = 1;
+
+        ctx.beginPath();
+        for (const pos of positions) {
+            const x = Math.round((pos / 100) * rect.width) + 0.5;
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, rect.height);
+        }
+        ctx.stroke();
+    }
+
+    // Resize observer to redraw canvases when container size changes
+    let overviewResizeObserver: ResizeObserver | null = null;
+    let zoomedResizeObserver: ResizeObserver | null = null;
+
+    // Redraw overview canvas when data or size changes
+    $effect(() => {
+        const positions = photoPositions;
+        const canvas = overviewCanvas;
+        if (!canvas) return;
+
+        // Initial draw
+        drawPhotoLines(canvas, positions);
+
+        // Setup resize observer
+        overviewResizeObserver?.disconnect();
+        overviewResizeObserver = new ResizeObserver(() => {
+            drawPhotoLines(canvas, photoPositions);
+        });
+        overviewResizeObserver.observe(canvas);
+
+        return () => {
+            overviewResizeObserver?.disconnect();
+        };
+    });
+
+    // Redraw zoomed canvas when data or size changes
+    $effect(() => {
+        const positions = zoomedPhotoPositions;
+        const canvas = zoomedCanvas;
+        if (!canvas) return;
+
+        // Initial draw
+        drawPhotoLines(canvas, positions);
+
+        // Setup resize observer
+        zoomedResizeObserver?.disconnect();
+        zoomedResizeObserver = new ResizeObserver(() => {
+            drawPhotoLines(canvas, zoomedPhotoPositions);
+        });
+        zoomedResizeObserver.observe(canvas);
+
+        return () => {
+            zoomedResizeObserver?.disconnect();
+        };
+    });
 </script>
 
 <svelte:window on:mousemove={handleMouseMove} on:mouseup={handleMouseUp} />
@@ -442,12 +526,8 @@
             <!-- Zoomed slider track -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
-                <!-- Photo lines -->
-                <div class="absolute inset-0">
-                    {#each zoomedPhotoPositions as pos}
-                        <div class="absolute top-0 bottom-0 w-px bg-[var(--accent)] opacity-70" style="left: {pos}%"></div>
-                    {/each}
-                </div>
+                <!-- Photo lines (canvas) -->
+                <canvas bind:this={zoomedCanvas} class="absolute inset-0 w-full h-full"></canvas>
 
                 <!-- Fixed window (draggable) -->
                 {#if selectedDuration !== 0}
@@ -481,12 +561,8 @@
             bind:this={sliderTrack}
             class="absolute inset-0 theme-bg-primary rounded overflow-hidden"
         >
-            <!-- Photo lines -->
-            <div class="absolute inset-0">
-                {#each photoPositions as pos}
-                    <div class="absolute top-0 bottom-0 w-px bg-[var(--accent)] opacity-70" style="left: {pos}%"></div>
-                {/each}
-            </div>
+            <!-- Photo lines (canvas) -->
+            <canvas bind:this={overviewCanvas} class="absolute inset-0 w-full h-full"></canvas>
 
             <!-- Dimmed areas -->
             <div class="absolute top-0 bottom-0 left-0 bg-black/50 dark:bg-black/70" style="width: {leftPercent}%"></div>
