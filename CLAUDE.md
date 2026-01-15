@@ -97,7 +97,7 @@ export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 
 ```bash
 pnpm install                              # 安装依赖
-pnpm desktop                              # 启动桌面开发
+pnpm desktop                              # 启动桌面开发（从项目根目录）
 cd packages/core && cargo test            # Rust 测试
 cd packages/desktop && pnpm tauri build   # 构建发布
 
@@ -110,6 +110,38 @@ cd packages/desktop
 pnpm tauri android build --debug --target aarch64
 /opt/homebrew/share/android-commandlinetools/platform-tools/adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 ```
+
+## 开发服务器
+
+### 桌面开发启动
+
+```bash
+pnpm desktop                              # 从项目根目录启动
+```
+
+- Vite 开发服务器端口：**1420**（strictPort，必须可用）
+- HMR 端口：**1421**（可选，设置 TAURI_DEV_HOST 时启用）
+- 修改 Svelte 文件会自动热更新，无需手动重启
+
+### 重启前清理
+
+如果端口被占用或需要重启：
+
+```bash
+# 方法1：杀掉占用端口的进程
+lsof -ti:1420 | xargs kill -9
+
+# 方法2：杀掉 fotos 相关进程
+pkill -f "target/debug/fotos"
+
+# 确认端口已释放
+lsof -i:1420 || echo "Port 1420 is free"
+```
+
+### 常见问题
+
+- **Port 1420 is already in use**：先用上面的命令杀掉占用进程
+- **beforeDevCommand terminated**：通常是 Vite 启动失败，检查端口或依赖
 
 ## 数据库
 

@@ -352,45 +352,38 @@
         }).length;
     });
 
-    // Density bins for overview
-    const NUM_BINS = 60;
-    let densityBins = $derived.by(() => {
+    // Photo positions for overview (percentage 0-100)
+    let photoPositions = $derived.by(() => {
         const totalMs = timeRange.max.getTime() - timeRange.min.getTime();
-        if (totalMs === 0) return Array(NUM_BINS).fill(0);
+        if (totalMs === 0) return [];
 
-        const bins = Array(NUM_BINS).fill(0);
+        const positions: number[] = [];
         for (const p of photos) {
             const date = parsePhotoDate(p.metadata?.date_taken);
             if (!date) continue;
-            const pos = (date.getTime() - timeRange.min.getTime()) / totalMs;
-            const binIndex = Math.min(NUM_BINS - 1, Math.floor(pos * NUM_BINS));
-            if (binIndex >= 0) bins[binIndex]++;
+            const pos = ((date.getTime() - timeRange.min.getTime()) / totalMs) * 100;
+            positions.push(pos);
         }
-        return bins;
+        return positions;
     });
 
-    let maxBinCount = $derived(Math.max(1, ...densityBins));
-
-    // Density bins for zoomed view (only selected range)
-    let zoomedDensityBins = $derived.by(() => {
+    // Photo positions for zoomed view (only selected range)
+    let zoomedPhotoPositions = $derived.by(() => {
         if (!isZoomed) return [];
         const { startMs, endMs, durationMs } = selectedRange;
-        if (durationMs === 0) return Array(NUM_BINS).fill(0);
+        if (durationMs === 0) return [];
 
-        const bins = Array(NUM_BINS).fill(0);
+        const positions: number[] = [];
         for (const p of photos) {
             const date = parsePhotoDate(p.metadata?.date_taken);
             if (!date) continue;
             const dateMs = date.getTime();
             if (dateMs < startMs || dateMs > endMs) continue;
-            const pos = (dateMs - startMs) / durationMs;
-            const binIndex = Math.min(NUM_BINS - 1, Math.floor(pos * NUM_BINS));
-            if (binIndex >= 0) bins[binIndex]++;
+            const pos = ((dateMs - startMs) / durationMs) * 100;
+            positions.push(pos);
         }
-        return bins;
+        return positions;
     });
-
-    let maxZoomedBinCount = $derived(Math.max(1, ...zoomedDensityBins));
 
     // Window width percentage in zoomed view
     let windowWidthPercent = $derived.by(() => {
@@ -449,13 +442,10 @@
             <!-- Zoomed slider track -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
-                <!-- Density visualization -->
-                <div class="absolute inset-0 flex items-end">
-                    {#each zoomedDensityBins as count}
-                        <div
-                            class="flex-1"
-                            style="height: {Math.max(2, (count / maxZoomedBinCount) * 100)}%; background-color: color-mix(in srgb, var(--accent) 40%, transparent);"
-                        ></div>
+                <!-- Photo lines -->
+                <div class="absolute inset-0">
+                    {#each zoomedPhotoPositions as pos}
+                        <div class="absolute top-0 bottom-0 w-px bg-[var(--accent)] opacity-70" style="left: {pos}%"></div>
                     {/each}
                 </div>
 
@@ -491,13 +481,10 @@
             bind:this={sliderTrack}
             class="absolute inset-0 theme-bg-primary rounded overflow-hidden"
         >
-            <!-- Density visualization -->
-            <div class="absolute inset-0 flex items-end">
-                {#each densityBins as count}
-                    <div
-                        class="flex-1"
-                        style="height: {Math.max(2, (count / maxBinCount) * 100)}%; background-color: color-mix(in srgb, var(--accent) 50%, transparent);"
-                    ></div>
+            <!-- Photo lines -->
+            <div class="absolute inset-0">
+                {#each photoPositions as pos}
+                    <div class="absolute top-0 bottom-0 w-px bg-[var(--accent)] opacity-70" style="left: {pos}%"></div>
                 {/each}
             </div>
 
