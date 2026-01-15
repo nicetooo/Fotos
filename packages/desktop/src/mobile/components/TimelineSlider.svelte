@@ -211,7 +211,7 @@
                 windowPosition = Math.max(0, Math.min(100, newPos));
             }
         } else if (sliderTrack) {
-            // Drag handles in overview
+            // Drag handles in overview - use delta from start position
             const rect = sliderTrack.getBoundingClientRect();
             const deltaPercent = ((clientX - dragStartX) / rect.width) * 100;
 
@@ -293,25 +293,11 @@
         const rect = sliderTrack.getBoundingClientRect();
         const touchPercent = ((touch.clientX - rect.left) / rect.width) * 100;
 
-        // Calculate handle hot zone in percentage (25px / track width * 100)
-        // Left handle: 20px outside + 5px inside, Right handle: 5px inside + 20px outside
-        const outsideOffset = (20 / rect.width) * 100;  // 20px outside
-        const insideOffset = (5 / rect.width) * 100;    // 5px inside
+        // If tap is outside current selection, jump to that position (priority over handle detection)
+        if (touchPercent < leftPercent - 5 || touchPercent > rightPercent + 5) {
+            e.preventDefault();
+            e.stopPropagation();
 
-        // Check if touch is within handle hot zones (asymmetric: more outside, less inside)
-        const nearLeftHandle = touchPercent >= leftPercent - outsideOffset && touchPercent <= leftPercent + insideOffset;
-        const nearRightHandle = touchPercent >= rightPercent - insideOffset && touchPercent <= rightPercent + outsideOffset;
-
-        // If near a handle, let the handle's own event handler deal with it
-        if (nearLeftHandle || nearRightHandle) {
-            return;
-        }
-
-        e.preventDefault();
-        e.stopPropagation();
-
-        // If tap is outside current selection, move selection to that position
-        if (touchPercent < leftPercent || touchPercent > rightPercent) {
             const width = rightPercent - leftPercent;
             const halfWidth = width / 2;
 
@@ -333,6 +319,22 @@
             onMapRangeConsumed?.();
             return;
         }
+
+        // Calculate handle hot zone in percentage (25px / track width * 100)
+        const outsideOffset = (20 / rect.width) * 100;
+        const insideOffset = (5 / rect.width) * 100;
+
+        // Check if touch is within handle hot zones
+        const nearLeftHandle = touchPercent >= leftPercent - outsideOffset && touchPercent <= leftPercent + insideOffset;
+        const nearRightHandle = touchPercent >= rightPercent - insideOffset && touchPercent <= rightPercent + outsideOffset;
+
+        // If near a handle, let the handle's own event handler deal with it
+        if (nearLeftHandle || nearRightHandle) {
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
 
         // Touch is inside selection but not near handles - drag the whole selection
         dragMode = 'middle';
@@ -370,6 +372,60 @@
             rightPercent = newRight;
             onMapRangeConsumed?.();
         }
+    }
+
+    // Click/tap on zoomed track to jump window position
+    function handleZoomedTrackClick(e: MouseEvent) {
+        const rect = zoomedTrack.getBoundingClientRect();
+        const clickPercent = ((e.clientX - rect.left) / rect.width) * 100;
+
+        // When selectedDuration === 0 (All), there's no window to move
+        if (selectedDuration === 0) {
+            return;
+        }
+
+        // If click is outside current window, move window to that position
+        if (clickPercent < windowLeftPercent || clickPercent > windowLeftPercent + windowWidthPercent) {
+            const maxLeft = 100 - windowWidthPercent;
+            if (maxLeft <= 0) return;
+
+            let newLeft = clickPercent - windowWidthPercent / 2;
+            newLeft = Math.max(0, Math.min(maxLeft, newLeft));
+            // windowPosition is 0-100, convert from 0-maxLeft range
+            windowPosition = (newLeft / maxLeft) * 100;
+            onMapRangeConsumed?.();
+        }
+    }
+
+    function handleZoomedTrackTap(e: TouchEvent) {
+        if (e.touches.length !== 1) return;
+
+        const touch = e.touches[0];
+        const rect = zoomedTrack.getBoundingClientRect();
+        const touchPercent = ((touch.clientX - rect.left) / rect.width) * 100;
+
+        // When selectedDuration === 0 (All), there's no window to move
+        if (selectedDuration === 0) {
+            return;
+        }
+
+        // Check if touch is on the window (let window's own handler deal with it)
+        if (touchPercent >= windowLeftPercent && touchPercent <= windowLeftPercent + windowWidthPercent) {
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Calculate new window position to center the window on tap
+        const maxLeft = 100 - windowWidthPercent;
+        if (maxLeft <= 0) return;
+
+        let newLeft = touchPercent - windowWidthPercent / 2;
+        newLeft = Math.max(0, Math.min(maxLeft, newLeft));
+        // windowPosition is 0-100, convert from 0-maxLeft range
+        windowPosition = (newLeft / maxLeft) * 100;
+        onMapRangeConsumed?.();
     }
 
     // === Mouse wheel handlers ===
@@ -639,17 +695,17 @@
 
             <!-- Zoomed slider track -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden touch-none" onwheel={handleZoomedWheel}>
+            <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel} onclick={handleZoomedTrackClick} ontouchstart={handleZoomedTrackTap}>
                 <!-- Photo lines (canvas) -->
                 <canvas bind:this={zoomedCanvas} class="absolute inset-0 w-full h-full"></canvas>
 
                 <!-- Fixed window (draggable) -->
                 {#if selectedDuration !== 0}
                     <div
-                        class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded-lg cursor-grab active:cursor-grabbing touch-none"
+                        class="absolute top-0 bottom-0 bg-[var(--accent)]/20 border-2 border-[var(--accent)] rounded-lg cursor-grab active:cursor-grabbing"
                         style="left: {windowLeftPercent}%; width: {windowWidthPercent}%"
                         onmousedown={(e) => handleMouseDown(e, 'window')}
-                        ontouchstart={(e) => handleTouchStart(e, 'window')}
+                        ontouchstart={(e) => { e.stopPropagation(); handleTouchStart(e, 'window'); }}
                     >
                         <div class="absolute inset-0 flex items-center justify-center">
                             <div class="w-8 h-4 bg-[var(--accent)] rounded-full flex items-center justify-center">
@@ -685,32 +741,28 @@
             <div class="absolute top-0 bottom-0 left-0 bg-black/50 dark:bg-black/70" style="width: {leftPercent}%"></div>
             <div class="absolute top-0 bottom-0 right-0 bg-black/50 dark:bg-black/70" style="width: {100 - rightPercent}%"></div>
 
-            <!-- Selected region border (4 sides) -->
+            <!-- Selected region with thick side borders as handles -->
             <div
-                class="absolute top-0 bottom-0 border-2 border-[var(--accent)] rounded pointer-events-none"
+                class="absolute top-0 bottom-0 border-y-2 border-[var(--accent)] rounded pointer-events-none"
                 style="left: {leftPercent}%; right: {100 - rightPercent}%"
             ></div>
         </div>
 
-        <!-- Left handle (hot zone: 20px outside + 5px inside = 25px total) -->
+        <!-- Left handle (thick border, direct drag) -->
         <div
-            class="absolute top-0 bottom-0 w-[25px] cursor-ew-resize flex items-center justify-center z-20"
-            style="left: {leftPercent}%; transform: translateX(-80%)"
+            class="absolute top-0 bottom-0 w-2 bg-[var(--accent)] rounded-l cursor-ew-resize z-20 {dragMode === 'left' ? 'bg-white shadow-[0_0_6px_var(--accent)]' : ''}"
+            style="left: {leftPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'left')}
             ontouchstart={(e) => { e.stopPropagation(); handleTouchStart(e, 'left'); }}
-        >
-            <div class="w-1.5 h-[85%] bg-[var(--accent)] rounded-full shadow-lg transition-all duration-100 {dragMode === 'left' ? 'w-2 bg-white shadow-[0_0_6px_var(--accent)]' : ''}"></div>
-        </div>
+        ></div>
 
-        <!-- Right handle (hot zone: 5px inside + 20px outside = 25px total) -->
+        <!-- Right handle (thick border, direct drag) -->
         <div
-            class="absolute top-0 bottom-0 w-[25px] cursor-ew-resize flex items-center justify-center z-20"
-            style="left: {rightPercent}%; transform: translateX(-20%)"
+            class="absolute top-0 bottom-0 w-2 bg-[var(--accent)] rounded-r cursor-ew-resize z-20 {dragMode === 'right' ? 'bg-white shadow-[0_0_6px_var(--accent)]' : ''}"
+            style="left: {rightPercent}%; transform: translateX(-50%)"
             onmousedown={(e) => handleMouseDown(e, 'right')}
             ontouchstart={(e) => { e.stopPropagation(); handleTouchStart(e, 'right'); }}
-        >
-            <div class="w-1.5 h-[85%] bg-[var(--accent)] rounded-full shadow-lg transition-all duration-100 {dragMode === 'right' ? 'w-2 bg-white shadow-[0_0_6px_var(--accent)]' : ''}"></div>
-        </div>
+        ></div>
     </div>
 
     <!-- Full range labels -->
