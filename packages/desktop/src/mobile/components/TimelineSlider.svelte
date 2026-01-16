@@ -136,6 +136,9 @@
 
     let overviewWidthPercent = $derived(overviewRightPercent - overviewLeftPercent);
 
+    // Minimum visual width for the handle border (just the two border lines visible)
+    const MIN_HANDLE_WIDTH_PX = 4; // 2px border on each side
+
     // Notify parent
     $effect(() => {
         onTimeRangeChange(viewWindow.start, viewWindow.end);
@@ -783,13 +786,13 @@
             <!-- Dimmed areas -->
             <div class="absolute top-0 bottom-0 left-0 bg-black/50 dark:bg-black/70" style="width: {overviewLeftPercent}%"></div>
             <div class="absolute top-0 bottom-0 right-0 bg-black/50 dark:bg-black/70" style="width: {100 - overviewRightPercent}%"></div>
-
-            <!-- Yellow selection box (draggable) -->
-            <div
-                class="absolute top-0 bottom-0 border-2 border-[var(--accent)] rounded pointer-events-none"
-                style="left: {overviewLeftPercent}%; width: {overviewWidthPercent}%"
-            ></div>
         </div>
+
+        <!-- Yellow selection box (draggable) - outside overflow-hidden container -->
+        <div
+            class="absolute top-0 bottom-0 border-2 border-[var(--accent)] rounded pointer-events-none"
+            style="left: {overviewLeftPercent}%; width: {overviewWidthPercent}%; min-width: {MIN_HANDLE_WIDTH_PX}px"
+        ></div>
     </div>
 
     <!-- Overview labels -->
