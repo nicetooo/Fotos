@@ -429,21 +429,19 @@
     });
 
     // Photo positions for detail view (percentage 0-100 within view window)
-    // Also collect positions for edge stacking
+    // Also collect data for edge stacking
     let detailPhotoData = $derived.by(() => {
         if (viewDurationMs === 0) return {
             positions: [],
-            leftPositions: [],
-            rightPositions: [],
             leftCount: 0,
-            rightCount: 0
+            rightCount: 0,
+            leftLineCount: 0,
+            rightLineCount: 0
         };
 
         const positions: number[] = [];
-        const leftPositions: number[] = [];
-        const rightPositions: number[] = [];
-        let leftCount = 0;
-        let rightCount = 0;
+        const leftTimestamps: number[] = [];
+        const rightTimestamps: number[] = [];
 
         for (const p of photos) {
             const date = parsePhotoDate(p.metadata?.date_taken);
@@ -452,29 +450,47 @@
             const pos = ((dateMs - viewWindow.startMs) / viewDurationMs) * 100;
 
             if (dateMs < viewWindow.startMs) {
-                leftCount++;
-                leftPositions.push(pos);
+                leftTimestamps.push(dateMs);
             } else if (dateMs > viewWindow.endMs) {
-                rightCount++;
-                rightPositions.push(pos);
+                rightTimestamps.push(dateMs);
             } else {
                 positions.push(pos);
             }
         }
+
+        // Calculate unique line count based on time intervals
+        // Two photos overlap if their time difference is less than what 1 pixel represents
+        // Assume canvas width ~350px, so 1px = viewDurationMs / 350
+        const msPerPixel = viewDurationMs / 350;
+
+        function countUniqueLines(timestamps: number[]): number {
+            if (timestamps.length === 0) return 0;
+            const sorted = [...timestamps].sort((a, b) => a - b);
+            let count = 1;
+            let lastTs = sorted[0];
+            for (let i = 1; i < sorted.length; i++) {
+                if (sorted[i] - lastTs >= msPerPixel) {
+                    count++;
+                    lastTs = sorted[i];
+                }
+            }
+            return count;
+        }
+
         return {
             positions,
-            leftPositions,
-            rightPositions,
-            leftCount,
-            rightCount
+            leftCount: leftTimestamps.length,
+            rightCount: rightTimestamps.length,
+            leftLineCount: countUniqueLines(leftTimestamps),
+            rightLineCount: countUniqueLines(rightTimestamps)
         };
     });
 
     let detailPhotoPositions = $derived(detailPhotoData.positions);
-    let leftPositions = $derived(detailPhotoData.leftPositions);
-    let rightPositions = $derived(detailPhotoData.rightPositions);
     let leftCount = $derived(detailPhotoData.leftCount);
     let rightCount = $derived(detailPhotoData.rightCount);
+    let leftLineCount = $derived(detailPhotoData.leftLineCount);
+    let rightLineCount = $derived(detailPhotoData.rightLineCount);
 
     // === Canvas drawing ===
     let overviewCanvas: HTMLCanvasElement;
@@ -516,10 +532,10 @@
     function drawDetailPhotoLines(
         canvas: HTMLCanvasElement | undefined,
         positions: number[],
-        leftPositions: number[],
-        rightPositions: number[],
         leftTotal: number,
-        rightTotal: number
+        rightTotal: number,
+        leftLines: number,
+        rightLines: number
     ) {
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
@@ -550,17 +566,12 @@
         ctx.stroke();
 
         // Draw edge indicators for photos outside view
-        // Convert to pixels, dedupe (overlapping = same line), then stack tightly
+        // Line count is pre-calculated based on time intervals (stable)
         const maxStackWidth = 100;
 
         // Left edge indicator
-        if (leftPositions.length > 0) {
-            // Convert percentage positions to pixel positions at current zoom
-            const pixelPositions = leftPositions.map(pos => Math.round((pos / 100) * rect.width));
-            // Dedupe: same pixel = overlapping photos = one line
-            const uniquePixels = [...new Set(pixelPositions)];
-            // Line count = unique pixel positions, capped at max
-            const lineCount = Math.min(uniquePixels.length, maxStackWidth);
+        if (leftLines > 0) {
+            const lineCount = Math.min(leftLines, maxStackWidth);
 
             ctx.strokeStyle = accentColor;
             ctx.globalAlpha = 0.7;
@@ -592,13 +603,8 @@
         }
 
         // Right edge indicator
-        if (rightPositions.length > 0) {
-            // Convert percentage positions to pixel positions at current zoom
-            const pixelPositions = rightPositions.map(pos => Math.round((pos / 100) * rect.width));
-            // Dedupe: same pixel = overlapping photos = one line
-            const uniquePixels = [...new Set(pixelPositions)];
-            // Line count = unique pixel positions, capped at max
-            const lineCount = Math.min(uniquePixels.length, maxStackWidth);
+        if (rightLines > 0) {
+            const lineCount = Math.min(rightLines, maxStackWidth);
 
             ctx.strokeStyle = accentColor;
             ctx.globalAlpha = 0.7;
@@ -650,16 +656,16 @@
     function scheduleDetailDraw(
         canvas: HTMLCanvasElement,
         positions: number[],
-        leftPos: number[],
-        rightPos: number[],
         leftTotal: number,
-        rightTotal: number
+        rightTotal: number,
+        leftLines: number,
+        rightLines: number
     ) {
         if (detailRafId !== null) {
             cancelAnimationFrame(detailRafId);
         }
         detailRafId = requestAnimationFrame(() => {
-            drawDetailPhotoLines(canvas, positions, leftPos, rightPos, leftTotal, rightTotal);
+            drawDetailPhotoLines(canvas, positions, leftTotal, rightTotal, leftLines, rightLines);
             detailRafId = null;
         });
     }
@@ -687,18 +693,18 @@
 
     $effect(() => {
         const positions = detailPhotoPositions;
-        const leftPos = leftPositions;
-        const rightPos = rightPositions;
         const lc = leftCount;
         const rc = rightCount;
+        const ll = leftLineCount;
+        const rl = rightLineCount;
         const canvas = detailCanvas;
         if (!canvas) return;
 
-        scheduleDetailDraw(canvas, positions, leftPos, rightPos, lc, rc);
+        scheduleDetailDraw(canvas, positions, lc, rc, ll, rl);
 
         detailResizeObserver?.disconnect();
         detailResizeObserver = new ResizeObserver(() => {
-            scheduleDetailDraw(canvas, detailPhotoPositions, leftPositions, rightPositions, leftCount, rightCount);
+            scheduleDetailDraw(canvas, detailPhotoPositions, leftCount, rightCount, leftLineCount, rightLineCount);
         });
         detailResizeObserver.observe(canvas);
 
