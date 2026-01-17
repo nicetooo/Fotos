@@ -380,10 +380,7 @@
     function setupMapControls() {
         if (!map) return;
 
-        // Add controls at bottom-right for mobile
-        map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
-
-        // Show All Photos control
+        // Show All Photos control (added first so it appears below navigation)
         class ShowAllControl {
             _container: HTMLDivElement | undefined;
             _button: HTMLButtonElement | undefined;
@@ -414,7 +411,10 @@
         const showAllControl = new ShowAllControl();
         map.addControl(showAllControl as any, 'bottom-right');
 
-        // Attribution at bottom-left to not overlap with controls
+        // Navigation controls (added second so it appears above ShowAll)
+        map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+
+        // Attribution at bottom-left
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
 
         // Handle resize
