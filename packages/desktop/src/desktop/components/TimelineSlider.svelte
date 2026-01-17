@@ -435,9 +435,32 @@
         ctx.stroke();
     }
 
-    // Resize observer to redraw canvases when container size changes
+    // Resize observers and animation frame IDs for debouncing
     let overviewResizeObserver: ResizeObserver | null = null;
     let zoomedResizeObserver: ResizeObserver | null = null;
+    let overviewRafId: number | null = null;
+    let zoomedRafId: number | null = null;
+
+    // Debounced draw functions to prevent flickering
+    function scheduleOverviewDraw(canvas: HTMLCanvasElement, positions: number[]) {
+        if (overviewRafId !== null) {
+            cancelAnimationFrame(overviewRafId);
+        }
+        overviewRafId = requestAnimationFrame(() => {
+            drawPhotoLines(canvas, positions);
+            overviewRafId = null;
+        });
+    }
+
+    function scheduleZoomedDraw(canvas: HTMLCanvasElement, positions: number[]) {
+        if (zoomedRafId !== null) {
+            cancelAnimationFrame(zoomedRafId);
+        }
+        zoomedRafId = requestAnimationFrame(() => {
+            drawPhotoLines(canvas, positions);
+            zoomedRafId = null;
+        });
+    }
 
     // Redraw overview canvas when data or size changes
     $effect(() => {
@@ -445,18 +468,19 @@
         const canvas = overviewCanvas;
         if (!canvas) return;
 
-        // Initial draw
-        drawPhotoLines(canvas, positions);
+        scheduleOverviewDraw(canvas, positions);
 
-        // Setup resize observer
         overviewResizeObserver?.disconnect();
         overviewResizeObserver = new ResizeObserver(() => {
-            drawPhotoLines(canvas, photoPositions);
+            scheduleOverviewDraw(canvas, photoPositions);
         });
         overviewResizeObserver.observe(canvas);
 
         return () => {
             overviewResizeObserver?.disconnect();
+            if (overviewRafId !== null) {
+                cancelAnimationFrame(overviewRafId);
+            }
         };
     });
 
@@ -466,18 +490,19 @@
         const canvas = zoomedCanvas;
         if (!canvas) return;
 
-        // Initial draw
-        drawPhotoLines(canvas, positions);
+        scheduleZoomedDraw(canvas, positions);
 
-        // Setup resize observer
         zoomedResizeObserver?.disconnect();
         zoomedResizeObserver = new ResizeObserver(() => {
-            drawPhotoLines(canvas, zoomedPhotoPositions);
+            scheduleZoomedDraw(canvas, zoomedPhotoPositions);
         });
         zoomedResizeObserver.observe(canvas);
 
         return () => {
             zoomedResizeObserver?.disconnect();
+            if (zoomedRafId !== null) {
+                cancelAnimationFrame(zoomedRafId);
+            }
         };
     });
 </script>
