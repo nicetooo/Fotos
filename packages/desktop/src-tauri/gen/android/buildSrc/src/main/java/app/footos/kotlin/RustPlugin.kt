@@ -1,4 +1,4 @@
-package app.fotos.kotlin
+package app.footos.kotlin
 
 import com.android.build.api.dsl.ApplicationExtension
 import org.gradle.api.DefaultTask

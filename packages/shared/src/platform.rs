@@ -119,7 +119,7 @@ impl PlatformContext {
 
     /// Get the database path
     pub fn db_path(&self) -> String {
-        format!("{}/fotos.db", self.app_data_dir)
+        format!("{}/footos.db", self.app_data_dir)
     }
 
     /// Get the thumbnails directory

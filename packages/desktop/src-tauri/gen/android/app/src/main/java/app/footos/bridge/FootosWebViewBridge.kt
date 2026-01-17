@@ -1,4 +1,4 @@
-package app.fotos.bridge
+package app.footos.bridge
 
 import android.os.Handler
 import android.os.Looper
@@ -9,7 +9,7 @@ import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 
 /**
- * WebView JavaScript Interface for Fotos app.
+ * WebView JavaScript Interface for 足迹相册 (footos) app.
  *
  * This bridge enables communication between the frontend (Svelte/TypeScript) and
  * native Android code (Kotlin). It mirrors the iOS webkit.messageHandlers pattern.
@@ -19,7 +19,7 @@ import org.json.JSONObject
  * - Kotlin -> JS: webView.evaluateJavascript() dispatching CustomEvents
  * - Kotlin -> JS: Calling global functions like window.__handleAndroidImportPaths()
  */
-class FotosWebViewBridge(
+class FootosWebViewBridge(
     private val activity: AppCompatActivity,
     private val webView: WebView,
     private val permissionManager: PermissionManager,
@@ -28,7 +28,7 @@ class FotosWebViewBridge(
 ) {
 
     companion object {
-        private const val TAG = "FotosWebViewBridge"
+        private const val TAG = "FootosWebViewBridge"
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -228,7 +228,7 @@ class FotosWebViewBridge(
                     window.__handleAndroidImportPaths([$pathsJson], '$dbPathEscaped', '$thumbDirEscaped');
                     return 'called';
                 } else {
-                    console.error('[Fotos] __handleAndroidImportPaths not found');
+                    console.error('[足迹相册] __handleAndroidImportPaths not found');
                     return 'not_found';
                 }
             })();
@@ -306,7 +306,7 @@ class FotosWebViewBridge(
      */
     fun notifyBridgeReady() {
         val script = """
-            console.log('[Fotos] Android bridge initialized');
+            console.log('[足迹相册] Android bridge initialized');
             window.__ANDROID_BRIDGE_READY__ = true;
             window.dispatchEvent(new CustomEvent('android-bridge-ready', { detail: {} }));
         """.trimIndent()

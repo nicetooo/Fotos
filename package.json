@@ -1,12 +1,12 @@
 {
-  "name": "fotos",
+  "name": "footos",
   "version": "1.0.0",
   "private": true,
   "description": "Cross-platform photo management software",
   "scripts": {
     "dev": "pnpm -r dev",
     "build": "pnpm -r build",
-    "desktop": "pnpm --filter fotos-desktop tauri dev"
+    "desktop": "pnpm --filter footos-desktop tauri dev"
   },
   "keywords": [],
   "author": "",

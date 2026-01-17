@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const tr: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'İptal',
+        confirm: 'Onayla',
+        delete: 'Sil',
+        remove: 'Kaldır',
+        close: 'Kapat',
+        save: 'Kaydet',
+        settings: 'Ayarlar',
+        import: 'İçe Aktar',
+        export: 'Dışa Aktar',
+        loading: 'Yükleniyor...',
+        scanning: 'Taranıyor...',
+        syncing: 'Senkronize ediliyor...',
+    },
+
+    nav: {
+        library: 'Kütüphane',
+        map: 'Harita',
+        timeline: 'Zaman Çizelgesi',
+        photos: 'Fotoğraflar',
+        files: 'dosya',
+    },
+
+    import: {
+        importPhotos: 'Fotoğraf içe aktar',
+        importFolder: 'Klasör içe aktar',
+        importFile: 'Dosya içe aktar',
+        importing: 'İçe aktarılıyor...',
+        selectPhotos: 'Fotoğraf seç',
+        noPhotosSelected: 'Fotoğraf seçilmedi',
+        duplicates: 'yinelenen',
+        complete: 'İçe aktarma tamamlandı',
+        failed: 'İçe aktarma başarısız',
+        photoImportUnavailable: 'Fotoğraf içe aktarma kullanılamıyor. Lütfen uygulamayı yeniden başlatın.',
+    },
+
+    library: {
+        noPhotos: 'Fotoğraf yok',
+        sortBy: 'Sırala',
+        sortDate: 'Tarih',
+        sortName: 'İsim',
+        sortSize: 'Boyut',
+        ascending: 'Artan',
+        descending: 'Azalan',
+    },
+
+    preview: {
+        showInFinder: 'Finder\'da göster',
+        showInExplorer: 'Gezgin\'de göster',
+        previous: 'Önceki',
+        next: 'Sonraki',
+        zoomIn: 'Yakınlaştır',
+        zoomOut: 'Uzaklaştır',
+        resetZoom: 'Yakınlaştırmayı sıfırla',
+    },
+
+    photoInfo: {
+        date: 'Tarih',
+        dimensions: 'Boyutlar',
+        fileSize: 'Dosya boyutu',
+        camera: 'Kamera',
+        exposure: 'Pozlama',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Sadece RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Yol',
+    },
+
+    delete: {
+        title: 'Sil',
+        removeFromLibrary: 'Kütüphaneden kaldır',
+        deleteOriginal: 'Orijinal dosyayı sil',
+        removeFromLibraryDesc: 'Orijinal dosya korunacak',
+        deleteOriginalDesc: 'Bu, orijinal dosyayı kalıcı olarak silecektir',
+        alsoDeleteRaw: 'RAW dosyasını da sil',
+        warningPermanent: 'Uyarı: Bu işlem geri alınamaz. Orijinal dosya diskten kalıcı olarak silinecektir.',
+        file: 'Dosya',
+        associatedRaw: 'Bu fotoğrafın ilişkili bir RAW dosyası var:',
+    },
+
+    settings: {
+        title: 'Ayarlar',
+        appearance: 'Görünüm',
+        theme: 'Tema',
+        themeDark: 'Koyu',
+        themeLight: 'Açık',
+        themeSystem: 'Sistem',
+        themeAuto: 'Otomatik',
+        language: 'Dil',
+        storage: 'Depolama',
+        database: 'Veritabanı',
+        thumbnails: 'Küçük resimler',
+        cache: 'Önbellek',
+        clearCache: 'Önbelleği temizle',
+        clearAllData: 'Tüm verileri sil',
+        clearCacheConfirm: 'Bu, tüm içe aktarılan fotoğrafları ve küçük resimleri silecektir. Harita önbelleği korunacaktır.\n\nDevam edilsin mi?',
+        about: 'Hakkında',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Fotoğraf kütüphanesi erişimi',
+        photoLibraryDenied: 'Fotoğraf kütüphanesi erişimi reddedildi',
+        photoLibraryLimited: 'Sınırlı fotoğraf erişimi',
+        goToSettings: 'Ayarlara git',
+        selectMorePhotos: 'Daha fazla fotoğraf seç',
+        selectFromAlbum: 'Albümden seç',
+        limitedAccessTitle: 'Sınırlı fotoğraf erişimi',
+        limitedAccessMessage: 'Yalnızca bazı fotoğraflara erişim izni verdiniz. Ayarlardan daha fazla fotoğraf seçebilir veya tüm fotoğraflara erişim izni verebilirsiniz.',
+        deniedAccessTitle: 'Fotoğraflara erişilemiyor',
+        deniedAccessMessage: 'Lütfen Ayarlar\'dan footos\'un fotoğraf kütüphanenize erişmesine izin verin.',
+    },
+
+    errors: {
+        initFailed: 'Başlatma başarısız',
+        importFailed: 'İçe aktarma başarısız',
+        deleteFailed: 'Silme başarısız',
+        loadFailed: 'Fotoğraflar yüklenemedi',
+        openFailed: 'Açma başarısız',
+        clearFailed: 'Veri silme başarısız',
+    },
+};

@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const vi: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Hủy',
+        confirm: 'Xác nhận',
+        delete: 'Xóa',
+        remove: 'Gỡ bỏ',
+        close: 'Đóng',
+        save: 'Lưu',
+        settings: 'Cài đặt',
+        import: 'Nhập',
+        export: 'Xuất',
+        loading: 'Đang tải...',
+        scanning: 'Đang quét...',
+        syncing: 'Đang đồng bộ...',
+    },
+
+    nav: {
+        library: 'Thư viện',
+        map: 'Bản đồ',
+        timeline: 'Dòng thời gian',
+        photos: 'Ảnh',
+        files: 'tệp',
+    },
+
+    import: {
+        importPhotos: 'Nhập ảnh',
+        importFolder: 'Nhập thư mục',
+        importFile: 'Nhập tệp',
+        importing: 'Đang nhập...',
+        selectPhotos: 'Chọn ảnh',
+        noPhotosSelected: 'Chưa chọn ảnh nào',
+        duplicates: 'trùng',
+        complete: 'Nhập hoàn tất',
+        failed: 'Nhập thất bại',
+        photoImportUnavailable: 'Không thể nhập ảnh. Vui lòng khởi động lại ứng dụng.',
+    },
+
+    library: {
+        noPhotos: 'Không có ảnh',
+        sortBy: 'Sắp xếp theo',
+        sortDate: 'Ngày',
+        sortName: 'Tên',
+        sortSize: 'Kích thước',
+        ascending: 'Tăng dần',
+        descending: 'Giảm dần',
+    },
+
+    preview: {
+        showInFinder: 'Hiển thị trong Finder',
+        showInExplorer: 'Hiển thị trong Explorer',
+        previous: 'Trước',
+        next: 'Sau',
+        zoomIn: 'Phóng to',
+        zoomOut: 'Thu nhỏ',
+        resetZoom: 'Đặt lại zoom',
+    },
+
+    photoInfo: {
+        date: 'Ngày',
+        dimensions: 'Kích thước',
+        fileSize: 'Kích thước tệp',
+        camera: 'Máy ảnh',
+        exposure: 'Phơi sáng',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Chỉ RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Đường dẫn',
+    },
+
+    delete: {
+        title: 'Xóa',
+        removeFromLibrary: 'Gỡ khỏi thư viện',
+        deleteOriginal: 'Xóa tệp gốc',
+        removeFromLibraryDesc: 'Tệp gốc sẽ được giữ lại',
+        deleteOriginalDesc: 'Điều này sẽ xóa vĩnh viễn tệp gốc',
+        alsoDeleteRaw: 'Cũng xóa tệp RAW',
+        warningPermanent: 'Cảnh báo: Hành động này không thể hoàn tác. Tệp gốc sẽ bị xóa vĩnh viễn khỏi ổ đĩa.',
+        file: 'Tệp',
+        associatedRaw: 'Ảnh này có tệp RAW liên kết:',
+    },
+
+    settings: {
+        title: 'Cài đặt',
+        appearance: 'Giao diện',
+        theme: 'Chủ đề',
+        themeDark: 'Tối',
+        themeLight: 'Sáng',
+        themeSystem: 'Hệ thống',
+        themeAuto: 'Tự động',
+        language: 'Ngôn ngữ',
+        storage: 'Lưu trữ',
+        database: 'Cơ sở dữ liệu',
+        thumbnails: 'Ảnh thu nhỏ',
+        cache: 'Bộ nhớ đệm',
+        clearCache: 'Xóa bộ nhớ đệm',
+        clearAllData: 'Xóa tất cả dữ liệu',
+        clearCacheConfirm: 'Điều này sẽ xóa tất cả ảnh đã nhập và ảnh thu nhỏ. Bộ nhớ đệm bản đồ sẽ được giữ lại.\n\nTiếp tục?',
+        about: 'Giới thiệu',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Quyền truy cập thư viện ảnh',
+        photoLibraryDenied: 'Quyền truy cập thư viện ảnh bị từ chối',
+        photoLibraryLimited: 'Quyền truy cập ảnh bị hạn chế',
+        goToSettings: 'Đi tới Cài đặt',
+        selectMorePhotos: 'Chọn thêm ảnh',
+        selectFromAlbum: 'Chọn từ album',
+        limitedAccessTitle: 'Quyền truy cập ảnh bị hạn chế',
+        limitedAccessMessage: 'Bạn chỉ cho phép truy cập một số ảnh. Bạn có thể chọn thêm ảnh hoặc cho phép truy cập tất cả ảnh trong Cài đặt.',
+        deniedAccessTitle: 'Không thể truy cập ảnh',
+        deniedAccessMessage: 'Vui lòng cho phép footos truy cập thư viện ảnh của bạn trong Cài đặt.',
+    },
+
+    errors: {
+        initFailed: 'Khởi tạo thất bại',
+        importFailed: 'Nhập thất bại',
+        deleteFailed: 'Xóa thất bại',
+        loadFailed: 'Tải ảnh thất bại',
+        openFailed: 'Mở thất bại',
+        clearFailed: 'Xóa dữ liệu thất bại',
+    },
+};

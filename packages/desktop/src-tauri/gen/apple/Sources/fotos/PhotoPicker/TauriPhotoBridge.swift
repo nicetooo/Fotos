@@ -149,7 +149,7 @@ import Photos
     private func showDeniedAccessAlert(from viewController: UIViewController) {
         let alert = UIAlertController(
             title: "无法访问照片",
-            message: "请在设置中允许 Fotos 访问您的照片库。",
+            message: "请在设置中允许足迹相册访问您的照片库。",
             preferredStyle: .alert
         )
 
@@ -479,7 +479,7 @@ import Photos
 // MARK: - WKScriptMessageHandler for receiving commands from JavaScript
 extension TauriPhotoBridge: WKScriptMessageHandler {
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "fotosPhotoPicker" else { return }
+        guard message.name == "footosPhotoPicker" else { return }
 
         if let body = message.body as? [String: Any] {
             let command = body["command"] as? String ?? ""

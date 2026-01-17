@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use fotos_core::PhotoInfo;
+use footos_core::PhotoInfo;
 use crate::error::PlatformResult;
 
 /// Photo source type for mobile platforms

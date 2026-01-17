@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const th: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'ยกเลิก',
+        confirm: 'ยืนยัน',
+        delete: 'ลบ',
+        remove: 'ลบออก',
+        close: 'ปิด',
+        save: 'บันทึก',
+        settings: 'การตั้งค่า',
+        import: 'นำเข้า',
+        export: 'ส่งออก',
+        loading: 'กำลังโหลด...',
+        scanning: 'กำลังสแกน...',
+        syncing: 'กำลังซิงค์...',
+    },
+
+    nav: {
+        library: 'คลัง',
+        map: 'แผนที่',
+        timeline: 'ไทม์ไลน์',
+        photos: 'รูปภาพ',
+        files: 'ไฟล์',
+    },
+
+    import: {
+        importPhotos: 'นำเข้ารูปภาพ',
+        importFolder: 'นำเข้าโฟลเดอร์',
+        importFile: 'นำเข้าไฟล์',
+        importing: 'กำลังนำเข้า...',
+        selectPhotos: 'เลือกรูปภาพ',
+        noPhotosSelected: 'ยังไม่ได้เลือกรูปภาพ',
+        duplicates: 'ซ้ำ',
+        complete: 'นำเข้าสำเร็จ',
+        failed: 'นำเข้าล้มเหลว',
+        photoImportUnavailable: 'ไม่สามารถนำเข้ารูปภาพได้ กรุณารีสตาร์ทแอป',
+    },
+
+    library: {
+        noPhotos: 'ไม่มีรูปภาพ',
+        sortBy: 'เรียงตาม',
+        sortDate: 'วันที่',
+        sortName: 'ชื่อ',
+        sortSize: 'ขนาด',
+        ascending: 'น้อยไปมาก',
+        descending: 'มากไปน้อย',
+    },
+
+    preview: {
+        showInFinder: 'แสดงใน Finder',
+        showInExplorer: 'แสดงใน Explorer',
+        previous: 'ก่อนหน้า',
+        next: 'ถัดไป',
+        zoomIn: 'ซูมเข้า',
+        zoomOut: 'ซูมออก',
+        resetZoom: 'รีเซ็ตซูม',
+    },
+
+    photoInfo: {
+        date: 'วันที่',
+        dimensions: 'ขนาด',
+        fileSize: 'ขนาดไฟล์',
+        camera: 'กล้อง',
+        exposure: 'การเปิดรับแสง',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'RAW เท่านั้น',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'เส้นทาง',
+    },
+
+    delete: {
+        title: 'ลบ',
+        removeFromLibrary: 'ลบออกจากคลัง',
+        deleteOriginal: 'ลบไฟล์ต้นฉบับ',
+        removeFromLibraryDesc: 'ไฟล์ต้นฉบับจะถูกเก็บไว้',
+        deleteOriginalDesc: 'การกระทำนี้จะลบไฟล์ต้นฉบับอย่างถาวร',
+        alsoDeleteRaw: 'ลบไฟล์ RAW ด้วย',
+        warningPermanent: 'คำเตือน: การกระทำนี้ไม่สามารถย้อนกลับได้ ไฟล์ต้นฉบับจะถูกลบออกจากดิสก์อย่างถาวร',
+        file: 'ไฟล์',
+        associatedRaw: 'รูปภาพนี้มีไฟล์ RAW ที่เกี่ยวข้อง:',
+    },
+
+    settings: {
+        title: 'การตั้งค่า',
+        appearance: 'รูปลักษณ์',
+        theme: 'ธีม',
+        themeDark: 'มืด',
+        themeLight: 'สว่าง',
+        themeSystem: 'ระบบ',
+        themeAuto: 'อัตโนมัติ',
+        language: 'ภาษา',
+        storage: 'พื้นที่จัดเก็บ',
+        database: 'ฐานข้อมูล',
+        thumbnails: 'รูปย่อ',
+        cache: 'แคช',
+        clearCache: 'ล้างแคช',
+        clearAllData: 'ลบข้อมูลทั้งหมด',
+        clearCacheConfirm: 'การกระทำนี้จะลบรูปภาพที่นำเข้าและรูปย่อทั้งหมด แคชแผนที่จะถูกเก็บไว้\n\nดำเนินการต่อ?',
+        about: 'เกี่ยวกับ',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'การเข้าถึงคลังรูปภาพ',
+        photoLibraryDenied: 'การเข้าถึงคลังรูปภาพถูกปฏิเสธ',
+        photoLibraryLimited: 'การเข้าถึงรูปภาพถูกจำกัด',
+        goToSettings: 'ไปที่การตั้งค่า',
+        selectMorePhotos: 'เลือกรูปภาพเพิ่มเติม',
+        selectFromAlbum: 'เลือกจากอัลบั้ม',
+        limitedAccessTitle: 'การเข้าถึงรูปภาพถูกจำกัด',
+        limitedAccessMessage: 'คุณอนุญาตให้เข้าถึงรูปภาพบางส่วนเท่านั้น คุณสามารถเลือกรูปภาพเพิ่มเติมหรืออนุญาตให้เข้าถึงรูปภาพทั้งหมดในการตั้งค่า',
+        deniedAccessTitle: 'ไม่สามารถเข้าถึงรูปภาพ',
+        deniedAccessMessage: 'กรุณาอนุญาตให้ footos เข้าถึงคลังรูปภาพของคุณในการตั้งค่า',
+    },
+
+    errors: {
+        initFailed: 'การเริ่มต้นล้มเหลว',
+        importFailed: 'การนำเข้าล้มเหลว',
+        deleteFailed: 'การลบล้มเหลว',
+        loadFailed: 'การโหลดรูปภาพล้มเหลว',
+        openFailed: 'การเปิดล้มเหลว',
+        clearFailed: 'การลบข้อมูลล้มเหลว',
+    },
+};

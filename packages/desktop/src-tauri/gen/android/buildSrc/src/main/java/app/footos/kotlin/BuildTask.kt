@@ -1,4 +1,4 @@
-package app.fotos.kotlin
+package app.footos.kotlin
 
 import java.io.File
 import org.apache.tools.ant.taskdefs.condition.Os

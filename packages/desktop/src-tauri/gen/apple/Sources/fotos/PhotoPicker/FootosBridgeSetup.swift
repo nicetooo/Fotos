@@ -2,9 +2,9 @@ import UIKit
 import WebKit
 
 /// Helper class to set up the Swift-JavaScript bridge
-@objc public class FotosBridgeSetup: NSObject {
+@objc public class FootosBridgeSetup: NSObject {
 
-    @objc public static let shared = FotosBridgeSetup()
+    @objc public static let shared = FootosBridgeSetup()
 
     private var setupComplete = false
     private var retryCount = 0
@@ -17,14 +17,14 @@ import WebKit
     /// Start watching for WebView and set up bridge
     @objc public func start() {
         guard !setupComplete else { return }
-        print("[FotosBridge] Starting to watch for WebView...")
+        print("[FootosBridge] Starting to watch for WebView...")
         attemptSetup()
     }
 
     private func attemptSetup() {
         guard !setupComplete && retryCount < maxRetries else {
             if !setupComplete {
-                print("[FotosBridge] Failed to find WebView after \(maxRetries) attempts")
+                print("[FootosBridge] Failed to find WebView after \(maxRetries) attempts")
             }
             return
         }
@@ -41,7 +41,7 @@ import WebKit
             return
         }
 
-        print("[FotosBridge] Found WebView on attempt \(retryCount)")
+        print("[FootosBridge] Found WebView on attempt \(retryCount)")
         setupBridge(webView: webView)
     }
 
@@ -54,15 +54,15 @@ import WebKit
 
         // Add script message handler
         let contentController = webView.configuration.userContentController
-        contentController.add(TauriPhotoBridge.shared, name: "fotosPhotoPicker")
+        contentController.add(TauriPhotoBridge.shared, name: "footosPhotoPicker")
 
-        print("[FotosBridge] Bridge setup complete")
+        print("[FootosBridge] Bridge setup complete")
 
         // Inject notification that bridge is ready
         let testScript = """
-        console.log('[Fotos] Swift bridge initialized');
-        window.__FOTOS_BRIDGE_READY__ = true;
-        window.dispatchEvent(new CustomEvent('fotos-bridge-ready', { detail: {} }));
+        console.log('[足迹相册] Swift bridge initialized');
+        window.__FOOTOS_BRIDGE_READY__ = true;
+        window.dispatchEvent(new CustomEvent('footos-bridge-ready', { detail: {} }));
         """
         webView.evaluateJavaScript(testScript, completionHandler: nil)
     }
@@ -85,14 +85,14 @@ import WebKit
 private enum BridgeAutoStart {
     static let start: Void = {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            FotosBridgeSetup.shared.start()
+            FootosBridgeSetup.shared.start()
         }
     }()
 }
 
 // Reference the static property to force initialization
 // This happens at app launch due to the @_cdecl attribute
-@_cdecl("FotosBridgeInit")
-public func FotosBridgeInit() {
+@_cdecl("FootosBridgeInit")
+public func FootosBridgeInit() {
     _ = BridgeAutoStart.start
 }

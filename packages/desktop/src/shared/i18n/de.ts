@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const de: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Abbrechen',
+        confirm: 'Bestätigen',
+        delete: 'Löschen',
+        remove: 'Entfernen',
+        close: 'Schließen',
+        save: 'Speichern',
+        settings: 'Einstellungen',
+        import: 'Importieren',
+        export: 'Exportieren',
+        loading: 'Laden...',
+        scanning: 'Scannen...',
+        syncing: 'Synchronisieren...',
+    },
+
+    nav: {
+        library: 'Bibliothek',
+        map: 'Karte',
+        timeline: 'Zeitleiste',
+        photos: 'Fotos',
+        files: 'Dateien',
+    },
+
+    import: {
+        importPhotos: 'Fotos importieren',
+        importFolder: 'Ordner importieren',
+        importFile: 'Datei importieren',
+        importing: 'Importieren...',
+        selectPhotos: 'Fotos auswählen',
+        noPhotosSelected: 'Keine Fotos ausgewählt',
+        duplicates: 'Duplikate',
+        complete: 'Import abgeschlossen',
+        failed: 'Import fehlgeschlagen',
+        photoImportUnavailable: 'Foto-Import nicht verfügbar. Bitte starten Sie die App neu.',
+    },
+
+    library: {
+        noPhotos: 'Keine Fotos',
+        sortBy: 'Sortieren nach',
+        sortDate: 'Datum',
+        sortName: 'Name',
+        sortSize: 'Größe',
+        ascending: 'Aufsteigend',
+        descending: 'Absteigend',
+    },
+
+    preview: {
+        showInFinder: 'Im Finder anzeigen',
+        showInExplorer: 'Im Explorer anzeigen',
+        previous: 'Zurück',
+        next: 'Weiter',
+        zoomIn: 'Vergrößern',
+        zoomOut: 'Verkleinern',
+        resetZoom: 'Zoom zurücksetzen',
+    },
+
+    photoInfo: {
+        date: 'Datum',
+        dimensions: 'Abmessungen',
+        fileSize: 'Dateigröße',
+        camera: 'Kamera',
+        exposure: 'Belichtung',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Nur RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Pfad',
+    },
+
+    delete: {
+        title: 'Löschen',
+        removeFromLibrary: 'Aus Bibliothek entfernen',
+        deleteOriginal: 'Originaldatei löschen',
+        removeFromLibraryDesc: 'Originaldatei wird behalten',
+        deleteOriginalDesc: 'Dies löscht die Originaldatei dauerhaft',
+        alsoDeleteRaw: 'RAW-Datei ebenfalls löschen',
+        warningPermanent: 'Warnung: Diese Aktion kann nicht rückgängig gemacht werden. Die Originaldatei wird dauerhaft von der Festplatte gelöscht.',
+        file: 'Datei',
+        associatedRaw: 'Dieses Foto hat eine zugehörige RAW-Datei:',
+    },
+
+    settings: {
+        title: 'Einstellungen',
+        appearance: 'Erscheinungsbild',
+        theme: 'Design',
+        themeDark: 'Dunkel',
+        themeLight: 'Hell',
+        themeSystem: 'System',
+        themeAuto: 'Auto',
+        language: 'Sprache',
+        storage: 'Speicher',
+        database: 'Datenbank',
+        thumbnails: 'Miniaturansichten',
+        cache: 'Cache',
+        clearCache: 'Cache leeren',
+        clearAllData: 'Alle Daten löschen',
+        clearCacheConfirm: 'Dies löscht alle importierten Fotos und Miniaturansichten. Der Karten-Cache wird beibehalten.\n\nFortfahren?',
+        about: 'Über',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Zugriff auf Fotobibliothek',
+        photoLibraryDenied: 'Zugriff auf Fotobibliothek verweigert',
+        photoLibraryLimited: 'Eingeschränkter Fotozugriff',
+        goToSettings: 'Zu Einstellungen',
+        selectMorePhotos: 'Mehr Fotos auswählen',
+        selectFromAlbum: 'Aus Album auswählen',
+        limitedAccessTitle: 'Eingeschränkter Fotozugriff',
+        limitedAccessMessage: 'Sie haben nur Zugriff auf ausgewählte Fotos gewährt. Sie können mehr Fotos auswählen oder den Zugriff auf alle Fotos in den Einstellungen erlauben.',
+        deniedAccessTitle: 'Kein Zugriff auf Fotos',
+        deniedAccessMessage: 'Bitte erlauben Sie footos den Zugriff auf Ihre Fotobibliothek in den Einstellungen.',
+    },
+
+    errors: {
+        initFailed: 'Initialisierung fehlgeschlagen',
+        importFailed: 'Import fehlgeschlagen',
+        deleteFailed: 'Löschen fehlgeschlagen',
+        loadFailed: 'Laden der Fotos fehlgeschlagen',
+        openFailed: 'Öffnen fehlgeschlagen',
+        clearFailed: 'Löschen der Daten fehlgeschlagen',
+    },
+};

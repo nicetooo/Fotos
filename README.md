@@ -1,4 +1,4 @@
-# Fotos
+# 足迹相册 (footos)
 
 一个现代化的照片管理桌面应用，专注于地理位置可视化和 RAW 文件支持。
 
@@ -132,7 +132,7 @@ npm run tauri build
 
 应用数据存储在系统 Application Support 目录：
 
-- `fotos.db` - SQLite 数据库
+- `footos.db` - SQLite 数据库
 - `thumbnails/` - 缩略图缓存
 - `raw_previews/` - RAW 预览缓存
 - `tiles/` - 地图瓦片缓存

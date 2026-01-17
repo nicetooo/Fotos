@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const es: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Cancelar',
+        confirm: 'Confirmar',
+        delete: 'Eliminar',
+        remove: 'Quitar',
+        close: 'Cerrar',
+        save: 'Guardar',
+        settings: 'Ajustes',
+        import: 'Importar',
+        export: 'Exportar',
+        loading: 'Cargando...',
+        scanning: 'Escaneando...',
+        syncing: 'Sincronizando...',
+    },
+
+    nav: {
+        library: 'Biblioteca',
+        map: 'Mapa',
+        timeline: 'Cronología',
+        photos: 'Fotos',
+        files: 'archivos',
+    },
+
+    import: {
+        importPhotos: 'Importar fotos',
+        importFolder: 'Importar carpeta',
+        importFile: 'Importar archivo',
+        importing: 'Importando...',
+        selectPhotos: 'Seleccionar fotos',
+        noPhotosSelected: 'No hay fotos seleccionadas',
+        duplicates: 'duplicados',
+        complete: 'Importación completada',
+        failed: 'Error en la importación',
+        photoImportUnavailable: 'La importación de fotos no está disponible. Por favor, reinicie la aplicación.',
+    },
+
+    library: {
+        noPhotos: 'Sin fotos',
+        sortBy: 'Ordenar por',
+        sortDate: 'Fecha',
+        sortName: 'Nombre',
+        sortSize: 'Tamaño',
+        ascending: 'Ascendente',
+        descending: 'Descendente',
+    },
+
+    preview: {
+        showInFinder: 'Mostrar en Finder',
+        showInExplorer: 'Mostrar en Explorador',
+        previous: 'Anterior',
+        next: 'Siguiente',
+        zoomIn: 'Acercar',
+        zoomOut: 'Alejar',
+        resetZoom: 'Restablecer zoom',
+    },
+
+    photoInfo: {
+        date: 'Fecha',
+        dimensions: 'Dimensiones',
+        fileSize: 'Tamaño del archivo',
+        camera: 'Cámara',
+        exposure: 'Exposición',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Solo RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Ruta',
+    },
+
+    delete: {
+        title: 'Eliminar',
+        removeFromLibrary: 'Quitar de la biblioteca',
+        deleteOriginal: 'Eliminar archivo original',
+        removeFromLibraryDesc: 'El archivo original se conservará',
+        deleteOriginalDesc: 'Esto eliminará permanentemente el archivo original',
+        alsoDeleteRaw: 'Eliminar también el archivo RAW',
+        warningPermanent: 'Advertencia: Esta acción no se puede deshacer. El archivo original se eliminará permanentemente del disco.',
+        file: 'Archivo',
+        associatedRaw: 'Esta foto tiene un archivo RAW asociado:',
+    },
+
+    settings: {
+        title: 'Ajustes',
+        appearance: 'Apariencia',
+        theme: 'Tema',
+        themeDark: 'Oscuro',
+        themeLight: 'Claro',
+        themeSystem: 'Sistema',
+        themeAuto: 'Auto',
+        language: 'Idioma',
+        storage: 'Almacenamiento',
+        database: 'Base de datos',
+        thumbnails: 'Miniaturas',
+        cache: 'Caché',
+        clearCache: 'Limpiar caché',
+        clearAllData: 'Borrar todos los datos',
+        clearCacheConfirm: 'Esto eliminará todas las fotos importadas y las miniaturas. El caché del mapa se conservará.\n\n¿Continuar?',
+        about: 'Acerca de',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Acceso a la biblioteca de fotos',
+        photoLibraryDenied: 'Acceso a la biblioteca de fotos denegado',
+        photoLibraryLimited: 'Acceso limitado a fotos',
+        goToSettings: 'Ir a Ajustes',
+        selectMorePhotos: 'Seleccionar más fotos',
+        selectFromAlbum: 'Seleccionar del álbum',
+        limitedAccessTitle: 'Acceso limitado a fotos',
+        limitedAccessMessage: 'Solo ha autorizado el acceso a algunas fotos. Puede seleccionar más fotos o permitir el acceso a todas las fotos en Ajustes.',
+        deniedAccessTitle: 'No se puede acceder a las fotos',
+        deniedAccessMessage: 'Por favor, permita que footos acceda a su biblioteca de fotos en Ajustes.',
+    },
+
+    errors: {
+        initFailed: 'Error de inicialización',
+        importFailed: 'Error de importación',
+        deleteFailed: 'Error al eliminar',
+        loadFailed: 'Error al cargar fotos',
+        openFailed: 'Error al abrir',
+        clearFailed: 'Error al borrar datos',
+    },
+};

@@ -25,6 +25,9 @@
         getRawFileSize,
     } from "../shared";
 
+    // i18n
+    import { createI18nState, type Locale } from "../shared/i18n";
+
     // Components
     import Settings from "./components/Settings.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
@@ -35,6 +38,11 @@
 
     // Set context synchronously during component initialization
     setPlatformService(platformService);
+
+    // i18n state
+    const i18n = createI18nState();
+    let locale = $derived(i18n.locale);
+    let t = $derived(i18n.t);
 
     let version = $state("...");
     let showSettings = $state(false);
@@ -57,8 +65,8 @@
     let previewPhotoList = $state<PhotoInfo[] | null>(null);
 
     // Sort state with localStorage persistence
-    const SORT_BY_KEY = "fotos-sort-by";
-    const SORT_ORDER_KEY = "fotos-sort-order";
+    const SORT_BY_KEY = "footos-sort-by";
+    const SORT_ORDER_KEY = "footos-sort-order";
     let sortBy = $state<SortBy>((() => {
         if (typeof localStorage !== "undefined") {
             const saved = localStorage.getItem(SORT_BY_KEY);
@@ -91,10 +99,11 @@
     });
 
     let libraryImportMenuOpen = $state(false);
+    let floatingImportMenuOpen = $state(false);
     let sortMenuOpen = $state(false);
 
     // Theme state
-    const THEME_KEY = "fotos-theme";
+    const THEME_KEY = "footos-theme";
     let theme = $state<Theme>((() => {
         if (typeof localStorage !== "undefined") {
             const saved = localStorage.getItem(THEME_KEY);
@@ -158,7 +167,7 @@
         try {
             version = await invoke("get_core_version");
             const appData = await appDataDir();
-            dbPath = await join(appData, "fotos.db");
+            dbPath = await join(appData, "footos.db");
             thumbDir = await join(appData, "thumbnails");
 
             // Initialize platform service
@@ -192,7 +201,7 @@
 
             await loadPhotos();
         } catch (e) {
-            error = "Failed to initialize: " + e;
+            error = t.errors.initFailed + ": " + e;
         }
 
         return () => {
@@ -230,17 +239,6 @@
         }
     }
 
-    async function handleImport() {
-        if (!platformService) return;
-        try {
-            error = "";
-            importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
-            await platformService.requestImport();
-        } catch (e) {
-            error = String(e);
-        }
-    }
-
     function handleLibrary() {
         showLibrary = !showLibrary;
     }
@@ -250,7 +248,7 @@
         try {
             await revealItemInDir(path);
         } catch (e) {
-            alert("Failed to open location: " + e);
+            alert(t.errors.openFailed + ": " + e);
         }
     }
 
@@ -331,7 +329,7 @@
             }
         } catch (e) {
             console.error('Delete failed:', e);
-            error = 'Delete failed: ' + e;
+            error = t.errors.deleteFailed + ': ' + e;
         } finally {
             isDeleting = false;
             deleteConfirmOpen = false;
@@ -392,15 +390,42 @@
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
-            <!-- Import button -->
-            <button
-                onclick={() => handleImport()}
-                disabled={isScanning}
-                class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
-                title="Import photos"
-            >
-                <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>
-            </button>
+            <!-- Import button with dropdown -->
+            <div class="relative">
+                <button
+                    onclick={() => floatingImportMenuOpen = !floatingImportMenuOpen}
+                    disabled={isScanning}
+                    class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                    title={t.import.importPhotos}
+                >
+                    <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>
+                </button>
+                {#if floatingImportMenuOpen}
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div
+                        class="fixed inset-0 z-40"
+                        onclick={() => floatingImportMenuOpen = false}
+                    ></div>
+                    <div class="absolute left-0 top-full mt-2 py-1 theme-bg-secondary border theme-border rounded-lg shadow-lg z-50 min-w-[140px]">
+                        <button
+                            onclick={() => { floatingImportMenuOpen = false; handleScan("folder"); }}
+                            disabled={isScanning}
+                            class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-folder w-4"></i>
+                            {t.import.importFolder}
+                        </button>
+                        <button
+                            onclick={() => { floatingImportMenuOpen = false; handleScan("file"); }}
+                            disabled={isScanning}
+                            class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-file-image w-4"></i>
+                            {t.import.importFile}
+                        </button>
+                    </div>
+                {/if}
+            </div>
 
             <!-- Library button -->
             <button
@@ -434,9 +459,9 @@
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-images theme-text-muted text-sm"></i>
                         <span class="theme-text-primary font-medium">
-                            {sortedPhotos.length} Photos
+                            {sortedPhotos.length} {t.nav.photos}
                             {#if sortedPhotos.length !== photos.length}
-                                <span class="theme-text-muted text-xs">({photos.length} files)</span>
+                                <span class="theme-text-muted text-xs">({photos.length} {t.nav.files})</span>
                             {/if}
                         </span>
                     </div>
@@ -457,7 +482,7 @@
                             onclick={() => sortMenuOpen = !sortMenuOpen}
                             class="h-7 px-2.5 rounded theme-bg-tertiary theme-text-primary text-xs flex items-center gap-1.5 hover:theme-bg-secondary"
                         >
-                            <span>{sortBy === 'date' ? 'Date' : sortBy === 'name' ? 'Name' : 'Size'}</span>
+                            <span>{sortBy === 'date' ? t.library.sortDate : sortBy === 'name' ? t.library.sortName : t.library.sortSize}</span>
                             <i class="fa-solid fa-chevron-down text-[10px] theme-text-muted"></i>
                         </button>
                         {#if sortMenuOpen}
@@ -471,19 +496,19 @@
                                     onclick={() => { sortBy = 'date'; sortMenuOpen = false; }}
                                     class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'date' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
                                 >
-                                    Date
+                                    {t.library.sortDate}
                                 </button>
                                 <button
                                     onclick={() => { sortBy = 'name'; sortMenuOpen = false; }}
                                     class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'name' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
                                 >
-                                    Name
+                                    {t.library.sortName}
                                 </button>
                                 <button
                                     onclick={() => { sortBy = 'dimensions'; sortMenuOpen = false; }}
                                     class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'dimensions' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
                                 >
-                                    Size
+                                    {t.library.sortSize}
                                 </button>
                             </div>
                         {/if}
@@ -521,7 +546,7 @@
                                     class="w-full px-3 py-1.5 text-left text-xs theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
                                 >
                                     <i class="fa-solid fa-folder w-3"></i>
-                                    Import Folder
+                                    {t.import.importFolder}
                                 </button>
                                 <button
                                     onclick={() => { libraryImportMenuOpen = false; handleScan("file"); }}
@@ -529,7 +554,7 @@
                                     class="w-full px-3 py-1.5 text-left text-xs theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
                                 >
                                     <i class="fa-solid fa-file-image w-3"></i>
-                                    Import File
+                                    {t.import.importFile}
                                 </button>
                             </div>
                         {/if}
@@ -568,12 +593,12 @@
                     {:else if !isScanning}
                         <div class="h-full flex flex-col items-center justify-center text-white/50 py-12">
                             <i class="fa-solid fa-images text-2xl mb-3"></i>
-                            <p class="text-sm">No photos</p>
+                            <p class="text-sm">{t.library.noPhotos}</p>
                             <button
                                 onclick={() => handleScan("folder")}
                                 class="mt-3 px-3 py-1.5 rounded bg-white/10 text-white/80 text-xs hover:bg-white/20"
                             >
-                                Import Photos
+                                {t.import.importPhotos}
                             </button>
                         </div>
                     {:else}
@@ -583,7 +608,7 @@
                                 {#if importStatus.total > 0}
                                     {importStatus.current} / {importStatus.total}
                                 {:else}
-                                    Scanning...
+                                    {t.common.scanning}...
                                 {/if}
                             </p>
                         </div>
@@ -599,10 +624,10 @@
                 {#if importStatus.total > 0}
                     <span>{importStatus.current} / {importStatus.total}</span>
                     {#if importStatus.duplicates > 0}
-                        <span class="text-yellow-400" title="Already imported">({importStatus.duplicates} dup)</span>
+                        <span class="text-yellow-400" title={t.import.duplicates}>({importStatus.duplicates} {t.import.duplicates})</span>
                     {/if}
                 {:else}
-                    <span>Scanning...</span>
+                    <span>{t.common.scanning}...</span>
                 {/if}
                 <button
                     onclick={handleCancelImport}
@@ -636,7 +661,7 @@
             onclick={(e) => e.stopPropagation()}
         >
             <div class="flex items-center justify-between px-6 py-4 border-b theme-border">
-                <h2 class="text-lg font-medium theme-text-primary">Settings</h2>
+                <h2 class="text-lg font-medium theme-text-primary">{t.settings.title}</h2>
                 <button
                     onclick={() => showSettings = false}
                     class="p-2 rounded-lg hover:theme-bg-tertiary theme-text-muted hover:theme-text-primary transition-colors"
@@ -645,7 +670,7 @@
                 </button>
             </div>
             <div class="p-6 overflow-y-auto max-h-[calc(80vh-60px)]">
-                <Settings {dbPath} {thumbDir} {version} {theme} onThemeChange={(t) => theme = t} />
+                <Settings {dbPath} {thumbDir} {version} {theme} onThemeChange={(newTheme) => theme = newTheme} {t} {locale} onLocaleChange={(newLocale) => i18n.setLocale(newLocale)} />
             </div>
         </div>
     </div>
@@ -723,18 +748,18 @@
             <div class="space-y-3">
                 {#if previewPhoto.metadata.date_taken}
                     <div>
-                        <p class="theme-text-muted text-xs">Date</p>
+                        <p class="theme-text-muted text-xs">{t.photoInfo.date}</p>
                         <p class="theme-text-primary font-mono text-xs">{previewPhoto.metadata.date_taken}</p>
                     </div>
                 {/if}
 
                 <div>
-                    <p class="theme-text-muted text-xs">Dimensions</p>
+                    <p class="theme-text-muted text-xs">{t.photoInfo.dimensions}</p>
                     <p class="theme-text-primary">{previewPhoto.metadata.width} × {previewPhoto.metadata.height}</p>
                 </div>
 
                 <div>
-                    <p class="theme-text-muted text-xs">File Size</p>
+                    <p class="theme-text-muted text-xs">{t.photoInfo.fileSize}</p>
                     <p class="theme-text-primary">
                         {formatFileSize(previewPhoto.file_size)}
                         {#if previewPhoto.hasRaw}
@@ -748,14 +773,14 @@
 
                 {#if previewPhoto.metadata.make || previewPhoto.metadata.model}
                     <div>
-                        <p class="theme-text-muted text-xs">Camera</p>
+                        <p class="theme-text-muted text-xs">{t.photoInfo.camera}</p>
                         <p class="theme-text-primary">{previewPhoto.metadata.make || ""} {previewPhoto.metadata.model || ""}</p>
                     </div>
                 {/if}
 
                 {#if previewPhoto.metadata.iso || previewPhoto.metadata.f_number || previewPhoto.metadata.exposure_time}
                     <div>
-                        <p class="theme-text-muted text-xs">Exposure</p>
+                        <p class="theme-text-muted text-xs">{t.photoInfo.exposure}</p>
                         <p class="theme-text-primary">
                             {#if previewPhoto.metadata.iso}ISO {previewPhoto.metadata.iso}{/if}
                             {#if previewPhoto.metadata.f_number} f/{previewPhoto.metadata.f_number.toFixed(1)}{/if}
@@ -766,7 +791,7 @@
 
                 {#if previewPhoto.metadata.lat && previewPhoto.metadata.lon}
                     <div>
-                        <p class="theme-text-muted text-xs">GPS</p>
+                        <p class="theme-text-muted text-xs">{t.photoInfo.gps}</p>
                         <p class="theme-text-primary font-mono text-xs">
                             {previewPhoto.metadata.lat.toFixed(6)}, {previewPhoto.metadata.lon.toFixed(6)}
                         </p>
@@ -775,24 +800,24 @@
 
                 {#if previewPhoto.hasRaw || previewPhoto.isRawOnly}
                     <div>
-                        <p class="theme-text-muted text-xs">RAW</p>
+                        <p class="theme-text-muted text-xs">{t.photoInfo.raw}</p>
                         {#if previewPhoto.hasRaw}
-                            <p class="text-amber-500 text-xs font-medium">JPEG + RAW</p>
+                            <p class="text-amber-500 text-xs font-medium">{t.photoInfo.jpegPlusRaw}</p>
                             <p class="theme-text-muted text-[10px] font-mono break-all mt-0.5">{previewPhoto.rawPath}</p>
                         {:else if previewPhoto.isRawOnly}
-                            <p class="text-rose-500 text-xs font-medium">RAW Only</p>
+                            <p class="text-rose-500 text-xs font-medium">{t.photoInfo.rawOnly}</p>
                         {/if}
                     </div>
                 {/if}
 
                 <div>
-                    <p class="theme-text-muted text-xs">Path</p>
+                    <p class="theme-text-muted text-xs">{t.photoInfo.path}</p>
                     <p class="theme-text-primary text-xs font-mono break-all">{previewPhoto.path}</p>
                 </div>
 
                 <!-- Delete actions -->
                 <div class="pt-3 mt-3 border-t theme-border">
-                    <p class="theme-text-muted text-xs mb-2">Delete</p>
+                    <p class="theme-text-muted text-xs mb-2">{t.delete.title}</p>
                     <div class="flex flex-col gap-2">
                         <button
                             onclick={(e) => { e.stopPropagation(); openDeleteConfirm('app'); }}
@@ -800,7 +825,7 @@
                             class="w-full px-3 py-2 rounded text-xs bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 disabled:opacity-50 flex items-center gap-2"
                         >
                             <i class="fa-solid fa-database"></i>
-                            Remove from Library
+                            {t.delete.removeFromLibrary}
                         </button>
                         <button
                             onclick={(e) => { e.stopPropagation(); openDeleteConfirm('complete'); }}
@@ -808,7 +833,7 @@
                             class="w-full px-3 py-2 rounded text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-50 flex items-center gap-2"
                         >
                             <i class="fa-solid fa-trash"></i>
-                            Delete Original File
+                            {t.delete.deleteOriginal}
                         </button>
                     </div>
                 </div>
@@ -834,20 +859,20 @@
                     </div>
                     <div>
                         <h3 class="text-lg font-medium theme-text-primary">
-                            {deleteMode === 'complete' ? 'Delete Photo' : 'Remove from Library'}
+                            {deleteMode === 'complete' ? t.delete.deleteOriginal : t.delete.removeFromLibrary}
                         </h3>
                         <p class="text-sm theme-text-muted">
-                            {deleteMode === 'complete' ? 'This will permanently delete the original file' : 'Original file will be kept'}
+                            {deleteMode === 'complete' ? t.delete.deleteOriginalDesc : t.delete.removeFromLibraryDesc}
                         </p>
                     </div>
                 </div>
 
                 <div class="theme-bg-primary rounded-lg p-3 mb-4">
-                    <p class="text-xs theme-text-muted mb-1">File</p>
+                    <p class="text-xs theme-text-muted mb-1">{t.delete.file}</p>
                     <p class="text-sm theme-text-primary font-mono break-all">{previewPhoto.path.split('/').pop()}</p>
                     {#if previewPhoto.hasRaw && deleteMode === 'complete'}
                         <div class="mt-3 pt-3 border-t border-white/10">
-                            <p class="text-xs theme-text-muted mb-2">This photo has an associated RAW file:</p>
+                            <p class="text-xs theme-text-muted mb-2">{t.delete.associatedRaw}:</p>
                             <p class="text-xs text-amber-400 font-mono break-all mb-3">{previewPhoto.rawPath?.split('/').pop()}</p>
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input
@@ -855,11 +880,11 @@
                                     bind:checked={deleteIncludeRaw}
                                     class="w-4 h-4 rounded border-2 border-amber-500 bg-transparent checked:bg-amber-500"
                                 />
-                                <span class="text-sm text-amber-400">Also delete RAW file</span>
+                                <span class="text-sm text-amber-400">{t.delete.alsoDeleteRaw}</span>
                             </label>
                         </div>
                     {:else if previewPhoto.hasRaw}
-                        <p class="text-xs text-amber-400 mt-1">+ Associated RAW file will also be removed</p>
+                        <p class="text-xs text-amber-400 mt-1">+ {t.delete.associatedRaw}</p>
                     {/if}
                 </div>
 
@@ -867,7 +892,7 @@
                     <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
                         <p class="text-xs text-red-400">
                             <i class="fa-solid fa-triangle-exclamation mr-1"></i>
-                            Warning: This action cannot be undone. The original file will be permanently deleted from disk.
+                            {t.delete.warningPermanent}
                         </p>
                     </div>
                 {/if}
@@ -878,7 +903,7 @@
                         disabled={isDeleting}
                         class="flex-1 px-4 py-2 rounded-lg theme-bg-tertiary theme-text-secondary hover:theme-text-primary disabled:opacity-50"
                     >
-                        Cancel
+                        {t.common.cancel}
                     </button>
                     <button
                         onclick={() => handleDeletePhoto(previewPhoto!, deleteMode, deleteIncludeRaw)}
@@ -888,7 +913,7 @@
                         {#if isDeleting}
                             <i class="fa-solid fa-spinner fa-spin"></i>
                         {/if}
-                        {deleteMode === 'complete' ? 'Delete' : 'Remove'}
+                        {deleteMode === 'complete' ? t.common.delete : t.common.remove}
                     </button>
                 </div>
             </div>

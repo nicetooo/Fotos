@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn test_generate_workflow() {
-        let temp_dir = std::env::temp_dir().join("fotos_thumb_gen_test");
+        let temp_dir = std::env::temp_dir().join("footos_thumb_gen_test");
         if temp_dir.exists() { fs::remove_dir_all(&temp_dir).unwrap(); }
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -725,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_idempotency_and_cache_hit() {
-        let temp_dir = std::env::temp_dir().join("fotos_thumb_idempotency");
+        let temp_dir = std::env::temp_dir().join("footos_thumb_idempotency");
         if temp_dir.exists() { fs::remove_dir_all(&temp_dir).unwrap(); }
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -758,7 +758,7 @@ mod tests {
 
     #[test]
     fn test_get_cached_path_check() {
-        let temp_dir = std::env::temp_dir().join("fotos_thumb_check_test");
+        let temp_dir = std::env::temp_dir().join("footos_thumb_check_test");
         if temp_dir.exists() { fs::remove_dir_all(&temp_dir).unwrap(); }
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -787,7 +787,7 @@ mod tests {
     fn test_non_utf8_path_handling() {
         use std::os::unix::ffi::OsStrExt;
         
-        let temp_dir = std::env::temp_dir().join("fotos_thumb_utf8");
+        let temp_dir = std::env::temp_dir().join("footos_thumb_utf8");
         if temp_dir.exists() { fs::remove_dir_all(&temp_dir).unwrap(); }
         fs::create_dir_all(&temp_dir).unwrap();
 

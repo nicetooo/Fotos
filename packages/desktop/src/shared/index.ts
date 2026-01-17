@@ -16,3 +16,6 @@ export type {
 
 // Utilities
 export * from "./utils";
+
+// i18n
+export * from "./i18n";

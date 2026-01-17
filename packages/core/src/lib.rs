@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn test_pipeline_error_tolerance_and_invariants() {
-        let temp_dir = std::env::temp_dir().join("fotos_pipeline_test");
+        let temp_dir = std::env::temp_dir().join("footos_pipeline_test");
         let thumb_dir = temp_dir.join("thumbs");
         let src_dir = temp_dir.join("src");
         

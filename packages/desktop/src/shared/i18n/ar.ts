@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const ar: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'إلغاء',
+        confirm: 'تأكيد',
+        delete: 'حذف',
+        remove: 'إزالة',
+        close: 'إغلاق',
+        save: 'حفظ',
+        settings: 'الإعدادات',
+        import: 'استيراد',
+        export: 'تصدير',
+        loading: 'جاري التحميل...',
+        scanning: 'جاري الفحص...',
+        syncing: 'جاري المزامنة...',
+    },
+
+    nav: {
+        library: 'المكتبة',
+        map: 'الخريطة',
+        timeline: 'الخط الزمني',
+        photos: 'الصور',
+        files: 'ملفات',
+    },
+
+    import: {
+        importPhotos: 'استيراد الصور',
+        importFolder: 'استيراد مجلد',
+        importFile: 'استيراد ملف',
+        importing: 'جاري الاستيراد...',
+        selectPhotos: 'اختر الصور',
+        noPhotosSelected: 'لم يتم اختيار صور',
+        duplicates: 'مكررة',
+        complete: 'اكتمل الاستيراد',
+        failed: 'فشل الاستيراد',
+        photoImportUnavailable: 'استيراد الصور غير متاح. يرجى إعادة تشغيل التطبيق.',
+    },
+
+    library: {
+        noPhotos: 'لا توجد صور',
+        sortBy: 'ترتيب حسب',
+        sortDate: 'التاريخ',
+        sortName: 'الاسم',
+        sortSize: 'الحجم',
+        ascending: 'تصاعدي',
+        descending: 'تنازلي',
+    },
+
+    preview: {
+        showInFinder: 'إظهار في Finder',
+        showInExplorer: 'إظهار في المستكشف',
+        previous: 'السابق',
+        next: 'التالي',
+        zoomIn: 'تكبير',
+        zoomOut: 'تصغير',
+        resetZoom: 'إعادة ضبط التكبير',
+    },
+
+    photoInfo: {
+        date: 'التاريخ',
+        dimensions: 'الأبعاد',
+        fileSize: 'حجم الملف',
+        camera: 'الكاميرا',
+        exposure: 'التعريض',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'RAW فقط',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'المسار',
+    },
+
+    delete: {
+        title: 'حذف',
+        removeFromLibrary: 'إزالة من المكتبة',
+        deleteOriginal: 'حذف الملف الأصلي',
+        removeFromLibraryDesc: 'سيتم الاحتفاظ بالملف الأصلي',
+        deleteOriginalDesc: 'سيتم حذف الملف الأصلي نهائياً',
+        alsoDeleteRaw: 'حذف ملف RAW أيضاً',
+        warningPermanent: 'تحذير: لا يمكن التراجع عن هذا الإجراء. سيتم حذف الملف الأصلي نهائياً من القرص.',
+        file: 'ملف',
+        associatedRaw: 'هذه الصورة لها ملف RAW مرتبط:',
+    },
+
+    settings: {
+        title: 'الإعدادات',
+        appearance: 'المظهر',
+        theme: 'السمة',
+        themeDark: 'داكن',
+        themeLight: 'فاتح',
+        themeSystem: 'النظام',
+        themeAuto: 'تلقائي',
+        language: 'اللغة',
+        storage: 'التخزين',
+        database: 'قاعدة البيانات',
+        thumbnails: 'الصور المصغرة',
+        cache: 'الذاكرة المؤقتة',
+        clearCache: 'مسح الذاكرة المؤقتة',
+        clearAllData: 'حذف جميع البيانات',
+        clearCacheConfirm: 'سيتم حذف جميع الصور المستوردة والصور المصغرة. سيتم الاحتفاظ بذاكرة الخريطة المؤقتة.\n\nهل تريد المتابعة؟',
+        about: 'حول',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'الوصول إلى مكتبة الصور',
+        photoLibraryDenied: 'تم رفض الوصول إلى مكتبة الصور',
+        photoLibraryLimited: 'وصول محدود للصور',
+        goToSettings: 'الذهاب إلى الإعدادات',
+        selectMorePhotos: 'اختيار المزيد من الصور',
+        selectFromAlbum: 'اختيار من الألبوم',
+        limitedAccessTitle: 'وصول محدود للصور',
+        limitedAccessMessage: 'لقد سمحت بالوصول إلى بعض الصور فقط. يمكنك اختيار المزيد من الصور أو السماح بالوصول إلى جميع الصور في الإعدادات.',
+        deniedAccessTitle: 'لا يمكن الوصول إلى الصور',
+        deniedAccessMessage: 'يرجى السماح لـ footos بالوصول إلى مكتبة الصور الخاصة بك في الإعدادات.',
+    },
+
+    errors: {
+        initFailed: 'فشل في التهيئة',
+        importFailed: 'فشل في الاستيراد',
+        deleteFailed: 'فشل في الحذف',
+        loadFailed: 'فشل في تحميل الصور',
+        openFailed: 'فشل في الفتح',
+        clearFailed: 'فشل في حذف البيانات',
+    },
+};

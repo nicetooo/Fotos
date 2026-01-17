@@ -6,7 +6,7 @@ gradlePlugin {
     plugins {
         create("pluginsForCoolKids") {
             id = "rust"
-            implementationClass = "app.fotos.kotlin.RustPlugin"
+            implementationClass = "app.footos.kotlin.RustPlugin"
         }
     }
 }

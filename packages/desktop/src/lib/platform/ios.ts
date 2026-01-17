@@ -126,13 +126,13 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         });
 
         // iOS Swift 桥接就绪事件
-        this.addListener('fotos-bridge-ready', () => {
+        this.addListener('footos-bridge-ready', () => {
             console.log("[iOS] Swift bridge is ready");
             this._bridgeReady = true;
         });
 
         // 检查桥接是否已就绪
-        if ((window as any).__FOTOS_BRIDGE_READY__) {
+        if ((window as any).__FOOTOS_BRIDGE_READY__) {
             console.log("[iOS] Swift bridge was already ready");
             this._bridgeReady = true;
         }
@@ -169,11 +169,11 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         console.log("[iOS] Requesting import, bridge ready:", this._bridgeReady);
 
         const webkit = (window as any).webkit;
-        const bridgeAvailable = webkit?.messageHandlers?.fotosPhotoPicker || (window as any).__FOTOS_BRIDGE_READY__;
+        const bridgeAvailable = webkit?.messageHandlers?.footosPhotoPicker || (window as any).__FOOTOS_BRIDGE_READY__;
 
         if (bridgeAvailable) {
             console.log("[iOS] Using webkit message handler");
-            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+            webkit.messageHandlers.footosPhotoPicker.postMessage({
                 command: "requestAndImport",
                 dbPath: this.dbPath,
                 thumbDir: this.thumbDir
@@ -189,7 +189,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         if (ready) {
             console.log("[iOS] Bridge became ready, proceeding");
             const webkit = (window as any).webkit;
-            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+            webkit.messageHandlers.footosPhotoPicker.postMessage({
                 command: "requestAndImport",
                 dbPath: this.dbPath,
                 thumbDir: this.thumbDir
@@ -206,7 +206,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         const ready = await this.waitForBridge(3000);
         if (ready) {
             const webkit = (window as any).webkit;
-            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+            webkit.messageHandlers.footosPhotoPicker.postMessage({
                 command: "syncIfFullAccess",
                 dbPath: this.dbPath,
                 thumbDir: this.thumbDir
@@ -218,8 +218,8 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
 
     showLimitedLibraryPicker(): void {
         const webkit = (window as any).webkit;
-        if (webkit?.messageHandlers?.fotosPhotoPicker) {
-            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+        if (webkit?.messageHandlers?.footosPhotoPicker) {
+            webkit.messageHandlers.footosPhotoPicker.postMessage({
                 command: "showLimitedLibraryPicker"
             });
         }
@@ -235,7 +235,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         return new Promise((resolve) => {
             const check = () => {
                 const webkit = (window as any).webkit;
-                if (webkit?.messageHandlers?.fotosPhotoPicker) {
+                if (webkit?.messageHandlers?.footosPhotoPicker) {
                     resolve(true);
                     return;
                 }

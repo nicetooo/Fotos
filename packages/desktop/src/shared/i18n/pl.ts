@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const pl: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Anuluj',
+        confirm: 'Potwierdź',
+        delete: 'Usuń',
+        remove: 'Usuń',
+        close: 'Zamknij',
+        save: 'Zapisz',
+        settings: 'Ustawienia',
+        import: 'Importuj',
+        export: 'Eksportuj',
+        loading: 'Ładowanie...',
+        scanning: 'Skanowanie...',
+        syncing: 'Synchronizacja...',
+    },
+
+    nav: {
+        library: 'Biblioteka',
+        map: 'Mapa',
+        timeline: 'Oś czasu',
+        photos: 'Zdjęcia',
+        files: 'plików',
+    },
+
+    import: {
+        importPhotos: 'Importuj zdjęcia',
+        importFolder: 'Importuj folder',
+        importFile: 'Importuj plik',
+        importing: 'Importowanie...',
+        selectPhotos: 'Wybierz zdjęcia',
+        noPhotosSelected: 'Nie wybrano zdjęć',
+        duplicates: 'duplikaty',
+        complete: 'Import zakończony',
+        failed: 'Import nie powiódł się',
+        photoImportUnavailable: 'Import zdjęć niedostępny. Uruchom ponownie aplikację.',
+    },
+
+    library: {
+        noPhotos: 'Brak zdjęć',
+        sortBy: 'Sortuj według',
+        sortDate: 'Data',
+        sortName: 'Nazwa',
+        sortSize: 'Rozmiar',
+        ascending: 'Rosnąco',
+        descending: 'Malejąco',
+    },
+
+    preview: {
+        showInFinder: 'Pokaż w Finderze',
+        showInExplorer: 'Pokaż w Eksploratorze',
+        previous: 'Poprzedni',
+        next: 'Następny',
+        zoomIn: 'Powiększ',
+        zoomOut: 'Pomniejsz',
+        resetZoom: 'Resetuj powiększenie',
+    },
+
+    photoInfo: {
+        date: 'Data',
+        dimensions: 'Wymiary',
+        fileSize: 'Rozmiar pliku',
+        camera: 'Aparat',
+        exposure: 'Ekspozycja',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Tylko RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Ścieżka',
+    },
+
+    delete: {
+        title: 'Usuń',
+        removeFromLibrary: 'Usuń z biblioteki',
+        deleteOriginal: 'Usuń oryginalny plik',
+        removeFromLibraryDesc: 'Oryginalny plik zostanie zachowany',
+        deleteOriginalDesc: 'Spowoduje to trwałe usunięcie oryginalnego pliku',
+        alsoDeleteRaw: 'Usuń również plik RAW',
+        warningPermanent: 'Ostrzeżenie: Tej akcji nie można cofnąć. Oryginalny plik zostanie trwale usunięty z dysku.',
+        file: 'Plik',
+        associatedRaw: 'To zdjęcie ma powiązany plik RAW:',
+    },
+
+    settings: {
+        title: 'Ustawienia',
+        appearance: 'Wygląd',
+        theme: 'Motyw',
+        themeDark: 'Ciemny',
+        themeLight: 'Jasny',
+        themeSystem: 'Systemowy',
+        themeAuto: 'Auto',
+        language: 'Język',
+        storage: 'Pamięć',
+        database: 'Baza danych',
+        thumbnails: 'Miniatury',
+        cache: 'Pamięć podręczna',
+        clearCache: 'Wyczyść pamięć podręczną',
+        clearAllData: 'Usuń wszystkie dane',
+        clearCacheConfirm: 'Spowoduje to usunięcie wszystkich zaimportowanych zdjęć i miniatur. Pamięć podręczna mapy zostanie zachowana.\n\nKontynuować?',
+        about: 'O aplikacji',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Dostęp do biblioteki zdjęć',
+        photoLibraryDenied: 'Odmówiono dostępu do biblioteki zdjęć',
+        photoLibraryLimited: 'Ograniczony dostęp do zdjęć',
+        goToSettings: 'Przejdź do ustawień',
+        selectMorePhotos: 'Wybierz więcej zdjęć',
+        selectFromAlbum: 'Wybierz z albumu',
+        limitedAccessTitle: 'Ograniczony dostęp do zdjęć',
+        limitedAccessMessage: 'Udzieliłeś dostępu tylko do niektórych zdjęć. Możesz wybrać więcej zdjęć lub zezwolić na dostęp do wszystkich zdjęć w ustawieniach.',
+        deniedAccessTitle: 'Brak dostępu do zdjęć',
+        deniedAccessMessage: 'Zezwól footos na dostęp do biblioteki zdjęć w ustawieniach.',
+    },
+
+    errors: {
+        initFailed: 'Inicjalizacja nie powiodła się',
+        importFailed: 'Import nie powiódł się',
+        deleteFailed: 'Usuwanie nie powiodło się',
+        loadFailed: 'Ładowanie zdjęć nie powiodło się',
+        openFailed: 'Otwarcie nie powiodło się',
+        clearFailed: 'Usuwanie danych nie powiodło się',
+    },
+};

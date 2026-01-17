@@ -1,12 +1,12 @@
 [package]
-name = "fotos-platform-desktop"
+name = "footos-platform-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "Desktop platform implementation for Fotos"
+description = "Desktop platform implementation for 足迹相册 (footos)"
 
 [dependencies]
-fotos-core = { path = "../core" }
-fotos-shared = { path = "../shared" }
+footos-core = { path = "../core" }
+footos-shared = { path = "../shared" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["fs", "sync"] }
 tauri = { version = "2", features = ["protocol-asset"] }

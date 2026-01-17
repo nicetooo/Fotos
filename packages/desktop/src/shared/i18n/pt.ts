@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const pt: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Cancelar',
+        confirm: 'Confirmar',
+        delete: 'Excluir',
+        remove: 'Remover',
+        close: 'Fechar',
+        save: 'Salvar',
+        settings: 'Configurações',
+        import: 'Importar',
+        export: 'Exportar',
+        loading: 'Carregando...',
+        scanning: 'Escaneando...',
+        syncing: 'Sincronizando...',
+    },
+
+    nav: {
+        library: 'Biblioteca',
+        map: 'Mapa',
+        timeline: 'Linha do tempo',
+        photos: 'Fotos',
+        files: 'arquivos',
+    },
+
+    import: {
+        importPhotos: 'Importar fotos',
+        importFolder: 'Importar pasta',
+        importFile: 'Importar arquivo',
+        importing: 'Importando...',
+        selectPhotos: 'Selecionar fotos',
+        noPhotosSelected: 'Nenhuma foto selecionada',
+        duplicates: 'duplicatas',
+        complete: 'Importação concluída',
+        failed: 'Falha na importação',
+        photoImportUnavailable: 'Importação de fotos não disponível. Por favor, reinicie o aplicativo.',
+    },
+
+    library: {
+        noPhotos: 'Sem fotos',
+        sortBy: 'Ordenar por',
+        sortDate: 'Data',
+        sortName: 'Nome',
+        sortSize: 'Tamanho',
+        ascending: 'Crescente',
+        descending: 'Decrescente',
+    },
+
+    preview: {
+        showInFinder: 'Mostrar no Finder',
+        showInExplorer: 'Mostrar no Explorador',
+        previous: 'Anterior',
+        next: 'Próximo',
+        zoomIn: 'Aumentar zoom',
+        zoomOut: 'Diminuir zoom',
+        resetZoom: 'Redefinir zoom',
+    },
+
+    photoInfo: {
+        date: 'Data',
+        dimensions: 'Dimensões',
+        fileSize: 'Tamanho do arquivo',
+        camera: 'Câmera',
+        exposure: 'Exposição',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Apenas RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Caminho',
+    },
+
+    delete: {
+        title: 'Excluir',
+        removeFromLibrary: 'Remover da biblioteca',
+        deleteOriginal: 'Excluir arquivo original',
+        removeFromLibraryDesc: 'O arquivo original será mantido',
+        deleteOriginalDesc: 'Isso excluirá permanentemente o arquivo original',
+        alsoDeleteRaw: 'Excluir também o arquivo RAW',
+        warningPermanent: 'Aviso: Esta ação não pode ser desfeita. O arquivo original será excluído permanentemente do disco.',
+        file: 'Arquivo',
+        associatedRaw: 'Esta foto tem um arquivo RAW associado:',
+    },
+
+    settings: {
+        title: 'Configurações',
+        appearance: 'Aparência',
+        theme: 'Tema',
+        themeDark: 'Escuro',
+        themeLight: 'Claro',
+        themeSystem: 'Sistema',
+        themeAuto: 'Auto',
+        language: 'Idioma',
+        storage: 'Armazenamento',
+        database: 'Banco de dados',
+        thumbnails: 'Miniaturas',
+        cache: 'Cache',
+        clearCache: 'Limpar cache',
+        clearAllData: 'Apagar todos os dados',
+        clearCacheConfirm: 'Isso excluirá todas as fotos importadas e miniaturas. O cache do mapa será preservado.\n\nContinuar?',
+        about: 'Sobre',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Acesso à biblioteca de fotos',
+        photoLibraryDenied: 'Acesso à biblioteca de fotos negado',
+        photoLibraryLimited: 'Acesso limitado às fotos',
+        goToSettings: 'Ir para Configurações',
+        selectMorePhotos: 'Selecionar mais fotos',
+        selectFromAlbum: 'Selecionar do álbum',
+        limitedAccessTitle: 'Acesso limitado às fotos',
+        limitedAccessMessage: 'Você autorizou acesso apenas a algumas fotos. Você pode selecionar mais fotos ou permitir acesso a todas as fotos nas Configurações.',
+        deniedAccessTitle: 'Não é possível acessar fotos',
+        deniedAccessMessage: 'Por favor, permita que o footos acesse sua biblioteca de fotos nas Configurações.',
+    },
+
+    errors: {
+        initFailed: 'Falha na inicialização',
+        importFailed: 'Falha na importação',
+        deleteFailed: 'Falha ao excluir',
+        loadFailed: 'Falha ao carregar fotos',
+        openFailed: 'Falha ao abrir',
+        clearFailed: 'Falha ao apagar dados',
+    },
+};

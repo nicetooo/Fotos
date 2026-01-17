@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use fotos_shared::{
+use footos_shared::{
     PhotoService, ImportOptions, PhotoAlbum, PhotoSource,
     PlatformError, PlatformResult,
 };
-use fotos_core::{
+use footos_core::{
     PhotoInfo, PhotoIndex, Thumbnailer, ThumbnailSpec,
     extract_raw_preview, compute_hash, read_metadata,
 };
@@ -21,7 +21,7 @@ use std::fs;
 /// - Passing photo data to Rust for processing
 ///
 /// This service handles:
-/// - Database operations (SQLite via fotos-core)
+/// - Database operations (SQLite via footos-core)
 /// - Thumbnail generation
 /// - RAW preview extraction
 pub struct IosPhotoService {

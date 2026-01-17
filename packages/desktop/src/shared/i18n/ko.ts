@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const ko: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: '취소',
+        confirm: '확인',
+        delete: '삭제',
+        remove: '제거',
+        close: '닫기',
+        save: '저장',
+        settings: '설정',
+        import: '가져오기',
+        export: '내보내기',
+        loading: '로딩 중...',
+        scanning: '스캔 중...',
+        syncing: '동기화 중...',
+    },
+
+    nav: {
+        library: '라이브러리',
+        map: '지도',
+        timeline: '타임라인',
+        photos: '사진',
+        files: '파일',
+    },
+
+    import: {
+        importPhotos: '사진 가져오기',
+        importFolder: '폴더 가져오기',
+        importFile: '파일 가져오기',
+        importing: '가져오는 중...',
+        selectPhotos: '사진 선택',
+        noPhotosSelected: '선택된 사진이 없습니다',
+        duplicates: '중복',
+        complete: '가져오기 완료',
+        failed: '가져오기 실패',
+        photoImportUnavailable: '사진을 가져올 수 없습니다. 앱을 다시 시작해주세요.',
+    },
+
+    library: {
+        noPhotos: '사진이 없습니다',
+        sortBy: '정렬 기준',
+        sortDate: '날짜',
+        sortName: '이름',
+        sortSize: '크기',
+        ascending: '오름차순',
+        descending: '내림차순',
+    },
+
+    preview: {
+        showInFinder: 'Finder에서 보기',
+        showInExplorer: '탐색기에서 보기',
+        previous: '이전',
+        next: '다음',
+        zoomIn: '확대',
+        zoomOut: '축소',
+        resetZoom: '확대/축소 초기화',
+    },
+
+    photoInfo: {
+        date: '날짜',
+        dimensions: '크기',
+        fileSize: '파일 크기',
+        camera: '카메라',
+        exposure: '노출',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'RAW만',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: '경로',
+    },
+
+    delete: {
+        title: '삭제',
+        removeFromLibrary: '라이브러리에서 제거',
+        deleteOriginal: '원본 파일 삭제',
+        removeFromLibraryDesc: '원본 파일은 유지됩니다',
+        deleteOriginalDesc: '원본 파일을 영구적으로 삭제합니다',
+        alsoDeleteRaw: 'RAW 파일도 삭제',
+        warningPermanent: '경고: 이 작업은 취소할 수 없습니다. 원본 파일이 디스크에서 영구적으로 삭제됩니다.',
+        file: '파일',
+        associatedRaw: '이 사진에는 연결된 RAW 파일이 있습니다:',
+    },
+
+    settings: {
+        title: '설정',
+        appearance: '모양',
+        theme: '테마',
+        themeDark: '다크',
+        themeLight: '라이트',
+        themeSystem: '시스템',
+        themeAuto: '자동',
+        language: '언어',
+        storage: '저장소',
+        database: '데이터베이스',
+        thumbnails: '썸네일',
+        cache: '캐시',
+        clearCache: '캐시 지우기',
+        clearAllData: '모든 데이터 지우기',
+        clearCacheConfirm: '가져온 모든 사진과 썸네일이 삭제됩니다. 지도 캐시는 유지됩니다.\n\n계속하시겠습니까?',
+        about: '정보',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: '사진 라이브러리 접근',
+        photoLibraryDenied: '사진 라이브러리 접근이 거부되었습니다',
+        photoLibraryLimited: '사진 접근이 제한되었습니다',
+        goToSettings: '설정으로 이동',
+        selectMorePhotos: '더 많은 사진 선택',
+        selectFromAlbum: '앨범에서 선택',
+        limitedAccessTitle: '사진 접근 제한됨',
+        limitedAccessMessage: '일부 사진에만 접근이 허용되었습니다. 설정에서 더 많은 사진을 선택하거나 모든 사진에 대한 접근을 허용할 수 있습니다.',
+        deniedAccessTitle: '사진에 접근할 수 없음',
+        deniedAccessMessage: '설정에서 footos가 사진 라이브러리에 접근할 수 있도록 허용해주세요.',
+    },
+
+    errors: {
+        initFailed: '초기화 실패',
+        importFailed: '가져오기 실패',
+        deleteFailed: '삭제 실패',
+        loadFailed: '사진 로드 실패',
+        openFailed: '열기 실패',
+        clearFailed: '데이터 지우기 실패',
+    },
+};

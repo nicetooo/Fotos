@@ -18,11 +18,11 @@ rust {
 }
 
 android {
-    namespace = "app.fotos"
+    namespace = "app.footos"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "app.fotos"
+        applicationId = "app.footos"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

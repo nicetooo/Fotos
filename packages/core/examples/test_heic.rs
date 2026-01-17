@@ -1,4 +1,4 @@
-use fotos_core::read_metadata;
+use footos_core::read_metadata;
 use std::path::Path;
 
 fn main() {

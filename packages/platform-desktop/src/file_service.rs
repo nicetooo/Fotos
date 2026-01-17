@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use fotos_shared::{
+use footos_shared::{
     FileService, FilePickerOptions, PickerResult, FileFilter,
     PlatformError, PlatformResult,
 };

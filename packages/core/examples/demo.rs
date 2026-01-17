@@ -1,12 +1,12 @@
-use fotos_core::{run_import_pipeline, PhotoCoreConfig, PhotoIndex};
+use footos_core::{run_import_pipeline, PhotoCoreConfig, PhotoIndex};
 use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    let temp_dir = std::env::temp_dir().join("fotos_demo");
+    let temp_dir = std::env::temp_dir().join("footos_demo");
     let src_dir = temp_dir.join("photos");
     let thumb_dir = temp_dir.join("thumbnails");
-    let db_path = temp_dir.join("fotos.db");
+    let db_path = temp_dir.join("footos.db");
 
     if temp_dir.exists() {
         fs::remove_dir_all(&temp_dir).unwrap();
@@ -14,7 +14,7 @@ fn main() {
     fs::create_dir_all(&src_dir).unwrap();
     fs::create_dir_all(&thumb_dir).unwrap();
 
-    println!("--- Fotos Core Demo ---");
+    println!("--- 足迹相册 Core Demo ---");
     println!("Temp Dir: {:?}", temp_dir);
 
     // Create a mock image file

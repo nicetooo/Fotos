@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const zh: Translations = {
+    app: {
+        name: '足迹相册',
+        version: 'v',
+    },
+
+    common: {
+        cancel: '取消',
+        confirm: '确认',
+        delete: '删除',
+        remove: '移除',
+        close: '关闭',
+        save: '保存',
+        settings: '设置',
+        import: '导入',
+        export: '导出',
+        loading: '加载中...',
+        scanning: '扫描中...',
+        syncing: '同步中...',
+    },
+
+    nav: {
+        library: '图库',
+        map: '地图',
+        timeline: '时间轴',
+        photos: '张照片',
+        files: '个文件',
+    },
+
+    import: {
+        importPhotos: '导入照片',
+        importFolder: '导入文件夹',
+        importFile: '导入文件',
+        importing: '正在导入...',
+        selectPhotos: '选择照片',
+        noPhotosSelected: '未选择照片',
+        duplicates: '重复',
+        complete: '导入完成',
+        failed: '导入失败',
+        photoImportUnavailable: '照片导入不可用，请重启应用。',
+    },
+
+    library: {
+        noPhotos: '暂无照片',
+        sortBy: '排序',
+        sortDate: '日期',
+        sortName: '名称',
+        sortSize: '大小',
+        ascending: '升序',
+        descending: '降序',
+    },
+
+    preview: {
+        showInFinder: '在访达中显示',
+        showInExplorer: '在资源管理器中显示',
+        previous: '上一张',
+        next: '下一张',
+        zoomIn: '放大',
+        zoomOut: '缩小',
+        resetZoom: '重置缩放',
+    },
+
+    photoInfo: {
+        date: '日期',
+        dimensions: '尺寸',
+        fileSize: '文件大小',
+        camera: '相机',
+        exposure: '曝光',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: '仅 RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: '路径',
+    },
+
+    delete: {
+        title: '删除',
+        removeFromLibrary: '从图库中移除',
+        deleteOriginal: '删除原始文件',
+        removeFromLibraryDesc: '原始文件将被保留',
+        deleteOriginalDesc: '这将永久删除原始文件',
+        alsoDeleteRaw: '同时删除 RAW 文件',
+        warningPermanent: '警告：此操作无法撤销，原始文件将从磁盘上永久删除。',
+        file: '文件',
+        associatedRaw: '此照片有关联的 RAW 文件：',
+    },
+
+    settings: {
+        title: '设置',
+        appearance: '外观',
+        theme: '主题',
+        themeDark: '深色',
+        themeLight: '浅色',
+        themeSystem: '跟随系统',
+        themeAuto: '自动',
+        language: '语言',
+        storage: '存储',
+        database: '数据库',
+        thumbnails: '缩略图',
+        cache: '缓存',
+        clearCache: '清除缓存',
+        clearAllData: '清除所有数据',
+        clearCacheConfirm: '这将删除所有已导入的照片和缩略图。地图缓存将被保留。\n\n是否继续？',
+        about: '关于',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: '照片库访问权限',
+        photoLibraryDenied: '照片库访问被拒绝',
+        photoLibraryLimited: '照片访问受限',
+        goToSettings: '前往设置',
+        selectMorePhotos: '选择更多照片',
+        selectFromAlbum: '从相册选择',
+        limitedAccessTitle: '照片访问受限',
+        limitedAccessMessage: '您只授权了部分照片访问权限。您可以选择更多照片或在设置中允许访问所有照片。',
+        deniedAccessTitle: '无法访问照片',
+        deniedAccessMessage: '请在设置中允许足迹相册访问您的照片库。',
+    },
+
+    errors: {
+        initFailed: '初始化失败',
+        importFailed: '导入失败',
+        deleteFailed: '删除失败',
+        loadFailed: '加载照片失败',
+        openFailed: '打开失败',
+        clearFailed: '清除数据失败',
+    },
+};

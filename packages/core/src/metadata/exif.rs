@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_metadata_graceful_failure_invariant() {
-        let temp_dir = std::env::temp_dir().join("fotos_metadata_test");
+        let temp_dir = std::env::temp_dir().join("footos_metadata_test");
         if temp_dir.exists() { std::fs::remove_dir_all(&temp_dir).unwrap(); }
         std::fs::create_dir_all(&temp_dir).unwrap();
 

@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const nl: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Annuleren',
+        confirm: 'Bevestigen',
+        delete: 'Verwijderen',
+        remove: 'Verwijderen',
+        close: 'Sluiten',
+        save: 'Opslaan',
+        settings: 'Instellingen',
+        import: 'Importeren',
+        export: 'Exporteren',
+        loading: 'Laden...',
+        scanning: 'Scannen...',
+        syncing: 'Synchroniseren...',
+    },
+
+    nav: {
+        library: 'Bibliotheek',
+        map: 'Kaart',
+        timeline: 'Tijdlijn',
+        photos: 'Foto\'s',
+        files: 'bestanden',
+    },
+
+    import: {
+        importPhotos: 'Foto\'s importeren',
+        importFolder: 'Map importeren',
+        importFile: 'Bestand importeren',
+        importing: 'Importeren...',
+        selectPhotos: 'Foto\'s selecteren',
+        noPhotosSelected: 'Geen foto\'s geselecteerd',
+        duplicates: 'duplicaten',
+        complete: 'Import voltooid',
+        failed: 'Import mislukt',
+        photoImportUnavailable: 'Foto-import niet beschikbaar. Herstart de app.',
+    },
+
+    library: {
+        noPhotos: 'Geen foto\'s',
+        sortBy: 'Sorteren op',
+        sortDate: 'Datum',
+        sortName: 'Naam',
+        sortSize: 'Grootte',
+        ascending: 'Oplopend',
+        descending: 'Aflopend',
+    },
+
+    preview: {
+        showInFinder: 'Tonen in Finder',
+        showInExplorer: 'Tonen in Verkenner',
+        previous: 'Vorige',
+        next: 'Volgende',
+        zoomIn: 'Inzoomen',
+        zoomOut: 'Uitzoomen',
+        resetZoom: 'Zoom resetten',
+    },
+
+    photoInfo: {
+        date: 'Datum',
+        dimensions: 'Afmetingen',
+        fileSize: 'Bestandsgrootte',
+        camera: 'Camera',
+        exposure: 'Belichting',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Alleen RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Pad',
+    },
+
+    delete: {
+        title: 'Verwijderen',
+        removeFromLibrary: 'Uit bibliotheek verwijderen',
+        deleteOriginal: 'Origineel bestand verwijderen',
+        removeFromLibraryDesc: 'Origineel bestand wordt bewaard',
+        deleteOriginalDesc: 'Dit verwijdert het originele bestand permanent',
+        alsoDeleteRaw: 'RAW-bestand ook verwijderen',
+        warningPermanent: 'Waarschuwing: Deze actie kan niet ongedaan worden gemaakt. Het originele bestand wordt permanent van de schijf verwijderd.',
+        file: 'Bestand',
+        associatedRaw: 'Deze foto heeft een bijbehorend RAW-bestand:',
+    },
+
+    settings: {
+        title: 'Instellingen',
+        appearance: 'Uiterlijk',
+        theme: 'Thema',
+        themeDark: 'Donker',
+        themeLight: 'Licht',
+        themeSystem: 'Systeem',
+        themeAuto: 'Auto',
+        language: 'Taal',
+        storage: 'Opslag',
+        database: 'Database',
+        thumbnails: 'Miniaturen',
+        cache: 'Cache',
+        clearCache: 'Cache wissen',
+        clearAllData: 'Alle gegevens wissen',
+        clearCacheConfirm: 'Dit verwijdert alle geïmporteerde foto\'s en miniaturen. De kaartcache blijft behouden.\n\nDoorgaan?',
+        about: 'Over',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Toegang tot fotobibliotheek',
+        photoLibraryDenied: 'Toegang tot fotobibliotheek geweigerd',
+        photoLibraryLimited: 'Beperkte fototoegang',
+        goToSettings: 'Naar instellingen',
+        selectMorePhotos: 'Meer foto\'s selecteren',
+        selectFromAlbum: 'Selecteren uit album',
+        limitedAccessTitle: 'Beperkte fototoegang',
+        limitedAccessMessage: 'U heeft alleen toegang tot sommige foto\'s verleend. U kunt meer foto\'s selecteren of toegang tot alle foto\'s toestaan in de instellingen.',
+        deniedAccessTitle: 'Geen toegang tot foto\'s',
+        deniedAccessMessage: 'Sta footos toe om toegang te krijgen tot uw fotobibliotheek in de instellingen.',
+    },
+
+    errors: {
+        initFailed: 'Initialisatie mislukt',
+        importFailed: 'Import mislukt',
+        deleteFailed: 'Verwijderen mislukt',
+        loadFailed: 'Laden van foto\'s mislukt',
+        openFailed: 'Openen mislukt',
+        clearFailed: 'Wissen van gegevens mislukt',
+    },
+};

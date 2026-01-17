@@ -1,16 +1,16 @@
-package app.fotos
+package app.footos
 
 import android.os.Bundle
 import android.util.Log
 import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
-import app.fotos.bridge.FotosWebViewBridge
-import app.fotos.bridge.MediaStoreSync
-import app.fotos.bridge.PermissionManager
-import app.fotos.bridge.PhotoPickerManager
+import app.footos.bridge.FootosWebViewBridge
+import app.footos.bridge.MediaStoreSync
+import app.footos.bridge.PermissionManager
+import app.footos.bridge.PhotoPickerManager
 
 /**
- * Main Activity for Fotos Android app.
+ * Main Activity for 足迹相册 (footos) Android app.
  * Extends Tauri's TauriActivity for WebView integration.
  */
 class MainActivity : TauriActivity() {
@@ -19,7 +19,7 @@ class MainActivity : TauriActivity() {
         private const val TAG = "MainActivity"
     }
 
-    private var bridge: FotosWebViewBridge? = null
+    private var bridge: FootosWebViewBridge? = null
     private lateinit var permissionManager: PermissionManager
     private lateinit var photoPickerManager: PhotoPickerManager
     private lateinit var mediaStoreSync: MediaStoreSync
@@ -65,7 +65,7 @@ class MainActivity : TauriActivity() {
         Log.d(TAG, "WebView created, attaching bridge")
 
         // Create bridge with all managers
-        bridge = FotosWebViewBridge(
+        bridge = FootosWebViewBridge(
             activity = this,
             webView = webView,
             permissionManager = permissionManager,

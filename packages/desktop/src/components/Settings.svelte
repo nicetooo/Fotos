@@ -141,7 +141,7 @@
         <h3 class="text-sm theme-text-muted mb-3">About</h3>
 
         <div class="text-sm">
-            <p class="theme-text-secondary">Fotos <span class="theme-text-muted">v{version}</span></p>
+            <p class="theme-text-secondary">足迹相册 <span class="theme-text-muted">v{version}</span></p>
             <p class="theme-text-muted text-xs mt-1">Tauri + Svelte + Rust</p>
         </div>
     </section>

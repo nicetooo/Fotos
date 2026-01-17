@@ -6,7 +6,7 @@ pub use file_service::IosFileService;
 pub use photo_service::IosPhotoService;
 pub use permission_service::IosPermissionService;
 
-use fotos_shared::{PlatformContext, PlatformType};
+use footos_shared::{PlatformContext, PlatformType};
 use std::sync::Arc;
 
 /// iOS platform services container

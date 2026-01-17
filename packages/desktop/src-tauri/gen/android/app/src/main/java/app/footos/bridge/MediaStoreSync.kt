@@ -1,4 +1,4 @@
-package app.fotos.bridge
+package app.footos.bridge
 
 import android.content.Context
 import android.net.Uri

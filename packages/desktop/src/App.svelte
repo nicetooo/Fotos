@@ -38,8 +38,8 @@
     let iosHasFullAccess = $state(false); // iOS full photo library access
 
     // Sort state with localStorage persistence
-    const SORT_BY_KEY = "fotos-sort-by";
-    const SORT_ORDER_KEY = "fotos-sort-order";
+    const SORT_BY_KEY = "footos-sort-by";
+    const SORT_ORDER_KEY = "footos-sort-order";
     let sortBy = $state<"name" | "date" | "size" | "dimensions">((() => {
         if (typeof localStorage !== "undefined") {
             const saved = localStorage.getItem(SORT_BY_KEY);
@@ -76,7 +76,7 @@
 
     // Theme state
     type Theme = "dark" | "light" | "system";
-    const THEME_KEY = "fotos-theme";
+    const THEME_KEY = "footos-theme";
     let theme = $state<Theme>((() => {
         if (typeof localStorage !== "undefined") {
             const saved = localStorage.getItem(THEME_KEY);
@@ -252,7 +252,7 @@
 
             version = await invoke("get_core_version");
             const appData = await appDataDir();
-            dbPath = await join(appData, "fotos.db");
+            dbPath = await join(appData, "footos.db");
             thumbDir = await join(appData, "thumbnails");
 
             await listen("import-progress", (event: any) => {
@@ -368,13 +368,13 @@
             }) as EventListener);
 
             // iOS Swift bridge ready event
-            window.addEventListener("fotos-bridge-ready", (() => {
+            window.addEventListener("footos-bridge-ready", (() => {
                 console.log("[iOS] Swift bridge is ready");
                 iosBridgeReady = true;
             }) as EventListener);
 
             // Check if bridge is already ready (in case event fired before we listened)
-            if ((window as any).__FOTOS_BRIDGE_READY__) {
+            if ((window as any).__FOOTOS_BRIDGE_READY__) {
                 console.log("[iOS] Swift bridge was already ready");
                 iosBridgeReady = true;
             }
@@ -522,7 +522,7 @@
             return new Promise((resolve) => {
                 const check = () => {
                     const webkit = (window as any).webkit;
-                    if (webkit?.messageHandlers?.fotosPhotoPicker) {
+                    if (webkit?.messageHandlers?.footosPhotoPicker) {
                         resolve(true);
                         return;
                     }
@@ -539,7 +539,7 @@
         const ready = await waitForBridge();
         if (ready) {
             const webkit = (window as any).webkit;
-            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+            webkit.messageHandlers.footosPhotoPicker.postMessage({
                 command: "syncIfFullAccess",
                 dbPath: dbPath,
                 thumbDir: thumbDir
@@ -555,11 +555,11 @@
 
         // Check if bridge is ready
         const webkit = (window as any).webkit;
-        const bridgeAvailable = webkit?.messageHandlers?.fotosPhotoPicker || (window as any).__FOTOS_BRIDGE_READY__;
+        const bridgeAvailable = webkit?.messageHandlers?.footosPhotoPicker || (window as any).__FOOTOS_BRIDGE_READY__;
 
         if (bridgeAvailable) {
             console.log("[iOS Import] Using webkit message handler");
-            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+            webkit.messageHandlers.footosPhotoPicker.postMessage({
                 command: "requestAndImport",
                 dbPath: dbPath,
                 thumbDir: thumbDir
@@ -580,7 +580,7 @@
             return new Promise<boolean>((resolve) => {
                 const check = () => {
                     const webkit = (window as any).webkit;
-                    if (webkit?.messageHandlers?.fotosPhotoPicker) {
+                    if (webkit?.messageHandlers?.footosPhotoPicker) {
                         resolve(true);
                         return;
                     }
@@ -599,7 +599,7 @@
         if (ready) {
             console.log("[iOS Import] Bridge became ready, proceeding");
             const webkit = (window as any).webkit;
-            webkit.messageHandlers.fotosPhotoPicker.postMessage({
+            webkit.messageHandlers.footosPhotoPicker.postMessage({
                 command: "requestAndImport",
                 dbPath: dbPath,
                 thumbDir: thumbDir

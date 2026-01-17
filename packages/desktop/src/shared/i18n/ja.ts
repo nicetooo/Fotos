@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const ja: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'キャンセル',
+        confirm: '確認',
+        delete: '削除',
+        remove: '除去',
+        close: '閉じる',
+        save: '保存',
+        settings: '設定',
+        import: 'インポート',
+        export: 'エクスポート',
+        loading: '読み込み中...',
+        scanning: 'スキャン中...',
+        syncing: '同期中...',
+    },
+
+    nav: {
+        library: 'ライブラリ',
+        map: 'マップ',
+        timeline: 'タイムライン',
+        photos: '写真',
+        files: 'ファイル',
+    },
+
+    import: {
+        importPhotos: '写真をインポート',
+        importFolder: 'フォルダをインポート',
+        importFile: 'ファイルをインポート',
+        importing: 'インポート中...',
+        selectPhotos: '写真を選択',
+        noPhotosSelected: '写真が選択されていません',
+        duplicates: '重複',
+        complete: 'インポート完了',
+        failed: 'インポート失敗',
+        photoImportUnavailable: '写真のインポートができません。アプリを再起動してください。',
+    },
+
+    library: {
+        noPhotos: '写真がありません',
+        sortBy: '並べ替え',
+        sortDate: '日付',
+        sortName: '名前',
+        sortSize: 'サイズ',
+        ascending: '昇順',
+        descending: '降順',
+    },
+
+    preview: {
+        showInFinder: 'Finderで表示',
+        showInExplorer: 'エクスプローラーで表示',
+        previous: '前へ',
+        next: '次へ',
+        zoomIn: '拡大',
+        zoomOut: '縮小',
+        resetZoom: 'ズームをリセット',
+    },
+
+    photoInfo: {
+        date: '日付',
+        dimensions: 'サイズ',
+        fileSize: 'ファイルサイズ',
+        camera: 'カメラ',
+        exposure: '露出',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'RAWのみ',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'パス',
+    },
+
+    delete: {
+        title: '削除',
+        removeFromLibrary: 'ライブラリから削除',
+        deleteOriginal: '元のファイルを削除',
+        removeFromLibraryDesc: '元のファイルは保持されます',
+        deleteOriginalDesc: '元のファイルを完全に削除します',
+        alsoDeleteRaw: 'RAWファイルも削除',
+        warningPermanent: '警告：この操作は取り消せません。元のファイルはディスクから完全に削除されます。',
+        file: 'ファイル',
+        associatedRaw: 'この写真には関連するRAWファイルがあります：',
+    },
+
+    settings: {
+        title: '設定',
+        appearance: '外観',
+        theme: 'テーマ',
+        themeDark: 'ダーク',
+        themeLight: 'ライト',
+        themeSystem: 'システム',
+        themeAuto: '自動',
+        language: '言語',
+        storage: 'ストレージ',
+        database: 'データベース',
+        thumbnails: 'サムネイル',
+        cache: 'キャッシュ',
+        clearCache: 'キャッシュをクリア',
+        clearAllData: 'すべてのデータをクリア',
+        clearCacheConfirm: 'インポートした写真とサムネイルがすべて削除されます。マップキャッシュは保持されます。\n\n続行しますか？',
+        about: 'アプリについて',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'フォトライブラリへのアクセス',
+        photoLibraryDenied: 'フォトライブラリへのアクセスが拒否されました',
+        photoLibraryLimited: '写真へのアクセスが制限されています',
+        goToSettings: '設定を開く',
+        selectMorePhotos: '写真を追加選択',
+        selectFromAlbum: 'アルバムから選択',
+        limitedAccessTitle: '写真へのアクセスが制限されています',
+        limitedAccessMessage: '一部の写真へのアクセスのみが許可されています。設定で追加の写真を選択するか、すべての写真へのアクセスを許可できます。',
+        deniedAccessTitle: '写真にアクセスできません',
+        deniedAccessMessage: '設定でfootosがフォトライブラリにアクセスすることを許可してください。',
+    },
+
+    errors: {
+        initFailed: '初期化に失敗しました',
+        importFailed: 'インポートに失敗しました',
+        deleteFailed: '削除に失敗しました',
+        loadFailed: '写真の読み込みに失敗しました',
+        openFailed: '開くことができませんでした',
+        clearFailed: 'データのクリアに失敗しました',
+    },
+};

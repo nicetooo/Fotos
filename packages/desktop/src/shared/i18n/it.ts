@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const it: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Annulla',
+        confirm: 'Conferma',
+        delete: 'Elimina',
+        remove: 'Rimuovi',
+        close: 'Chiudi',
+        save: 'Salva',
+        settings: 'Impostazioni',
+        import: 'Importa',
+        export: 'Esporta',
+        loading: 'Caricamento...',
+        scanning: 'Scansione...',
+        syncing: 'Sincronizzazione...',
+    },
+
+    nav: {
+        library: 'Libreria',
+        map: 'Mappa',
+        timeline: 'Cronologia',
+        photos: 'Foto',
+        files: 'file',
+    },
+
+    import: {
+        importPhotos: 'Importa foto',
+        importFolder: 'Importa cartella',
+        importFile: 'Importa file',
+        importing: 'Importazione...',
+        selectPhotos: 'Seleziona foto',
+        noPhotosSelected: 'Nessuna foto selezionata',
+        duplicates: 'duplicati',
+        complete: 'Importazione completata',
+        failed: 'Importazione fallita',
+        photoImportUnavailable: 'Importazione foto non disponibile. Riavvia l\'app.',
+    },
+
+    library: {
+        noPhotos: 'Nessuna foto',
+        sortBy: 'Ordina per',
+        sortDate: 'Data',
+        sortName: 'Nome',
+        sortSize: 'Dimensione',
+        ascending: 'Crescente',
+        descending: 'Decrescente',
+    },
+
+    preview: {
+        showInFinder: 'Mostra nel Finder',
+        showInExplorer: 'Mostra in Esplora risorse',
+        previous: 'Precedente',
+        next: 'Successivo',
+        zoomIn: 'Ingrandisci',
+        zoomOut: 'Rimpicciolisci',
+        resetZoom: 'Reimposta zoom',
+    },
+
+    photoInfo: {
+        date: 'Data',
+        dimensions: 'Dimensioni',
+        fileSize: 'Dimensione file',
+        camera: 'Fotocamera',
+        exposure: 'Esposizione',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Solo RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Percorso',
+    },
+
+    delete: {
+        title: 'Elimina',
+        removeFromLibrary: 'Rimuovi dalla libreria',
+        deleteOriginal: 'Elimina file originale',
+        removeFromLibraryDesc: 'Il file originale verrà mantenuto',
+        deleteOriginalDesc: 'Questo eliminerà permanentemente il file originale',
+        alsoDeleteRaw: 'Elimina anche il file RAW',
+        warningPermanent: 'Attenzione: Questa azione non può essere annullata. Il file originale verrà eliminato permanentemente dal disco.',
+        file: 'File',
+        associatedRaw: 'Questa foto ha un file RAW associato:',
+    },
+
+    settings: {
+        title: 'Impostazioni',
+        appearance: 'Aspetto',
+        theme: 'Tema',
+        themeDark: 'Scuro',
+        themeLight: 'Chiaro',
+        themeSystem: 'Sistema',
+        themeAuto: 'Auto',
+        language: 'Lingua',
+        storage: 'Archiviazione',
+        database: 'Database',
+        thumbnails: 'Miniature',
+        cache: 'Cache',
+        clearCache: 'Svuota cache',
+        clearAllData: 'Elimina tutti i dati',
+        clearCacheConfirm: 'Questo eliminerà tutte le foto importate e le miniature. La cache della mappa verrà preservata.\n\nContinuare?',
+        about: 'Informazioni',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Accesso alla libreria foto',
+        photoLibraryDenied: 'Accesso alla libreria foto negato',
+        photoLibraryLimited: 'Accesso limitato alle foto',
+        goToSettings: 'Vai alle impostazioni',
+        selectMorePhotos: 'Seleziona altre foto',
+        selectFromAlbum: 'Seleziona dall\'album',
+        limitedAccessTitle: 'Accesso limitato alle foto',
+        limitedAccessMessage: 'Hai autorizzato l\'accesso solo ad alcune foto. Puoi selezionare altre foto o consentire l\'accesso a tutte le foto nelle impostazioni.',
+        deniedAccessTitle: 'Impossibile accedere alle foto',
+        deniedAccessMessage: 'Consenti a footos di accedere alla tua libreria foto nelle impostazioni.',
+    },
+
+    errors: {
+        initFailed: 'Inizializzazione fallita',
+        importFailed: 'Importazione fallita',
+        deleteFailed: 'Eliminazione fallita',
+        loadFailed: 'Caricamento foto fallito',
+        openFailed: 'Apertura fallita',
+        clearFailed: 'Eliminazione dati fallita',
+    },
+};

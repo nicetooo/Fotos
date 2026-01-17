@@ -8,7 +8,7 @@ pub use photo_service::DesktopPhotoService;
 pub use permission_service::DesktopPermissionService;
 pub use event_service::TauriEventService;
 
-use fotos_shared::{PlatformContext, PlatformType};
+use footos_shared::{PlatformContext, PlatformType};
 use std::sync::Arc;
 
 /// Desktop platform services container

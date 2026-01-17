@@ -1,5 +1,5 @@
 [package]
-name = "fotos"
+name = "footos"
 version = "0.1.0"
 description = "Photo management with map and timeline"
 authors = ["you"]
@@ -8,7 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "fotos_lib"
+name = "footos_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -20,9 +20,9 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-fotos-core = { path = "../../core" }
-fotos-shared = { path = "../../shared" }
-fotos-platform-desktop = { path = "../../platform-desktop" }
+footos-core = { path = "../../core" }
+footos-shared = { path = "../../shared" }
+footos-platform-desktop = { path = "../../platform-desktop" }
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 tauri-plugin-os = "2.3.2"
 urlencoding = "2.1"

@@ -7,7 +7,7 @@ pub use file_service::AndroidFileService;
 pub use photo_service::AndroidPhotoService;
 pub use permission_service::AndroidPermissionService;
 
-use fotos_shared::{PlatformContext, PlatformType};
+use footos_shared::{PlatformContext, PlatformType};
 use std::sync::Arc;
 
 /// Android platform services container

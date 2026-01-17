@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const ru: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Отмена',
+        confirm: 'Подтвердить',
+        delete: 'Удалить',
+        remove: 'Убрать',
+        close: 'Закрыть',
+        save: 'Сохранить',
+        settings: 'Настройки',
+        import: 'Импорт',
+        export: 'Экспорт',
+        loading: 'Загрузка...',
+        scanning: 'Сканирование...',
+        syncing: 'Синхронизация...',
+    },
+
+    nav: {
+        library: 'Библиотека',
+        map: 'Карта',
+        timeline: 'Хронология',
+        photos: 'Фото',
+        files: 'файлов',
+    },
+
+    import: {
+        importPhotos: 'Импорт фото',
+        importFolder: 'Импорт папки',
+        importFile: 'Импорт файла',
+        importing: 'Импорт...',
+        selectPhotos: 'Выбрать фото',
+        noPhotosSelected: 'Фото не выбраны',
+        duplicates: 'дубликаты',
+        complete: 'Импорт завершен',
+        failed: 'Ошибка импорта',
+        photoImportUnavailable: 'Импорт фото недоступен. Пожалуйста, перезапустите приложение.',
+    },
+
+    library: {
+        noPhotos: 'Нет фото',
+        sortBy: 'Сортировать по',
+        sortDate: 'Дате',
+        sortName: 'Имени',
+        sortSize: 'Размеру',
+        ascending: 'По возрастанию',
+        descending: 'По убыванию',
+    },
+
+    preview: {
+        showInFinder: 'Показать в Finder',
+        showInExplorer: 'Показать в Проводнике',
+        previous: 'Назад',
+        next: 'Далее',
+        zoomIn: 'Увеличить',
+        zoomOut: 'Уменьшить',
+        resetZoom: 'Сбросить масштаб',
+    },
+
+    photoInfo: {
+        date: 'Дата',
+        dimensions: 'Размеры',
+        fileSize: 'Размер файла',
+        camera: 'Камера',
+        exposure: 'Экспозиция',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Только RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Путь',
+    },
+
+    delete: {
+        title: 'Удаление',
+        removeFromLibrary: 'Убрать из библиотеки',
+        deleteOriginal: 'Удалить исходный файл',
+        removeFromLibraryDesc: 'Исходный файл будет сохранен',
+        deleteOriginalDesc: 'Исходный файл будет удален навсегда',
+        alsoDeleteRaw: 'Также удалить RAW файл',
+        warningPermanent: 'Внимание: Это действие нельзя отменить. Исходный файл будет удален с диска навсегда.',
+        file: 'Файл',
+        associatedRaw: 'У этого фото есть связанный RAW файл:',
+    },
+
+    settings: {
+        title: 'Настройки',
+        appearance: 'Внешний вид',
+        theme: 'Тема',
+        themeDark: 'Темная',
+        themeLight: 'Светлая',
+        themeSystem: 'Системная',
+        themeAuto: 'Авто',
+        language: 'Язык',
+        storage: 'Хранилище',
+        database: 'База данных',
+        thumbnails: 'Миниатюры',
+        cache: 'Кэш',
+        clearCache: 'Очистить кэш',
+        clearAllData: 'Удалить все данные',
+        clearCacheConfirm: 'Это удалит все импортированные фото и миниатюры. Кэш карты будет сохранен.\n\nПродолжить?',
+        about: 'О приложении',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Доступ к фотобиблиотеке',
+        photoLibraryDenied: 'Доступ к фотобиблиотеке запрещен',
+        photoLibraryLimited: 'Ограниченный доступ к фото',
+        goToSettings: 'Перейти в настройки',
+        selectMorePhotos: 'Выбрать больше фото',
+        selectFromAlbum: 'Выбрать из альбома',
+        limitedAccessTitle: 'Ограниченный доступ к фото',
+        limitedAccessMessage: 'Вы разрешили доступ только к некоторым фото. Вы можете выбрать больше фото или разрешить доступ ко всем фото в настройках.',
+        deniedAccessTitle: 'Нет доступа к фото',
+        deniedAccessMessage: 'Пожалуйста, разрешите footos доступ к вашей фотобиблиотеке в настройках.',
+    },
+
+    errors: {
+        initFailed: 'Ошибка инициализации',
+        importFailed: 'Ошибка импорта',
+        deleteFailed: 'Ошибка удаления',
+        loadFailed: 'Ошибка загрузки фото',
+        openFailed: 'Ошибка открытия',
+        clearFailed: 'Ошибка очистки данных',
+    },
+};

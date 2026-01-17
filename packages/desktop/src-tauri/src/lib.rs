@@ -1,4 +1,4 @@
-use fotos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo};
+use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // Global cancellation flag for import operations
@@ -16,7 +16,7 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 fn get_core_version() -> String {
-    fotos_core::get_version()
+    footos_core::get_version()
 }
 
 #[tauri::command]
@@ -32,8 +32,8 @@ async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo
     let mut photos = index.list().map_err(|e| e.to_string())?;
     
     // Populate thumb_path and file_size
-    let thumbnailer = fotos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-    let spec = fotos_core::ThumbnailSpec { width: 256, height: 256 };
+    let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
+    let spec = footos_core::ThumbnailSpec { width: 256, height: 256 };
     for photo in &mut photos {
         let source_path = std::path::Path::new(&photo.path);
 
@@ -161,7 +161,7 @@ async fn import_photos(
         }
     } else {
         println!("[Import] Processing as directory");
-        fotos_core::scan_photos(root_path_buf).map_err(|e| {
+        footos_core::scan_photos(root_path_buf).map_err(|e| {
             println!("[Import] Scan error: {}", e);
             e.to_string()
         })?
@@ -213,7 +213,7 @@ async fn import_photos(
         // Returns: Ok(true) = new photo, Ok(false) = duplicate, Err = failure
         let file_result = (|| -> Result<bool, String> {
             println!("[Import] Computing hash...");
-            let hash = fotos_core::compute_hash(&path).map_err(|e| {
+            let hash = footos_core::compute_hash(&path).map_err(|e| {
                 println!("[Import] Hash error: {}", e);
                 e.to_string()
             })?;
@@ -228,7 +228,7 @@ async fn import_photos(
             }
 
             println!("[Import] Reading metadata for: {}", path_str);
-            let metadata = fotos_core::read_metadata(&path).map_err(|e| {
+            let metadata = footos_core::read_metadata(&path).map_err(|e| {
                 println!("[Import] Metadata error: {}", e);
                 e.to_string()
             })?;
@@ -236,7 +236,7 @@ async fn import_photos(
 
             // Thumbnail generation may fail if no EXIF thumbnail - that's OK, frontend uses original
             println!("[Import] Generating thumbnail...");
-            let thumb_result = fotos_core::generate_thumbnail(&path, &config);
+            let thumb_result = footos_core::generate_thumbnail(&path, &config);
             println!("[Import] Thumbnail result: {:?}", thumb_result.is_ok());
 
             println!("[Import] Inserting into DB...");
@@ -295,8 +295,8 @@ async fn delete_photos_from_app(
 ) -> Result<DeleteResult, String> {
     let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
 
-    let thumbnailer = fotos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-    let spec = fotos_core::ThumbnailSpec { width: 256, height: 256 };
+    let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
+    let spec = footos_core::ThumbnailSpec { width: 256, height: 256 };
 
     let mut result = DeleteResult::default();
 
@@ -328,8 +328,8 @@ async fn delete_photos_completely(
 ) -> Result<DeleteResult, String> {
     let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
 
-    let thumbnailer = fotos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-    let spec = fotos_core::ThumbnailSpec { width: 256, height: 256 };
+    let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
+    let spec = footos_core::ThumbnailSpec { width: 256, height: 256 };
 
     let mut result = DeleteResult::default();
 
@@ -400,7 +400,7 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
     for (i, photo) in photos.iter().enumerate() {
         let path = std::path::PathBuf::from(&photo.path);
         
-        let file_result = fotos_core::generate_thumbnail(&path, &config);
+        let file_result = footos_core::generate_thumbnail(&path, &config);
 
         match file_result {
             Ok(_) => success += 1,
@@ -434,7 +434,7 @@ async fn get_raw_preview(path: String, cache_dir: String) -> Result<String, Stri
     let file_name = source_path.file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("preview");
-    let hash = fotos_core::compute_hash(source_path).map_err(|e| e.to_string())?;
+    let hash = footos_core::compute_hash(source_path).map_err(|e| e.to_string())?;
     let hash_prefix = &hash[..hash.len().min(16)];
     let preview_path = std::path::PathBuf::from(&cache_dir)
         .join("raw_previews")
@@ -446,7 +446,7 @@ async fn get_raw_preview(path: String, cache_dir: String) -> Result<String, Stri
     }
 
     // Extract and cache the preview
-    let preview_bytes = fotos_core::extract_raw_preview(source_path).map_err(|e| e.to_string())?;
+    let preview_bytes = footos_core::extract_raw_preview(source_path).map_err(|e| e.to_string())?;
 
     // Ensure directory exists
     if let Some(parent) = preview_path.parent() {
@@ -512,22 +512,22 @@ async fn process_ios_photo(
     let source_path = std::path::Path::new(path);
 
     // Read metadata
-    let metadata = fotos_core::read_metadata(source_path)
+    let metadata = footos_core::read_metadata(source_path)
         .map_err(|e| format!("Failed to read metadata: {}", e))?;
 
     // Compute hash
-    let hash = fotos_core::compute_hash(source_path)
+    let hash = footos_core::compute_hash(source_path)
         .map_err(|e| format!("Failed to compute hash: {}", e))?;
 
     // Generate thumbnail
-    let config = fotos_core::PhotoCoreConfig {
+    let config = footos_core::PhotoCoreConfig {
         thumbnail_dir: thumb_dir.clone(),
         thumbnail_size: 256,
     };
-    let _ = fotos_core::generate_thumbnail(source_path, &config);
+    let _ = footos_core::generate_thumbnail(source_path, &config);
 
     // Open database and insert
-    let index = fotos_core::PhotoIndex::open(db_path)
+    let index = footos_core::PhotoIndex::open(db_path)
         .map_err(|e| format!("Failed to open database: {}", e))?;
 
     // Use iOS photo identifier as the path prefix for reference

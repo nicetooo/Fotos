@@ -1,15 +1,15 @@
 [package]
-name = "fotos-platform-android"
+name = "footos-platform-android"
 version = "0.1.0"
 edition = "2021"
-description = "Android platform implementation for Fotos"
+description = "Android platform implementation for 足迹相册 (footos)"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-fotos-core = { path = "../core" }
-fotos-shared = { path = "../shared" }
+footos-core = { path = "../core" }
+footos-shared = { path = "../shared" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["fs", "sync"] }
 jni = "0.21"

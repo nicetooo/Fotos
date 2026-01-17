@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const id: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Batal',
+        confirm: 'Konfirmasi',
+        delete: 'Hapus',
+        remove: 'Hapus',
+        close: 'Tutup',
+        save: 'Simpan',
+        settings: 'Pengaturan',
+        import: 'Impor',
+        export: 'Ekspor',
+        loading: 'Memuat...',
+        scanning: 'Memindai...',
+        syncing: 'Menyinkronkan...',
+    },
+
+    nav: {
+        library: 'Perpustakaan',
+        map: 'Peta',
+        timeline: 'Linimasa',
+        photos: 'Foto',
+        files: 'file',
+    },
+
+    import: {
+        importPhotos: 'Impor foto',
+        importFolder: 'Impor folder',
+        importFile: 'Impor file',
+        importing: 'Mengimpor...',
+        selectPhotos: 'Pilih foto',
+        noPhotosSelected: 'Tidak ada foto dipilih',
+        duplicates: 'duplikat',
+        complete: 'Impor selesai',
+        failed: 'Impor gagal',
+        photoImportUnavailable: 'Impor foto tidak tersedia. Silakan mulai ulang aplikasi.',
+    },
+
+    library: {
+        noPhotos: 'Tidak ada foto',
+        sortBy: 'Urutkan berdasarkan',
+        sortDate: 'Tanggal',
+        sortName: 'Nama',
+        sortSize: 'Ukuran',
+        ascending: 'Menaik',
+        descending: 'Menurun',
+    },
+
+    preview: {
+        showInFinder: 'Tampilkan di Finder',
+        showInExplorer: 'Tampilkan di Explorer',
+        previous: 'Sebelumnya',
+        next: 'Berikutnya',
+        zoomIn: 'Perbesar',
+        zoomOut: 'Perkecil',
+        resetZoom: 'Atur ulang zoom',
+    },
+
+    photoInfo: {
+        date: 'Tanggal',
+        dimensions: 'Dimensi',
+        fileSize: 'Ukuran file',
+        camera: 'Kamera',
+        exposure: 'Eksposur',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'Hanya RAW',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Jalur',
+    },
+
+    delete: {
+        title: 'Hapus',
+        removeFromLibrary: 'Hapus dari perpustakaan',
+        deleteOriginal: 'Hapus file asli',
+        removeFromLibraryDesc: 'File asli akan dipertahankan',
+        deleteOriginalDesc: 'Ini akan menghapus file asli secara permanen',
+        alsoDeleteRaw: 'Hapus juga file RAW',
+        warningPermanent: 'Peringatan: Tindakan ini tidak dapat dibatalkan. File asli akan dihapus secara permanen dari disk.',
+        file: 'File',
+        associatedRaw: 'Foto ini memiliki file RAW terkait:',
+    },
+
+    settings: {
+        title: 'Pengaturan',
+        appearance: 'Tampilan',
+        theme: 'Tema',
+        themeDark: 'Gelap',
+        themeLight: 'Terang',
+        themeSystem: 'Sistem',
+        themeAuto: 'Otomatis',
+        language: 'Bahasa',
+        storage: 'Penyimpanan',
+        database: 'Basis data',
+        thumbnails: 'Gambar mini',
+        cache: 'Cache',
+        clearCache: 'Hapus cache',
+        clearAllData: 'Hapus semua data',
+        clearCacheConfirm: 'Ini akan menghapus semua foto yang diimpor dan gambar mini. Cache peta akan dipertahankan.\n\nLanjutkan?',
+        about: 'Tentang',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Akses perpustakaan foto',
+        photoLibraryDenied: 'Akses perpustakaan foto ditolak',
+        photoLibraryLimited: 'Akses foto terbatas',
+        goToSettings: 'Buka Pengaturan',
+        selectMorePhotos: 'Pilih lebih banyak foto',
+        selectFromAlbum: 'Pilih dari album',
+        limitedAccessTitle: 'Akses foto terbatas',
+        limitedAccessMessage: 'Anda hanya mengizinkan akses ke beberapa foto. Anda dapat memilih lebih banyak foto atau mengizinkan akses ke semua foto di Pengaturan.',
+        deniedAccessTitle: 'Tidak dapat mengakses foto',
+        deniedAccessMessage: 'Silakan izinkan footos mengakses perpustakaan foto Anda di Pengaturan.',
+    },
+
+    errors: {
+        initFailed: 'Inisialisasi gagal',
+        importFailed: 'Impor gagal',
+        deleteFailed: 'Penghapusan gagal',
+        loadFailed: 'Gagal memuat foto',
+        openFailed: 'Gagal membuka',
+        clearFailed: 'Gagal menghapus data',
+    },
+};

@@ -1,21 +1,21 @@
-package app.fotos.native
+package app.footos.native
 
 import android.util.Log
 
 /**
- * JNI interface to Rust native library (fotos_platform_android)
+ * JNI interface to Rust native library (footos_platform_android)
  *
  * This object provides the bridge between Kotlin and the Rust photo processing library.
  * All methods are called from Kotlin and executed in Rust via JNI.
  */
-object FotosNative {
+object FootosNative {
 
-    private const val TAG = "FotosNative"
+    private const val TAG = "FootosNative"
     private var initialized = false
 
     init {
         try {
-            System.loadLibrary("fotos_platform_android")
+            System.loadLibrary("footos_platform_android")
             Log.d(TAG, "Native library loaded successfully")
         } catch (e: UnsatisfiedLinkError) {
             Log.e(TAG, "Failed to load native library: ${e.message}")
@@ -126,7 +126,7 @@ object FotosNative {
 
     /**
      * Initialize the Rust library
-     * Kotlin signature: FotosNative.init(filesDir: String, cacheDir: String)
+     * Kotlin signature: FootosNative.init(filesDir: String, cacheDir: String)
      */
     private external fun init(filesDir: String, cacheDir: String)
 

@@ -1,4 +1,4 @@
-// Top-level build file for Fotos Android project
+// Top-level build file for 足迹相册 (footos) Android project
 
 buildscript {
     repositories {

@@ -1,0 +1,131 @@
+import type { Translations } from './types';
+
+export const fr: Translations = {
+    app: {
+        name: 'footos',
+        version: 'v',
+    },
+
+    common: {
+        cancel: 'Annuler',
+        confirm: 'Confirmer',
+        delete: 'Supprimer',
+        remove: 'Retirer',
+        close: 'Fermer',
+        save: 'Enregistrer',
+        settings: 'Paramètres',
+        import: 'Importer',
+        export: 'Exporter',
+        loading: 'Chargement...',
+        scanning: 'Analyse...',
+        syncing: 'Synchronisation...',
+    },
+
+    nav: {
+        library: 'Bibliothèque',
+        map: 'Carte',
+        timeline: 'Chronologie',
+        photos: 'Photos',
+        files: 'fichiers',
+    },
+
+    import: {
+        importPhotos: 'Importer des photos',
+        importFolder: 'Importer un dossier',
+        importFile: 'Importer un fichier',
+        importing: 'Importation...',
+        selectPhotos: 'Sélectionner des photos',
+        noPhotosSelected: 'Aucune photo sélectionnée',
+        duplicates: 'doublons',
+        complete: 'Importation terminée',
+        failed: 'Échec de l\'importation',
+        photoImportUnavailable: 'L\'importation de photos n\'est pas disponible. Veuillez redémarrer l\'application.',
+    },
+
+    library: {
+        noPhotos: 'Aucune photo',
+        sortBy: 'Trier par',
+        sortDate: 'Date',
+        sortName: 'Nom',
+        sortSize: 'Taille',
+        ascending: 'Croissant',
+        descending: 'Décroissant',
+    },
+
+    preview: {
+        showInFinder: 'Afficher dans le Finder',
+        showInExplorer: 'Afficher dans l\'Explorateur',
+        previous: 'Précédent',
+        next: 'Suivant',
+        zoomIn: 'Zoom avant',
+        zoomOut: 'Zoom arrière',
+        resetZoom: 'Réinitialiser le zoom',
+    },
+
+    photoInfo: {
+        date: 'Date',
+        dimensions: 'Dimensions',
+        fileSize: 'Taille du fichier',
+        camera: 'Appareil photo',
+        exposure: 'Exposition',
+        gps: 'GPS',
+        raw: 'RAW',
+        rawOnly: 'RAW uniquement',
+        jpegPlusRaw: 'JPEG + RAW',
+        path: 'Chemin',
+    },
+
+    delete: {
+        title: 'Supprimer',
+        removeFromLibrary: 'Retirer de la bibliothèque',
+        deleteOriginal: 'Supprimer le fichier original',
+        removeFromLibraryDesc: 'Le fichier original sera conservé',
+        deleteOriginalDesc: 'Cela supprimera définitivement le fichier original',
+        alsoDeleteRaw: 'Supprimer également le fichier RAW',
+        warningPermanent: 'Attention : Cette action est irréversible. Le fichier original sera définitivement supprimé du disque.',
+        file: 'Fichier',
+        associatedRaw: 'Cette photo a un fichier RAW associé :',
+    },
+
+    settings: {
+        title: 'Paramètres',
+        appearance: 'Apparence',
+        theme: 'Thème',
+        themeDark: 'Sombre',
+        themeLight: 'Clair',
+        themeSystem: 'Système',
+        themeAuto: 'Auto',
+        language: 'Langue',
+        storage: 'Stockage',
+        database: 'Base de données',
+        thumbnails: 'Miniatures',
+        cache: 'Cache',
+        clearCache: 'Vider le cache',
+        clearAllData: 'Effacer toutes les données',
+        clearCacheConfirm: 'Cela supprimera toutes les photos importées et les miniatures. Le cache de la carte sera préservé.\n\nContinuer ?',
+        about: 'À propos',
+        techStack: 'Tauri + Svelte + Rust',
+    },
+
+    permissions: {
+        photoLibraryAccess: 'Accès à la photothèque',
+        photoLibraryDenied: 'Accès à la photothèque refusé',
+        photoLibraryLimited: 'Accès limité aux photos',
+        goToSettings: 'Aller aux paramètres',
+        selectMorePhotos: 'Sélectionner plus de photos',
+        selectFromAlbum: 'Sélectionner depuis l\'album',
+        limitedAccessTitle: 'Accès limité aux photos',
+        limitedAccessMessage: 'Vous avez autorisé l\'accès à certaines photos uniquement. Vous pouvez sélectionner plus de photos ou autoriser l\'accès à toutes les photos dans les paramètres.',
+        deniedAccessTitle: 'Impossible d\'accéder aux photos',
+        deniedAccessMessage: 'Veuillez autoriser footos à accéder à votre photothèque dans les paramètres.',
+    },
+
+    errors: {
+        initFailed: 'Échec de l\'initialisation',
+        importFailed: 'Échec de l\'importation',
+        deleteFailed: 'Échec de la suppression',
+        loadFailed: 'Échec du chargement des photos',
+        openFailed: 'Échec de l\'ouverture',
+        clearFailed: 'Échec de l\'effacement des données',
+    },
+};

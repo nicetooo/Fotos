@@ -1,4 +1,4 @@
-# Fotos - 开发指南
+# 足迹相册 (footos) - 开发指南
 
 跨平台照片管理应用：地图可视化 + Desktop/iOS/Android
 
@@ -131,8 +131,8 @@ pnpm desktop                              # 从项目根目录启动
 # 方法1：杀掉占用端口的进程
 lsof -ti:1420 | xargs kill -9
 
-# 方法2：杀掉 fotos 相关进程
-pkill -f "target/debug/fotos"
+# 方法2：杀掉 footos 相关进程
+pkill -f "target/debug/footos"
 
 # 确认端口已释放
 lsof -i:1420 || echo "Port 1420 is free"

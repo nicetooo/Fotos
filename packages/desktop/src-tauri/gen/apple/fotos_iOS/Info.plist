@@ -41,8 +41,8 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Fotos needs access to your photo library to import and manage your photos.</string>
+	<string>足迹相册需要访问您的相册以导入和管理照片。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Fotos needs permission to save photos to your library.</string>
+	<string>足迹相册需要权限将照片保存到您的相册。</string>
 </dict>
 </plist>

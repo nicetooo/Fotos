@@ -8,7 +8,7 @@ use jni::objects::{JClass, JString, JByteArray};
 use jni::sys::{jint, jboolean, jlong};
 
 use crate::AndroidPhotoService;
-use fotos_shared::PhotoService;
+use footos_shared::PhotoService;
 use std::sync::OnceLock;
 
 static PHOTO_SERVICE: OnceLock<AndroidPhotoService> = OnceLock::new();
@@ -18,9 +18,9 @@ fn get_photo_service() -> &'static AndroidPhotoService {
 }
 
 /// Initialize the Rust library
-/// Called from Kotlin: FotosNative.init(filesDir, cacheDir)
+/// Called from Kotlin: FootosNative.init(filesDir, cacheDir)
 #[no_mangle]
-pub extern "system" fn Java_app_fotos_native_FotosNative_init(
+pub extern "system" fn Java_app_footos_native_FootosNative_init(
     mut env: JNIEnv,
     _class: JClass,
     files_dir: JString,
@@ -38,9 +38,9 @@ pub extern "system" fn Java_app_fotos_native_FotosNative_init(
 }
 
 /// Process a photo from MediaStore
-/// Called from Kotlin: FotosNative.processPhoto(photoData, contentUri, dbPath, thumbDir)
+/// Called from Kotlin: FootosNative.processPhoto(photoData, contentUri, dbPath, thumbDir)
 #[no_mangle]
-pub extern "system" fn Java_app_fotos_native_FotosNative_processPhoto(
+pub extern "system" fn Java_app_footos_native_FootosNative_processPhoto(
     mut env: JNIEnv,
     _class: JClass,
     photo_data: JByteArray,
@@ -75,9 +75,9 @@ pub extern "system" fn Java_app_fotos_native_FotosNative_processPhoto(
 }
 
 /// Check if import should be cancelled
-/// Called from Kotlin: FotosNative.isImportCancelled()
+/// Called from Kotlin: FootosNative.isImportCancelled()
 #[no_mangle]
-pub extern "system" fn Java_app_fotos_native_FotosNative_isImportCancelled(
+pub extern "system" fn Java_app_footos_native_FootosNative_isImportCancelled(
     _env: JNIEnv,
     _class: JClass,
 ) -> jboolean {
@@ -85,9 +85,9 @@ pub extern "system" fn Java_app_fotos_native_FotosNative_isImportCancelled(
 }
 
 /// Cancel the import operation
-/// Called from Kotlin: FotosNative.cancelImport()
+/// Called from Kotlin: FootosNative.cancelImport()
 #[no_mangle]
-pub extern "system" fn Java_app_fotos_native_FotosNative_cancelImport(
+pub extern "system" fn Java_app_footos_native_FootosNative_cancelImport(
     _env: JNIEnv,
     _class: JClass,
 ) {
@@ -95,9 +95,9 @@ pub extern "system" fn Java_app_fotos_native_FotosNative_cancelImport(
 }
 
 /// Get photo count in database
-/// Called from Kotlin: FotosNative.getPhotoCount(dbPath)
+/// Called from Kotlin: FootosNative.getPhotoCount(dbPath)
 #[no_mangle]
-pub extern "system" fn Java_app_fotos_native_FotosNative_getPhotoCount(
+pub extern "system" fn Java_app_footos_native_FootosNative_getPhotoCount(
     mut env: JNIEnv,
     _class: JClass,
     db_path: JString,
@@ -107,7 +107,7 @@ pub extern "system" fn Java_app_fotos_native_FotosNative_getPhotoCount(
         Err(_) => return -1,
     };
 
-    use fotos_core::PhotoIndex;
+    use footos_core::PhotoIndex;
     match PhotoIndex::open(db) {
         Ok(index) => match index.list() {
             Ok(photos) => photos.len() as jlong,
@@ -118,9 +118,9 @@ pub extern "system" fn Java_app_fotos_native_FotosNative_getPhotoCount(
 }
 
 /// Clear all app data
-/// Called from Kotlin: FotosNative.clearAppData(dbPath, thumbDir, rawPreviewDir, tileCacheDir)
+/// Called from Kotlin: FootosNative.clearAppData(dbPath, thumbDir, rawPreviewDir, tileCacheDir)
 #[no_mangle]
-pub extern "system" fn Java_app_fotos_native_FotosNative_clearAppData(
+pub extern "system" fn Java_app_footos_native_FootosNative_clearAppData(
     mut env: JNIEnv,
     _class: JClass,
     db_path: JString,

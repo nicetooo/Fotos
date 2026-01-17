@@ -22,6 +22,9 @@
         groupPhotos,
     } from "../shared";
 
+    // i18n
+    import { createI18nState, type Locale } from "../shared/i18n";
+
     // Components
     import Settings from "./components/Settings.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
@@ -32,6 +35,11 @@
 
     // Set context synchronously during component initialization
     setPlatformService(platformService);
+
+    // i18n state
+    const i18n = createI18nState();
+    let locale = $derived(i18n.locale);
+    let t = $derived(i18n.t);
 
     // iOS-specific service (set during initialization)
     let iosPlatformService: IOSPlatformService | null = $state(null);
@@ -58,7 +66,7 @@
     let hasFullAccess = $state(false);
 
     // Theme state
-    const THEME_KEY = "fotos-theme";
+    const THEME_KEY = "footos-theme";
     let theme = $state<Theme>((() => {
         if (typeof localStorage !== "undefined") {
             const saved = localStorage.getItem(THEME_KEY);
@@ -124,7 +132,7 @@
 
             version = await invoke("get_core_version");
             const appData = await appDataDir();
-            dbPath = await join(appData, "fotos.db");
+            dbPath = await join(appData, "footos.db");
             thumbDir = await join(appData, "thumbnails");
 
             // Initialize platform service
@@ -171,7 +179,7 @@
                 hasFullAccess = status === 'granted';
             }
         } catch (e) {
-            error = "Failed to initialize: " + e;
+            error = t.errors.initFailed + ": " + e;
         }
 
         return () => {
@@ -263,7 +271,7 @@
                 {#if importStatus.total > 0}
                     <span>{importStatus.current} / {importStatus.total}</span>
                 {:else}
-                    <span>Syncing...</span>
+                    <span>{t.common.syncing}...</span>
                 {/if}
             </div>
         {/if}
@@ -290,7 +298,7 @@
             onclick={(e) => e.stopPropagation()}
         >
             <div class="flex items-center justify-between px-6 py-4 border-b theme-border">
-                <h2 class="text-lg font-medium theme-text-primary">Settings</h2>
+                <h2 class="text-lg font-medium theme-text-primary">{t.settings.title}</h2>
                 <button
                     onclick={() => showSettings = false}
                     class="p-2 rounded-lg hover:theme-bg-tertiary theme-text-muted hover:theme-text-primary transition-colors"
@@ -299,7 +307,7 @@
                 </button>
             </div>
             <div class="p-6 overflow-y-auto max-h-[calc(80vh-60px)]">
-                <Settings {dbPath} {thumbDir} {version} {theme} onThemeChange={(t) => theme = t} />
+                <Settings {dbPath} {thumbDir} {version} {theme} onThemeChange={(newTheme) => theme = newTheme} {t} {locale} onLocaleChange={(newLocale) => i18n.setLocale(newLocale)} />
             </div>
         </div>
     </div>

@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn test_scan_stability_filters() {
-        let temp_dir = std::env::temp_dir().join("fotos_scan_test");
+        let temp_dir = std::env::temp_dir().join("footos_scan_test");
         if temp_dir.exists() { fs::remove_dir_all(&temp_dir).unwrap(); }
         fs::create_dir_all(&temp_dir).unwrap();
 

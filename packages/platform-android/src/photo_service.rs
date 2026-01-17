@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use fotos_shared::{
+use footos_shared::{
     PhotoService, ImportOptions, PhotoAlbum, PhotoSource,
     PlatformError, PlatformResult,
 };
-use fotos_core::{
+use footos_core::{
     PhotoInfo, PhotoIndex, Thumbnailer, ThumbnailSpec,
     extract_raw_preview, compute_hash, read_metadata,
 };
