@@ -571,7 +571,8 @@
 
         // Draw edge indicators for photos outside view
         // Line count is pre-calculated based on time intervals (stable)
-        const maxStackWidth = 100;
+        // Limit max stack width to 20% of screen width
+        const maxStackWidth = Math.floor(rect.width * 0.2);
 
         // Left edge indicator
         if (leftLines > 0) {
