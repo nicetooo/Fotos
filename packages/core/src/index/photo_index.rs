@@ -225,6 +225,12 @@ impl PhotoIndex {
     /// - Future versions may introduce `LIMIT/OFFSET` paging or an iterator API.
     pub fn list(&self) -> Result<Vec<PhotoInfo>, CoreError> {
         let conn = self.conn.lock().map_err(|e| CoreError::Database(e.to_string()))?;
+        
+        // Debug: count rows first
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM photos", [], |row| row.get(0))
+            .unwrap_or(-1);
+        println!("[PhotoIndex::list] Raw count from DB: {}", count);
+        
         let mut stmt = conn.prepare(
             "SELECT 
                 id, path, hash, make, model, date_taken, width, height,
@@ -241,14 +247,16 @@ impl PhotoIndex {
                     make: row.get(3)?,
                     model: row.get(4)?,
                     date_taken: row.get(5)?,
-                    width: row.get::<_, i64>(6)? as u32,
-                    height: row.get::<_, i64>(7)? as u32,
+                    // Handle NULL values with defaults
+                    width: row.get::<_, Option<i64>>(6)?.unwrap_or(0) as u32,
+                    height: row.get::<_, Option<i64>>(7)?.unwrap_or(0) as u32,
                     lat: row.get(8)?,
                     lon: row.get(9)?,
                     iso: row.get::<_, Option<i64>>(10)?.map(|x| x as u32),
                     f_number: row.get::<_, Option<f64>>(11)?.map(|x| x as f32),
                     exposure_time: row.get(12)?,
-                    orientation: row.get::<_, i64>(13)? as u32,
+                    // Default orientation to 1 (normal) if NULL
+                    orientation: row.get::<_, Option<i64>>(13)?.unwrap_or(1) as u32,
                 },
                 thumb_path: None,
                 file_size: 0,
@@ -257,7 +265,27 @@ impl PhotoIndex {
             })
         })?;
 
-        Ok(rows.filter_map(Result::ok).collect())
+        let mut success_count = 0;
+        let mut error_count = 0;
+        let mut results = Vec::new();
+        
+        for row in rows {
+            match row {
+                Ok(photo) => {
+                    success_count += 1;
+                    results.push(photo);
+                }
+                Err(e) => {
+                    error_count += 1;
+                    if error_count <= 3 {
+                        println!("[PhotoIndex::list] Row error: {}", e);
+                    }
+                }
+            }
+        }
+        
+        println!("[PhotoIndex::list] Success: {}, Errors: {}", success_count, error_count);
+        Ok(results)
     }
 }
 

@@ -157,7 +157,8 @@
                 }
             });
 
-            platformService.onImportComplete(() => {
+            platformService.onImportComplete((result) => {
+                console.log("[App] Import complete callback triggered:", result);
                 loadPhotos();
             });
 
@@ -188,11 +189,17 @@
     });
 
     async function loadPhotos() {
-        if (!dbPath) return;
+        console.log("[App] loadPhotos called, dbPath:", dbPath, "thumbDir:", thumbDir);
+        if (!dbPath) {
+            console.log("[App] loadPhotos: dbPath is empty, skipping");
+            return;
+        }
         try {
-            photos = await invoke("list_photos", { dbPath, thumbDir });
+            const result = await invoke("list_photos", { dbPath, thumbDir });
+            console.log("[App] loadPhotos: got", result?.length, "photos");
+            photos = result as any[];
         } catch (e) {
-            console.error("Failed to list photos", e);
+            console.error("[App] Failed to list photos", e);
         }
     }
 

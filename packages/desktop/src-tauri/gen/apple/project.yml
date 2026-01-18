@@ -1,6 +1,6 @@
-name: fotos
+name: footos
 options:
-  bundleIdPrefix: app.fotos.desktop
+  bundleIdPrefix: app.footos
   deploymentTarget:
     iOS: 14.0
 fileGroups: [../../src]
@@ -10,8 +10,8 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: Fotos
-      PRODUCT_BUNDLE_IDENTIFIER: app.fotos.desktop
+      PRODUCT_NAME: 足迹相册
+      PRODUCT_BUNDLE_IDENTIFIER: app.footos
 targetTemplates:
   app:
     type: application
@@ -24,19 +24,20 @@ targetTemplates:
     settings:
       groups: [app]
 targets:
-  fotos_iOS:
+  footos_iOS:
     type: application
     platform: iOS
     sources:
       - path: Sources
       - path: Assets.xcassets
-      - path: fotos_iOS
+      - path: Externals
+      - path: footos_iOS
       - path: assets
         buildPhase: resources
         type: folder
       - path: LaunchScreen.storyboard
     info:
-      path: fotos_iOS/Info.plist
+      path: footos_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
         UILaunchStoryboardName: LaunchScreen
@@ -53,7 +54,7 @@ targets:
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
     entitlements:
-      path: fotos_iOS/fotos_iOS.entitlements
+      path: footos_iOS/footos_iOS.entitlements
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -78,9 +79,6 @@ targets:
       - sdk: Security.framework
       - sdk: UIKit.framework
       - sdk: WebKit.framework
-      - sdk: Photos.framework
-      - sdk: PhotosUI.framework
-      - sdk: CoreLocation.framework
     preBuildScripts:
       - script: pnpm tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code

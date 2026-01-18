@@ -21,15 +21,24 @@ fn get_core_version() -> String {
 
 #[tauri::command]
 async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo>, String> {
+    println!("[list_photos] Called with db_path: {}", db_path);
+    
     // Ensure parent directory exists
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let index = PhotoIndex::open(db_path)
-        .map_err(|e| e.to_string())?;
+    let index = PhotoIndex::open(db_path.clone())
+        .map_err(|e| {
+            println!("[list_photos] Failed to open db: {}", e);
+            e.to_string()
+        })?;
     
-    let mut photos = index.list().map_err(|e| e.to_string())?;
+    let mut photos = index.list().map_err(|e| {
+        println!("[list_photos] Error listing photos: {}", e);
+        e.to_string()
+    })?;
+    println!("[list_photos] Found {} photos in db at {}", photos.len(), db_path);
     
     // Populate thumb_path and file_size
     let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
@@ -71,15 +80,20 @@ async fn import_photos(
     println!("[Import] Thumb dir: {}", thumb_dir);
 
     // Handle file:// URIs (iOS returns these)
-    let root_path = if root_path.starts_with("file://") {
-        let decoded = urlencoding::decode(&root_path[7..])
-            .map_err(|e| format!("Failed to decode file URI: {}", e))?
-            .into_owned();
-        println!("[Import] Decoded file URI to: {}", decoded);
-        decoded
-    } else {
-        root_path
-    };
+    // Keep stripping file:// prefix until we get a plain path
+    let mut root_path = root_path;
+    loop {
+        if root_path.starts_with("file://") {
+            let decoded = urlencoding::decode(&root_path[7..])
+                .map_err(|e| format!("Failed to decode file URI: {}", e))?
+                .into_owned();
+            println!("[Import] Decoded file URI: {} -> {}", root_path, decoded);
+            root_path = decoded;
+        } else {
+            break;
+        }
+    }
+    println!("[Import] Final path: {}", root_path);
 
     // Reset cancellation flag at start
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);

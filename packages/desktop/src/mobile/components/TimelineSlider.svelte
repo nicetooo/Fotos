@@ -79,8 +79,9 @@
             if (len > 0 && fullTimeRange.durationMs > 0) {
                 // Center on the middle of the time range
                 viewCenterMs = fullTimeRange.min.getTime() + fullTimeRange.durationMs / 2;
-                // Reset to default duration
-                viewDurationMs = Math.min(DAY, fullTimeRange.durationMs);
+                // Default to show ALL photos initially so user sees everything on map
+                // User can then narrow down using presets or pinch zoom
+                viewDurationMs = fullTimeRange.durationMs;
                 isCustomDuration = false;
             }
             prevPhotosLength = len;

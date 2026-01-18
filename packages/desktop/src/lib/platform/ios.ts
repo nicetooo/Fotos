@@ -4,6 +4,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
     PlatformCapabilities,
     ImportProgress,
@@ -166,63 +167,48 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     }
 
     async requestImport(): Promise<void> {
-        console.log("[iOS] Requesting import, bridge ready:", this._bridgeReady);
-
-        const webkit = (window as any).webkit;
-        const bridgeAvailable = webkit?.messageHandlers?.footosPhotoPicker || (window as any).__FOOTOS_BRIDGE_READY__;
-
-        if (bridgeAvailable) {
-            console.log("[iOS] Using webkit message handler");
-            webkit.messageHandlers.footosPhotoPicker.postMessage({
-                command: "requestAndImport",
-                dbPath: this.dbPath,
-                thumbDir: this.thumbDir
+        console.log("[iOS] Requesting import via tauri-plugin-dialog");
+        
+        try {
+            // Use tauri-plugin-dialog to open photo picker
+            // pickerMode: 'image' opens the native iOS photo library picker
+            const selected = await open({
+                multiple: true,
+                filters: [{
+                    name: 'Images',
+                    extensions: ['image/*']  // MIME type for iOS
+                }],
+                // @ts-ignore - pickerMode is supported on iOS
+                pickerMode: 'image'
             });
-            return;
-        }
 
-        // 桥接未就绪，等待后重试
-        console.log("[iOS] Bridge not ready, waiting...");
-        this.scanningCallbacks.forEach(cb => cb(true));
+            if (!selected) {
+                console.log("[iOS] User cancelled photo selection");
+                return;
+            }
 
-        const ready = await this.waitForBridge(3000);
-        if (ready) {
-            console.log("[iOS] Bridge became ready, proceeding");
-            const webkit = (window as any).webkit;
-            webkit.messageHandlers.footosPhotoPicker.postMessage({
-                command: "requestAndImport",
-                dbPath: this.dbPath,
-                thumbDir: this.thumbDir
-            });
-        } else {
-            console.error("[iOS] Bridge not available after timeout");
+            const paths = Array.isArray(selected) ? selected : [selected];
+            console.log("[iOS] Selected", paths.length, "photos");
+            
+            if (paths.length > 0) {
+                await this.processIOSImport(paths, this.dbPath, this.thumbDir);
+            }
+        } catch (err) {
+            console.error("[iOS] Photo picker error:", err);
             this.scanningCallbacks.forEach(cb => cb(false));
         }
     }
 
     async syncPhotosIfFullAccess(): Promise<void> {
-        console.log("[iOS] Checking for full access to auto-sync...");
-
-        const ready = await this.waitForBridge(3000);
-        if (ready) {
-            const webkit = (window as any).webkit;
-            webkit.messageHandlers.footosPhotoPicker.postMessage({
-                command: "syncIfFullAccess",
-                dbPath: this.dbPath,
-                thumbDir: this.thumbDir
-            });
-        } else {
-            console.log("[iOS] Bridge not ready for auto-sync");
-        }
+        // Auto-sync is not available when using tauri-plugin-dialog
+        // Users need to manually import photos using the + button
+        console.log("[iOS] Auto-sync not available, use manual import");
     }
 
     showLimitedLibraryPicker(): void {
-        const webkit = (window as any).webkit;
-        if (webkit?.messageHandlers?.footosPhotoPicker) {
-            webkit.messageHandlers.footosPhotoPicker.postMessage({
-                command: "showLimitedLibraryPicker"
-            });
-        }
+        // Limited library picker is iOS-specific and requires native Swift code
+        // With tauri-plugin-dialog, users can select any photos they want
+        console.log("[iOS] Limited library picker not available, use requestImport instead");
     }
 
     onPermissionChange(callback: (hasFullAccess: boolean) => void): () => void {
@@ -267,8 +253,13 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
 
         for (let i = 0; i < paths.length; i++) {
             try {
+                // tauri-plugin-dialog on iOS returns file:// URIs, pass as-is
+                // Don't add file:// prefix since it's already included
+                const pathToImport = paths[i];
+                console.log("[iOS] Importing path:", pathToImport);
+                
                 const result: any = await invoke("import_photos", {
-                    rootPath: "file://" + paths[i],
+                    rootPath: pathToImport,
                     dbPath: db,
                     thumbDir: thumb,
                 });
@@ -292,13 +283,17 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         }
 
         console.log("[iOS] Import complete:", { totalSuccess, totalDuplicates, totalFailure });
+        console.log("[iOS] Calling", this.completeCallbacks.size, "complete callbacks");
 
         const result: ImportResult = {
             success: totalSuccess,
             failure: totalFailure,
             duplicates: totalDuplicates,
         };
-        this.completeCallbacks.forEach(cb => cb(result));
+        this.completeCallbacks.forEach(cb => {
+            console.log("[iOS] Triggering complete callback");
+            cb(result);
+        });
         this.scanningCallbacks.forEach(cb => cb(false));
         this.importRunning = false;
     }

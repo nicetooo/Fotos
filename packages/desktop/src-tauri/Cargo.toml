@@ -27,3 +27,8 @@ reqwest = { version = "0.12", features = ["rustls-tls"], default-features = fals
 tauri-plugin-os = "2.3.2"
 urlencoding = "2.1"
 
+[patch.crates-io]
+# Fix iOS crash in wry::wkwebview::platform_webview_version when NSBundle crashes
+# on iOS 26.x simulator. This local patch skips the WebKit bundle lookup on iOS.
+wry = { path = "../../../patches/wry" }
+

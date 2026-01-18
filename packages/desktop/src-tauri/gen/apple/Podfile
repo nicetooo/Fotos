@@ -1,13 +1,13 @@
 # Uncomment the next line to define a global platform for your project
 
-target 'fotos_iOS' do
+target 'footos_iOS' do
 platform :ios, '14.0'
-  # Pods for fotos_iOS
+  # Pods for footos_iOS
 end
 
-target 'fotos_macOS' do
+target 'footos_macOS' do
 platform :osx, '11.0'
-  # Pods for fotos_macOS
+  # Pods for footos_macOS
 end
 
 # Delete the deployment target for iOS and macOS, causing it to be inherited from the Podfile
