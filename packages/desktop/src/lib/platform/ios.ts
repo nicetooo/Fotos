@@ -36,7 +36,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     private dbPath = '';
     private thumbDir = '';
     private _hasFullAccess = false;
-    private _bridgeReady = false;
+    private bridgeReady = false;
     private importRunning = false;
 
     get hasFullPhotoAccess(): boolean {
@@ -129,13 +129,13 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         // iOS Swift 桥接就绪事件
         this.addListener('footos-bridge-ready', () => {
             console.log("[iOS] Swift bridge is ready");
-            this._bridgeReady = true;
+            this.bridgeReady = true;
         });
 
         // 检查桥接是否已就绪
         if ((window as any).__FOOTOS_BRIDGE_READY__) {
             console.log("[iOS] Swift bridge was already ready");
-            this._bridgeReady = true;
+            this.bridgeReady = true;
         }
 
         // 暴露全局函数给 Swift 调用
@@ -167,7 +167,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     }
 
     async requestImport(): Promise<void> {
-        console.log("[iOS] Requesting import via tauri-plugin-dialog");
+        console.log("[iOS] Requesting import via tauri-plugin-dialog, bridge:", this.bridgeReady);
         
         try {
             // Use tauri-plugin-dialog to open photo picker
@@ -214,25 +214,6 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     onPermissionChange(callback: (hasFullAccess: boolean) => void): () => void {
         this.permissionCallbacks.add(callback);
         return () => this.permissionCallbacks.delete(callback);
-    }
-
-    private async waitForBridge(maxWait: number): Promise<boolean> {
-        const startTime = Date.now();
-        return new Promise((resolve) => {
-            const check = () => {
-                const webkit = (window as any).webkit;
-                if (webkit?.messageHandlers?.footosPhotoPicker) {
-                    resolve(true);
-                    return;
-                }
-                if (Date.now() - startTime > maxWait) {
-                    resolve(false);
-                    return;
-                }
-                setTimeout(check, 100);
-            };
-            check();
-        });
     }
 
     private async processIOSImport(paths: string[], db: string, thumb: string): Promise<void> {
