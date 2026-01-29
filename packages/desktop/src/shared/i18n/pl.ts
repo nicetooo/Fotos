@@ -120,6 +120,25 @@ export const pl: Translations = {
         deniedAccessMessage: 'Zezwól footos na dostęp do biblioteki zdjęć w ustawieniach.',
     },
 
+    map: {
+        showAllPhotos: 'Pokaż wszystkie zdjęcia',
+        boxSelect: 'Zaznaczanie prostokątem',
+        noGeotaggedPhotos: 'Brak zdjęć z lokalizacją',
+        noGeotaggedPhotosDesc: 'Żadne z zaimportowanych zdjęć nie zawiera danych GPS.',
+    },
+    imageError: {
+        unableToLoad: 'Nie można załadować obrazu',
+        rawPreviewFailed: 'Nie udało się wyodrębnić podglądu RAW',
+        fileMissing: 'Plik mógł zostać przeniesiony lub dysk odłączony',
+        extractingRaw: 'Wyodrębnianie podglądu RAW...',
+        showingThumbnail: 'Wyświetlanie miniatury (pełny podgląd niedostępny)',
+    },
+    timeline: {
+        all: 'Wszystko',
+        reset: 'Resetuj',
+        range: 'Zakres',
+    },
+
     errors: {
         initFailed: 'Inicjalizacja nie powiodła się',
         importFailed: 'Import nie powiódł się',

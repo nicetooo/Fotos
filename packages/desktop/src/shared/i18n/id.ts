@@ -120,6 +120,25 @@ export const id: Translations = {
         deniedAccessMessage: 'Silakan izinkan footos mengakses perpustakaan foto Anda di Pengaturan.',
     },
 
+    map: {
+        showAllPhotos: 'Tampilkan semua foto',
+        boxSelect: 'Pilih area',
+        noGeotaggedPhotos: 'Tidak ada foto berlokasi',
+        noGeotaggedPhotosDesc: 'Tidak ada foto yang diimpor mengandung data GPS.',
+    },
+    imageError: {
+        unableToLoad: 'Tidak dapat memuat gambar',
+        rawPreviewFailed: 'Gagal mengekstrak pratinjau dari file RAW',
+        fileMissing: 'File mungkin telah dipindahkan atau drive terputus',
+        extractingRaw: 'Mengekstrak pratinjau RAW...',
+        showingThumbnail: 'Menampilkan thumbnail (pratinjau penuh tidak tersedia)',
+    },
+    timeline: {
+        all: 'Semua',
+        reset: 'Atur ulang',
+        range: 'Rentang',
+    },
+
     errors: {
         initFailed: 'Inisialisasi gagal',
         importFailed: 'Impor gagal',

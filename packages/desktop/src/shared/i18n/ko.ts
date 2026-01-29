@@ -120,6 +120,27 @@ export const ko: Translations = {
         deniedAccessMessage: '설정에서 footos가 사진 라이브러리에 접근할 수 있도록 허용해주세요.',
     },
 
+    map: {
+        showAllPhotos: '모든 사진 표시',
+        boxSelect: '영역 선택',
+        noGeotaggedPhotos: '위치 정보 사진 없음',
+        noGeotaggedPhotosDesc: '가져온 사진 중 GPS 데이터가 포함된 사진이 없습니다.',
+    },
+
+    imageError: {
+        unableToLoad: '이미지를 불러올 수 없습니다',
+        rawPreviewFailed: 'RAW 파일 미리보기 추출 실패',
+        fileMissing: '파일이 이동되었거나 드라이브 연결이 끊어졌을 수 있습니다',
+        extractingRaw: 'RAW 미리보기 추출 중...',
+        showingThumbnail: '썸네일 표시 중 (전체 미리보기 사용 불가)',
+    },
+
+    timeline: {
+        all: '전체',
+        reset: '초기화',
+        range: '범위',
+    },
+
     errors: {
         initFailed: '초기화 실패',
         importFailed: '가져오기 실패',

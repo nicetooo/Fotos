@@ -151,6 +151,30 @@ export interface Translations {
         deniedAccessMessage: string;
     };
 
+    // Map
+    map: {
+        showAllPhotos: string;
+        boxSelect: string;
+        noGeotaggedPhotos: string;
+        noGeotaggedPhotosDesc: string;
+    };
+
+    // Image preview errors
+    imageError: {
+        unableToLoad: string;
+        rawPreviewFailed: string;
+        fileMissing: string;
+        extractingRaw: string;
+        showingThumbnail: string;
+    };
+
+    // Timeline
+    timeline: {
+        all: string;
+        reset: string;
+        range: string;
+    };
+
     // Errors
     errors: {
         initFailed: string;

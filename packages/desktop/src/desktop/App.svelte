@@ -386,7 +386,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} />
+        <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
@@ -431,7 +431,7 @@
             <button
                 onclick={() => handleLibrary()}
                 class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all {showLibrary ? 'theme-bg-secondary' : ''}"
-                title="Library"
+                title={t.nav.library}
             >
                 <i class="fa-solid fa-images"></i>
             </button>
@@ -440,7 +440,7 @@
             <button
                 onclick={() => showSettings = true}
                 class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all"
-                title="Settings"
+                title={t.common.settings}
             >
                 <i class="fa-solid fa-gear"></i>
             </button>
@@ -468,10 +468,10 @@
                     <button
                         onclick={() => showLibrary = false}
                         class="p-1.5 rounded-lg hover:theme-bg-secondary theme-text-muted hover:theme-text-primary transition-colors"
-                        title="Close"
-                    >
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
+                    title={t.common.close}
+                >
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
                 </div>
 
                 <!-- Toolbar -->
@@ -517,7 +517,7 @@
                     <button
                         onclick={() => (sortOrder = sortOrder === "asc" ? "desc" : "asc")}
                         class="w-7 h-7 rounded theme-bg-tertiary theme-text-secondary hover:theme-text-primary flex items-center justify-center"
-                        title={sortOrder === "asc" ? "Ascending" : "Descending"}
+                        title={sortOrder === "asc" ? t.library.ascending : t.library.descending}
                     >
                         <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
                     </button>
@@ -529,7 +529,7 @@
                             onclick={() => libraryImportMenuOpen = !libraryImportMenuOpen}
                             disabled={isScanning}
                             class="w-7 h-7 rounded theme-bg-tertiary theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center"
-                            title="Import"
+                            title={t.common.import}
                         >
                             <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-xs"></i>
                         </button>
@@ -632,7 +632,7 @@
                 <button
                     onclick={handleCancelImport}
                     class="ml-1 w-5 h-5 rounded-full bg-white/10 hover:bg-red-500/50 flex items-center justify-center transition-colors"
-                    title="Cancel import"
+                    title={t.common.cancel}
                 >
                     <i class="fa-solid fa-xmark text-[10px]"></i>
                 </button>
@@ -695,7 +695,7 @@
                 <button
                     onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
                     class="p-2 rounded hover:theme-bg-secondary theme-text-muted hover:theme-text-primary"
-                    title="Show in Finder"
+                    title={t.preview.showInFinder}
                 >
                     <i class="fa-solid fa-folder-open text-sm"></i>
                 </button>
@@ -712,14 +712,14 @@
         <button
             onclick={(e) => { e.stopPropagation(); navigatePreview("prev"); }}
             class="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary z-20"
-            title="Previous"
+            title={t.preview.previous}
         >
             <i class="fa-solid fa-chevron-left"></i>
         </button>
         <button
             onclick={(e) => { e.stopPropagation(); navigatePreview("next"); }}
             class="absolute right-72 top-1/2 -translate-y-1/2 p-3 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary z-20"
-            title="Next"
+            title={t.preview.next}
         >
             <i class="fa-solid fa-chevron-right"></i>
         </button>
@@ -735,6 +735,7 @@
                     src={previewPhoto.path}
                     alt={previewPhoto.path.split("/").pop() || "Preview"}
                     thumbPath={previewPhoto.thumb_path || ""}
+                    {t}
                 />
             {/key}
         </div>

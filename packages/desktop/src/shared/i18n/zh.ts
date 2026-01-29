@@ -120,6 +120,27 @@ export const zh: Translations = {
         deniedAccessMessage: '请在设置中允许足迹相册访问您的照片库。',
     },
 
+    map: {
+        showAllPhotos: '显示所有照片',
+        boxSelect: '框选照片',
+        noGeotaggedPhotos: '没有地理位置照片',
+        noGeotaggedPhotosDesc: '您导入的照片中没有包含 GPS 数据的照片。',
+    },
+
+    imageError: {
+        unableToLoad: '无法加载图片',
+        rawPreviewFailed: '无法从 RAW 文件提取预览',
+        fileMissing: '文件可能已被移动或驱动器已断开',
+        extractingRaw: '正在提取 RAW 预览...',
+        showingThumbnail: '显示缩略图（完整预览不可用）',
+    },
+
+    timeline: {
+        all: '全部',
+        reset: '重置',
+        range: '范围',
+    },
+
     errors: {
         initFailed: '初始化失败',
         importFailed: '导入失败',

@@ -2,11 +2,13 @@
     import { convertFileSrc } from "@tauri-apps/api/core";
     import { invoke } from "@tauri-apps/api/core";
     import { appDataDir } from "@tauri-apps/api/path";
+    import type { Translations } from "../../shared/i18n/types";
 
-    let { src, alt = "Preview", thumbPath = "" } = $props<{
+    let { src, alt = "Preview", thumbPath = "", t } = $props<{
         src: string;
         alt?: string;
         thumbPath?: string;
+        t: Translations;
     }>();
 
     let container: HTMLDivElement | undefined = $state();
@@ -209,12 +211,12 @@
         {#if error && !loading}
             <div class="flex flex-col items-center justify-center text-neutral-500 gap-3">
                 <i class="fa-solid fa-image-slash text-4xl"></i>
-                <p class="text-sm">Unable to load image</p>
+                <p class="text-sm">{t.imageError.unableToLoad}</p>
                 <p class="text-xs text-neutral-600">
                     {#if isRaw}
-                        Failed to extract preview from RAW file
+                        {t.imageError.rawPreviewFailed}
                     {:else}
-                        File may have been moved or the drive disconnected
+                        {t.imageError.fileMissing}
                     {/if}
                 </p>
             </div>
@@ -222,7 +224,7 @@
             <div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
                 <i class="fa-solid fa-spinner fa-spin text-neutral-500 text-2xl"></i>
                 {#if isRaw && loading}
-                    <p class="text-neutral-500 text-xs">Extracting RAW preview...</p>
+                    <p class="text-neutral-500 text-xs">{t.imageError.extractingRaw}</p>
                 {/if}
             </div>
         {/if}
@@ -249,6 +251,6 @@
 {#if isRaw && rawPreviewFailed && thumbPath && loaded}
     <div class="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-amber-900/80 text-xs text-amber-200 pointer-events-none">
         <i class="fa-solid fa-triangle-exclamation mr-1.5"></i>
-        Showing thumbnail (full preview unavailable)
+        {t.imageError.showingThumbnail}
     </div>
 {/if}

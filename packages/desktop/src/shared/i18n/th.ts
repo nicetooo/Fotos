@@ -120,6 +120,25 @@ export const th: Translations = {
         deniedAccessMessage: 'กรุณาอนุญาตให้ footos เข้าถึงคลังรูปภาพของคุณในการตั้งค่า',
     },
 
+    map: {
+        showAllPhotos: 'แสดงรูปภาพทั้งหมด',
+        boxSelect: 'เลือกพื้นที่',
+        noGeotaggedPhotos: 'ไม่มีรูปภาพที่มีตำแหน่ง',
+        noGeotaggedPhotosDesc: 'รูปภาพที่นำเข้าไม่มีข้อมูล GPS',
+    },
+    imageError: {
+        unableToLoad: 'ไม่สามารถโหลดรูปภาพ',
+        rawPreviewFailed: 'ไม่สามารถดึงตัวอย่างจากไฟล์ RAW',
+        fileMissing: 'ไฟล์อาจถูกย้ายหรือไดรฟ์ถูกตัดการเชื่อมต่อ',
+        extractingRaw: 'กำลังแยกตัวอย่าง RAW...',
+        showingThumbnail: 'แสดงภาพขนาดย่อ (ไม่สามารถแสดงตัวอย่างแบบเต็มได้)',
+    },
+    timeline: {
+        all: 'ทั้งหมด',
+        reset: 'รีเซ็ต',
+        range: 'ช่วง',
+    },
+
     errors: {
         initFailed: 'การเริ่มต้นล้มเหลว',
         importFailed: 'การนำเข้าล้มเหลว',

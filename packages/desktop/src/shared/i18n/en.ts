@@ -120,6 +120,27 @@ export const en: Translations = {
         deniedAccessMessage: 'Please allow footos to access your photo library in Settings.',
     },
 
+    map: {
+        showAllPhotos: 'Show all photos',
+        boxSelect: 'Box select photos',
+        noGeotaggedPhotos: 'No Geotagged Photos',
+        noGeotaggedPhotosDesc: 'None of your imported photos have GPS data.',
+    },
+
+    imageError: {
+        unableToLoad: 'Unable to load image',
+        rawPreviewFailed: 'Failed to extract preview from RAW file',
+        fileMissing: 'File may have been moved or the drive disconnected',
+        extractingRaw: 'Extracting RAW preview...',
+        showingThumbnail: 'Showing thumbnail (full preview unavailable)',
+    },
+
+    timeline: {
+        all: 'All',
+        reset: 'Reset',
+        range: 'Range',
+    },
+
     errors: {
         initFailed: 'Failed to initialize',
         importFailed: 'Import failed',

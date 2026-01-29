@@ -120,6 +120,25 @@ export const de: Translations = {
         deniedAccessMessage: 'Bitte erlauben Sie footos den Zugriff auf Ihre Fotobibliothek in den Einstellungen.',
     },
 
+    map: {
+        showAllPhotos: 'Alle Fotos anzeigen',
+        boxSelect: 'Bereichsauswahl',
+        noGeotaggedPhotos: 'Keine geogetaggten Fotos',
+        noGeotaggedPhotosDesc: 'Keine Ihrer importierten Fotos enthält GPS-Daten.',
+    },
+    imageError: {
+        unableToLoad: 'Bild kann nicht geladen werden',
+        rawPreviewFailed: 'RAW-Vorschau konnte nicht extrahiert werden',
+        fileMissing: 'Datei wurde möglicherweise verschoben oder das Laufwerk getrennt',
+        extractingRaw: 'RAW-Vorschau wird extrahiert...',
+        showingThumbnail: 'Zeige Miniaturansicht (Vollvorschau nicht verfügbar)',
+    },
+    timeline: {
+        all: 'Alle',
+        reset: 'Zurücksetzen',
+        range: 'Bereich',
+    },
+
     errors: {
         initFailed: 'Initialisierung fehlgeschlagen',
         importFailed: 'Import fehlgeschlagen',

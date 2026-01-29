@@ -120,6 +120,25 @@ export const tr: Translations = {
         deniedAccessMessage: 'Lütfen Ayarlar\'dan footos\'un fotoğraf kütüphanenize erişmesine izin verin.',
     },
 
+    map: {
+        showAllPhotos: 'Tüm fotoğrafları göster',
+        boxSelect: 'Alan seçimi',
+        noGeotaggedPhotos: 'Konum bilgili fotoğraf yok',
+        noGeotaggedPhotosDesc: 'İçe aktarılan fotoğrafların hiçbirinde GPS verisi bulunmuyor.',
+    },
+    imageError: {
+        unableToLoad: 'Görüntü yüklenemiyor',
+        rawPreviewFailed: 'RAW dosyasından önizleme çıkarılamadı',
+        fileMissing: 'Dosya taşınmış veya sürücü bağlantısı kesilmiş olabilir',
+        extractingRaw: 'RAW önizleme çıkarılıyor...',
+        showingThumbnail: 'Küçük resim gösteriliyor (tam önizleme kullanılamıyor)',
+    },
+    timeline: {
+        all: 'Tümü',
+        reset: 'Sıfırla',
+        range: 'Aralık',
+    },
+
     errors: {
         initFailed: 'Başlatma başarısız',
         importFailed: 'İçe aktarma başarısız',

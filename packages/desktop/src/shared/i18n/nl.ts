@@ -120,6 +120,25 @@ export const nl: Translations = {
         deniedAccessMessage: 'Sta footos toe om toegang te krijgen tot uw fotobibliotheek in de instellingen.',
     },
 
+    map: {
+        showAllPhotos: 'Alle foto\'s tonen',
+        boxSelect: 'Rechthoekige selectie',
+        noGeotaggedPhotos: 'Geen foto\'s met locatie',
+        noGeotaggedPhotosDesc: 'Geen van uw geïmporteerde foto\'s bevat GPS-gegevens.',
+    },
+    imageError: {
+        unableToLoad: 'Kan afbeelding niet laden',
+        rawPreviewFailed: 'Kan RAW-voorbeeld niet extraheren',
+        fileMissing: 'Bestand is mogelijk verplaatst of station ontkoppeld',
+        extractingRaw: 'RAW-voorbeeld extraheren...',
+        showingThumbnail: 'Miniatuur weergegeven (volledig voorbeeld niet beschikbaar)',
+    },
+    timeline: {
+        all: 'Alles',
+        reset: 'Herstellen',
+        range: 'Bereik',
+    },
+
     errors: {
         initFailed: 'Initialisatie mislukt',
         importFailed: 'Import mislukt',

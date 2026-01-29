@@ -120,6 +120,25 @@ export const vi: Translations = {
         deniedAccessMessage: 'Vui lòng cho phép footos truy cập thư viện ảnh của bạn trong Cài đặt.',
     },
 
+    map: {
+        showAllPhotos: 'Hiển thị tất cả ảnh',
+        boxSelect: 'Chọn vùng',
+        noGeotaggedPhotos: 'Không có ảnh có vị trí',
+        noGeotaggedPhotosDesc: 'Không có ảnh nào được nhập có dữ liệu GPS.',
+    },
+    imageError: {
+        unableToLoad: 'Không thể tải hình ảnh',
+        rawPreviewFailed: 'Không thể trích xuất bản xem trước từ tệp RAW',
+        fileMissing: 'Tệp có thể đã được di chuyển hoặc ổ đĩa đã ngắt kết nối',
+        extractingRaw: 'Đang trích xuất xem trước RAW...',
+        showingThumbnail: 'Đang hiện ảnh thu nhỏ (xem trước đầy đủ không khả dụng)',
+    },
+    timeline: {
+        all: 'Tất cả',
+        reset: 'Đặt lại',
+        range: 'Phạm vi',
+    },
+
     errors: {
         initFailed: 'Khởi tạo thất bại',
         importFailed: 'Nhập thất bại',

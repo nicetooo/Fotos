@@ -4,12 +4,14 @@
     import "maplibre-gl/dist/maplibre-gl.css";
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
+    import type { Translations } from "../../shared/i18n/types";
 
-    let { photos, onOpenPreview, theme = "dark", tileConfig } = $props<{
+    let { photos, onOpenPreview, theme = "dark", tileConfig, t } = $props<{
         photos: any[];
         onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
         theme?: "dark" | "light";
         tileConfig?: { tiles: string[]; tileSize: number };
+        t: Translations;
     }>();
 
     let mapContainer: HTMLDivElement;
@@ -392,7 +394,7 @@
                 this._button = document.createElement('button');
                 this._button.type = 'button';
                 this._button.className = 'maplibregl-ctrl-show-all';
-                this._button.title = 'Show all photos';
+                this._button.title = t.map.showAllPhotos;
                 this._button.innerHTML = '<i class="fa-solid fa-expand"></i>';
                 this._button.onclick = (e) => {
                     e.stopPropagation();
@@ -541,8 +543,8 @@
             <div class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-[1000] pointer-events-none">
                 <div class="text-center p-6 theme-bg-secondary rounded-2xl border theme-border shadow-xl">
                     <i class="fa-solid fa-location-slash text-4xl theme-text-muted mb-4"></i>
-                    <h3 class="text-xl font-bold theme-text-primary mb-2">No Geotagged Photos</h3>
-                    <p class="theme-text-secondary max-w-xs">None of your imported photos have GPS data.</p>
+                    <h3 class="text-xl font-bold theme-text-primary mb-2">{t.map.noGeotaggedPhotos}</h3>
+                    <p class="theme-text-secondary max-w-xs">{t.map.noGeotaggedPhotosDesc}</p>
                 </div>
             </div>
         {/if}
@@ -559,6 +561,7 @@
                     onTimeRangeChange={handleTimeRangeChange}
                     onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
                     onShowAll={handleShowAllPhotos}
+                    {t}
                 />
             {/if}
         </div>

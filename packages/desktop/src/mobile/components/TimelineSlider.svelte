@@ -1,16 +1,20 @@
 <script lang="ts">
+    import type { Translations } from "../../shared/i18n/types";
+
     let {
         photos,
         mapViewTimeRange,
         onTimeRangeChange,
         onMapRangeConsumed,
-        onShowAll
+        onShowAll,
+        t
     } = $props<{
         photos: any[];
         mapViewTimeRange?: { start: Date; end: Date } | null;
         onTimeRangeChange: (start: Date, end: Date) => void;
         onMapRangeConsumed?: () => void;
         onShowAll?: () => void;
+        t: Translations;
     }>();
 
     // === Constants ===
@@ -19,14 +23,14 @@
     const MIN_DURATION = 5 * 60 * 1000; // 5 minutes minimum
 
     // Duration presets (0 = All)
-    const durationPresets = [
+    let durationPresets = $derived([
         { label: '1h', value: HOUR },
         { label: '6h', value: 6 * HOUR },
         { label: '1d', value: DAY },
         { label: '7d', value: 7 * DAY },
         { label: '30d', value: 30 * DAY },
-        { label: 'All', value: 0 },
-    ];
+        { label: t.timeline.all, value: 0 },
+    ]);
 
     // === Parse dates from photos ===
     function parsePhotoDate(dateStr: string | null): Date | null {
@@ -752,7 +756,7 @@
 
     <!-- Duration presets -->
     <div class="flex items-center gap-2 mb-2">
-        <span class="text-[10px] theme-text-muted">Range:</span>
+        <span class="text-[10px] theme-text-muted">{t.timeline.range}:</span>
         <div class="flex gap-1">
             {#each durationPresets as preset}
                 <button

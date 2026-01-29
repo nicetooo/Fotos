@@ -1,4 +1,6 @@
 <script lang="ts">
+    import type { Translations } from "../../shared/i18n/types";
+
     let {
         photos,
         externalTimeRange,
@@ -6,7 +8,8 @@
         onTimeRangeChange,
         onExternalRangeConsumed,
         onMapRangeConsumed,
-        onShowAll
+        onShowAll,
+        t
     } = $props<{
         photos: any[];
         externalTimeRange?: { start: Date; end: Date } | null;
@@ -15,6 +18,7 @@
         onExternalRangeConsumed?: () => void;
         onMapRangeConsumed?: () => void;
         onShowAll?: () => void;
+        t: Translations;
     }>();
 
     // Parse dates from photos
@@ -64,14 +68,14 @@
     });
 
     // === Layer 2: Fixed-width window slider (inside zoomed view) ===
-    const durationOptions = [
+    let durationOptions = $derived([
         { label: '1h', value: 60 * 60 * 1000 },
         { label: '6h', value: 6 * 60 * 60 * 1000 },
         { label: '1d', value: 24 * 60 * 60 * 1000 },
         { label: '7d', value: 7 * 24 * 60 * 60 * 1000 },
         { label: '30d', value: 30 * 24 * 60 * 60 * 1000 },
-        { label: 'All', value: 0 },
-    ];
+        { label: t.timeline.all, value: 0 },
+    ]);
 
     // Default to "All"
     let selectedDuration = $state(0);
@@ -521,7 +525,7 @@
             </span>
             {#if isZoomed || isMapConstrained}
                 <button onclick={resetSelection} class="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)]">
-                    {isMapConstrained ? 'All' : 'Reset'}
+                    {isMapConstrained ? t.timeline.all : t.timeline.reset}
                 </button>
             {/if}
         </div>
@@ -532,7 +536,7 @@
         <div class="mb-3">
             <!-- Duration selector -->
             <div class="flex items-center gap-2 mb-2">
-                <span class="text-[10px] theme-text-muted">Window:</span>
+                <span class="text-[10px] theme-text-muted">{t.timeline.range}:</span>
                 <div class="flex gap-1">
                     {#each durationOptions as option}
                         <button

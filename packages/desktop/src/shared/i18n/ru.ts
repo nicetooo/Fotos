@@ -120,6 +120,25 @@ export const ru: Translations = {
         deniedAccessMessage: 'Пожалуйста, разрешите footos доступ к вашей фотобиблиотеке в настройках.',
     },
 
+    map: {
+        showAllPhotos: 'Показать все фото',
+        boxSelect: 'Выделение области',
+        noGeotaggedPhotos: 'Нет фото с геометками',
+        noGeotaggedPhotosDesc: 'Ни одна из импортированных фотографий не содержит данных GPS.',
+    },
+    imageError: {
+        unableToLoad: 'Не удалось загрузить изображение',
+        rawPreviewFailed: 'Не удалось извлечь превью из RAW-файла',
+        fileMissing: 'Файл мог быть перемещён или диск отключён',
+        extractingRaw: 'Извлечение превью RAW...',
+        showingThumbnail: 'Отображается миниатюра (полный предпросмотр недоступен)',
+    },
+    timeline: {
+        all: 'Все',
+        reset: 'Сброс',
+        range: 'Диапазон',
+    },
+
     errors: {
         initFailed: 'Ошибка инициализации',
         importFailed: 'Ошибка импорта',

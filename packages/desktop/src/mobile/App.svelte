@@ -8,8 +8,10 @@
     import {
         setPlatformService,
         isIOSPlatform,
+        isAndroidPlatform,
         type PlatformService,
         type IOSPlatformService,
+        type AndroidPlatformService,
         type ImportProgress,
     } from "../lib/platform";
 
@@ -43,6 +45,9 @@
 
     // iOS-specific service (set during initialization)
     let iosPlatformService: IOSPlatformService | null = $state(null);
+
+    // Android-specific service (set during initialization)
+    let androidPlatformService: AndroidPlatformService | null = $state(null);
 
     let version = $state("...");
     let showSettings = $state(false);
@@ -130,6 +135,11 @@
                 iosPlatformService = platformService;
             }
 
+            // Check if Android platform for specific features
+            if (isAndroidPlatform(platformService)) {
+                androidPlatformService = platformService;
+            }
+
             version = await invoke("get_core_version");
             const appData = await appDataDir();
             dbPath = await join(appData, "footos.db");
@@ -178,6 +188,15 @@
                 // Check initial permission status
                 const status = await platformService.checkPermissionStatus();
                 hasFullAccess = status === 'granted';
+            }
+
+            // Android: Auto-sync photos from MediaStore if has access
+            if (androidPlatformService) {
+                androidPlatformService.onPermissionChange((hasAccess: boolean) => {
+                    hasFullAccess = hasAccess;
+                });
+
+                androidPlatformService.syncPhotosIfHasAccess();
             }
         } catch (e) {
             error = t.errors.initFailed + ": " + e;
@@ -245,7 +264,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} />
+        <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
@@ -255,7 +274,7 @@
                     onclick={() => handleImport()}
                     disabled={isScanning}
                     class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
-                    title="Import photos"
+                    title={t.import.importPhotos}
                 >
                     <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-lg"></i>
                 </button>
@@ -265,7 +284,7 @@
             <button
                 onclick={() => showSettings = true}
                 class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all"
-                title="Settings"
+                title={t.common.settings}
             >
                 <i class="fa-solid fa-gear text-lg"></i>
             </button>
@@ -364,6 +383,7 @@
                     src={previewPhoto.path}
                     alt={previewPhoto.path.split("/").pop() || "Preview"}
                     thumbPath={previewPhoto.thumb_path || ""}
+                    {t}
                 />
             {/key}
         </div>

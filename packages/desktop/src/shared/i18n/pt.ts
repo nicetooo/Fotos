@@ -120,6 +120,25 @@ export const pt: Translations = {
         deniedAccessMessage: 'Por favor, permita que o footos acesse sua biblioteca de fotos nas Configurações.',
     },
 
+    map: {
+        showAllPhotos: 'Mostrar todas as fotos',
+        boxSelect: 'Seleção retangular',
+        noGeotaggedPhotos: 'Sem fotos geolocalizadas',
+        noGeotaggedPhotosDesc: 'Nenhuma das suas fotos importadas contém dados GPS.',
+    },
+    imageError: {
+        unableToLoad: 'Não é possível carregar a imagem',
+        rawPreviewFailed: 'Falha ao extrair pré-visualização RAW',
+        fileMissing: 'O arquivo pode ter sido movido ou a unidade desconectada',
+        extractingRaw: 'Extraindo pré-visualização RAW...',
+        showingThumbnail: 'Exibindo miniatura (pré-visualização completa indisponível)',
+    },
+    timeline: {
+        all: 'Tudo',
+        reset: 'Redefinir',
+        range: 'Intervalo',
+    },
+
     errors: {
         initFailed: 'Falha na inicialização',
         importFailed: 'Falha na importação',

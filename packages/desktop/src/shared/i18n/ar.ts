@@ -120,6 +120,25 @@ export const ar: Translations = {
         deniedAccessMessage: 'يرجى السماح لـ footos بالوصول إلى مكتبة الصور الخاصة بك في الإعدادات.',
     },
 
+    map: {
+        showAllPhotos: 'عرض جميع الصور',
+        boxSelect: 'تحديد منطقة',
+        noGeotaggedPhotos: 'لا توجد صور بموقع جغرافي',
+        noGeotaggedPhotosDesc: 'لا تحتوي أي من صورك المستوردة على بيانات GPS.',
+    },
+    imageError: {
+        unableToLoad: 'تعذر تحميل الصورة',
+        rawPreviewFailed: 'فشل استخراج معاينة ملف RAW',
+        fileMissing: 'ربما تم نقل الملف أو فصل محرك الأقراص',
+        extractingRaw: 'جارٍ استخراج معاينة RAW...',
+        showingThumbnail: 'عرض الصورة المصغرة (المعاينة الكاملة غير متاحة)',
+    },
+    timeline: {
+        all: 'الكل',
+        reset: 'إعادة تعيين',
+        range: 'النطاق',
+    },
+
     errors: {
         initFailed: 'فشل في التهيئة',
         importFailed: 'فشل في الاستيراد',

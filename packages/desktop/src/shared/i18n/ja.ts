@@ -120,6 +120,27 @@ export const ja: Translations = {
         deniedAccessMessage: '設定でfootosがフォトライブラリにアクセスすることを許可してください。',
     },
 
+    map: {
+        showAllPhotos: 'すべての写真を表示',
+        boxSelect: '範囲選択',
+        noGeotaggedPhotos: '位置情報付き写真なし',
+        noGeotaggedPhotosDesc: 'インポートした写真にGPSデータが含まれていません。',
+    },
+
+    imageError: {
+        unableToLoad: '画像を読み込めません',
+        rawPreviewFailed: 'RAWファイルのプレビュー抽出に失敗',
+        fileMissing: 'ファイルが移動されたか、ドライブが切断された可能性があります',
+        extractingRaw: 'RAWプレビューを抽出中...',
+        showingThumbnail: 'サムネイルを表示中（フルプレビュー不可）',
+    },
+
+    timeline: {
+        all: 'すべて',
+        reset: 'リセット',
+        range: '範囲',
+    },
+
     errors: {
         initFailed: '初期化に失敗しました',
         importFailed: 'インポートに失敗しました',
