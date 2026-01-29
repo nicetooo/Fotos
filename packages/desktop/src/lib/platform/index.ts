@@ -12,6 +12,7 @@ export type {
     MapTileConfig,
     PlatformService,
     IOSPlatformService,
+    AndroidPlatformService,
 } from "./types";
 
 // Context utilities
@@ -21,6 +22,7 @@ export {
     getPlatformService,
     getIOSPlatformService,
     isIOSPlatform,
+    isAndroidPlatform,
 } from "./context";
 
 // Platform implementations (for direct usage if needed)

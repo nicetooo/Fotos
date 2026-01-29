@@ -36,9 +36,24 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keyProps = Properties()
+            val keyPropsFile = rootProject.file("key.properties")
+            if (keyPropsFile.exists()) {
+                keyProps.load(keyPropsFile.inputStream())
+                storeFile = file(keyProps["storeFile"] as String)
+                storePassword = keyProps["storePassword"] as String
+                keyAlias = keyProps["keyAlias"] as String
+                keyPassword = keyProps["keyPassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
