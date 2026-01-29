@@ -145,9 +145,77 @@
     // Track images currently being loaded (prevent duplicate loads)
     let loadingImages = new Set<string>();
     // Cache rendered ImageData by thumbPath — avoids re-fetch + re-canvas-render
+    // LRU eviction: Map insertion order = oldest first. On access, delete+re-insert.
     let thumbDataCache = new Map<string, ImageData>();
+    const THUMB_CACHE_MAX = 120;   // Max ImageData entries in JS heap (~3.6MB)
+    const ATLAS_BUDGET = 180;      // Max images in MapLibre GPU atlas (~5.5MB)
     // GeoJSON fingerprint to skip redundant source.setData() calls
     let lastGeoJSONFingerprint = '';
+
+    /** LRU get from thumbDataCache — moves entry to end (most recent). */
+    function thumbCacheGet(key: string): ImageData | undefined {
+        const val = thumbDataCache.get(key);
+        if (val !== undefined) {
+            // Move to end (most recently used)
+            thumbDataCache.delete(key);
+            thumbDataCache.set(key, val);
+        }
+        return val;
+    }
+
+    /** LRU set into thumbDataCache — evicts oldest if over limit. */
+    function thumbCacheSet(key: string, value: ImageData) {
+        if (thumbDataCache.has(key)) {
+            thumbDataCache.delete(key);
+        }
+        thumbDataCache.set(key, value);
+        // Evict oldest entries if over limit
+        while (thumbDataCache.size > THUMB_CACHE_MAX) {
+            const oldest = thumbDataCache.keys().next().value;
+            if (oldest !== undefined) thumbDataCache.delete(oldest);
+            else break;
+        }
+    }
+
+    /**
+     * Evict non-visible images from MapLibre's GPU atlas to stay under budget.
+     * Called on 'idle' after loading visible thumbnails.
+     * Safe: evicted images are re-loaded on demand via styleimagemissing handler.
+     */
+    function evictNonVisibleImages() {
+        if (!map) return;
+        if (loadedImages.size <= ATLAS_BUDGET) return;
+
+        // Collect visible image IDs from rendered features
+        const visibleIds = new Set<string>();
+        try {
+            const clusters = map.queryRenderedFeatures(undefined, { layers: [CLUSTER_THUMB_LAYER_ID] });
+            for (const f of clusters) {
+                const cid = f.properties?.cluster_id;
+                if (cid !== undefined) visibleIds.add(`cluster:${cid}`);
+            }
+        } catch (_) { /* layer may not exist */ }
+        try {
+            const singles = map.queryRenderedFeatures(undefined, { layers: [UNCLUSTERED_THUMB_LAYER_ID] });
+            for (const f of singles) {
+                const id = f.properties?.imageId;
+                if (id) visibleIds.add(id);
+            }
+        } catch (_) { /* layer may not exist */ }
+
+        // Remove non-visible images until under budget
+        let removed = 0;
+        const target = loadedImages.size - ATLAS_BUDGET;
+        for (const imageId of loadedImages) {
+            if (removed >= target) break;
+            if (visibleIds.has(imageId)) continue;
+            try {
+                if (map.hasImage(imageId)) map.removeImage(imageId);
+            } catch (_) { /* ignore */ }
+            loadedImages.delete(imageId);
+            removed++;
+        }
+    }
 
     /**
      * Build GeoJSON FeatureCollection from photos, optionally filtered by time.
@@ -439,7 +507,7 @@
 
         // Check ImageData cache (same thumbPath, possibly different imageId for cluster vs unclustered)
         const cacheKey = `${borderWidth}:${thumbPath}`;
-        const cached = thumbDataCache.get(cacheKey);
+        const cached = thumbCacheGet(cacheKey);
         if (cached) {
             try {
                 map.addImage(imageId, cached, { pixelRatio: THUMB_PIXEL_RATIO });
@@ -458,7 +526,7 @@
             if (map.hasImage(imageId)) { loadedImages.add(imageId); return; }
             try {
                 const imageData = drawCircularThumbnail(img, borderWidth);
-                thumbDataCache.set(cacheKey, imageData);
+                thumbCacheSet(cacheKey, imageData);
                 map.addImage(imageId, imageData, { pixelRatio: THUMB_PIXEL_RATIO });
                 loadedImages.add(imageId);
             } catch (_) { /* ignore */ }
@@ -552,7 +620,11 @@
             return; // Layer might not exist yet
         }
 
-        if (features.length === 0) return;
+        if (features.length === 0) {
+            // No visible features, but still run eviction
+            evictNonVisibleImages();
+            return;
+        }
 
         // Limit batch size to avoid blocking
         let loaded = 0;
@@ -573,6 +645,9 @@
             loadThumbnailForMap(imageId, thumbPath, originalPath);
             loaded++;
         }
+
+        // 3. Evict non-visible images to keep GPU memory under budget
+        evictNonVisibleImages();
     }
 
     /**
@@ -1131,7 +1206,10 @@
         initializePhotos(geo);
     });
 
-    // Update GeoJSON source when time filter changes (instead of toggling DOM visibility)
+    // Update GeoJSON source when time filter changes (instead of toggling DOM visibility).
+    // Uses rAF throttle: if rapid filter changes arrive (e.g. during timeline pinch),
+    // only the latest one executes per animation frame, avoiding redundant buildGeoJSON + setData.
+    let pendingSourceUpdateRaf: number | null = null;
     $effect(() => {
         const start = timeFilterStart;
         const end = timeFilterEnd;
@@ -1139,7 +1217,17 @@
 
         if (!loaded || allPhotosData.length === 0) return;
 
-        updateSourceData(allPhotosData, start, end);
+        if (pendingSourceUpdateRaf !== null) cancelAnimationFrame(pendingSourceUpdateRaf);
+        pendingSourceUpdateRaf = requestAnimationFrame(() => {
+            pendingSourceUpdateRaf = null;
+            updateSourceData(allPhotosData, start, end);
+        });
+        return () => {
+            if (pendingSourceUpdateRaf !== null) {
+                cancelAnimationFrame(pendingSourceUpdateRaf);
+                pendingSourceUpdateRaf = null;
+            }
+        };
     });
 </script>
 

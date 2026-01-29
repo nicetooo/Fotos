@@ -158,9 +158,15 @@
     // Minimum visual width for the handle border (just the two border lines visible)
     const MIN_HANDLE_WIDTH_PX = 4; // 2px border on each side
 
-    // Notify parent
+    // Notify parent (debounced to avoid rapid GeoJSON rebuilds during pinch/pan).
+    // Timeline UI updates instantly via local $derived; only the map update is delayed.
     $effect(() => {
-        onTimeRangeChange(viewWindow.start, viewWindow.end);
+        const start = viewWindow.start;
+        const end = viewWindow.end;
+        const timer = setTimeout(() => {
+            onTimeRangeChange(start, end);
+        }, 120);
+        return () => clearTimeout(timer);
     });
 
     // === Dragging state ===
