@@ -2,7 +2,8 @@
     import { invoke } from "@tauri-apps/api/core";
     import { emit } from "@tauri-apps/api/event";
     import type { Theme } from "../../shared/types";
-    import { locales, type Translations, type Locale } from "../../shared/i18n";
+    import { type Translations, type Locale } from "../../shared/i18n";
+    import LanguageSelect from "./LanguageSelect.svelte";
 
     let { dbPath, thumbDir, version, theme, onThemeChange, t, locale, onLocaleChange } = $props<{
         dbPath: string;
@@ -78,17 +79,11 @@
     <section class="mb-6">
         <h3 class="text-sm theme-text-muted mb-3">{t.settings.language}</h3>
 
-        <select
+        <LanguageSelect
             value={locale}
-            onchange={(e) => onLocaleChange(e.currentTarget.value as Locale)}
-            class="w-full px-3 py-3 rounded-lg border theme-bg-tertiary theme-border theme-text-primary text-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        >
-            {#each locales as loc}
-                <option value={loc.code} selected={locale === loc.code}>
-                    {loc.nativeName} ({loc.name})
-                </option>
-            {/each}
-        </select>
+            onChange={onLocaleChange}
+            label={t.settings.language}
+        />
     </section>
 
     <!-- Cache -->
