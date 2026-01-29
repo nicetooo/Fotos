@@ -568,6 +568,20 @@
         ctx.clearRect(0, 0, rect.width, rect.height);
         const accentColor = getAccentColor();
 
+        // Draw touchpad-style dot grid background (hints at touch interactivity)
+        const dotSpacing = 10;  // px between dots
+        const dotRadius = 1.0;  // px
+        ctx.fillStyle = accentColor;
+        ctx.globalAlpha = 0.12;
+        for (let y = dotSpacing / 2; y < rect.height; y += dotSpacing) {
+            for (let x = dotSpacing / 2; x < rect.width; x += dotSpacing) {
+                ctx.beginPath();
+                ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        ctx.globalAlpha = 1.0;
+
         // Draw main photo lines
         ctx.strokeStyle = accentColor;
         ctx.globalAlpha = 0.7;
