@@ -32,28 +32,42 @@
         { label: t.timeline.all, value: 0 },
     ]);
 
-    // === Parse dates from photos ===
-    function parsePhotoDate(dateStr: string | null): Date | null {
-        if (!dateStr) return null;
-        const cleaned = dateStr.replace(/"/g, '').trim();
-        const date = new Date(cleaned.replace(' ', 'T'));
-        return isNaN(date.getTime()) ? null : date;
-    }
+    // === Pre-parsed date cache ===
+    // Parse all photo dates ONCE when photos change.
+    // Subsequent computations use this cached ms array (pure number comparisons).
+    // This eliminates ~2000 string→Date parses per moveend event.
+    let parsedDatesMs = $derived.by(() => {
+        const result: number[] = [];
+        for (const p of photos) {
+            const dateStr = p.metadata?.date_taken;
+            if (!dateStr) { result.push(NaN); continue; }
+            const cleaned = dateStr.replace(/"/g, '').trim();
+            const d = new Date(cleaned.replace(' ', 'T'));
+            result.push(d.getTime()); // NaN if invalid
+        }
+        return result;
+    });
+
+    // Sorted valid timestamps (for fullTimeRange)
+    let sortedValidMs = $derived.by(() => {
+        const valid = parsedDatesMs.filter(ms => !isNaN(ms));
+        valid.sort((a, b) => a - b);
+        return valid;
+    });
 
     // === Full time range from all photos ===
     let fullTimeRange = $derived.by(() => {
-        const dates = photos
-            .map(p => parsePhotoDate(p.metadata?.date_taken))
-            .filter((d): d is Date => d !== null)
-            .sort((a, b) => a.getTime() - b.getTime());
-
-        if (dates.length === 0) {
+        if (sortedValidMs.length === 0) {
             const now = new Date();
             return { min: now, max: now, durationMs: 0 };
         }
-        const min = dates[0];
-        const max = dates[dates.length - 1];
-        return { min, max, durationMs: max.getTime() - min.getTime() };
+        const minMs = sortedValidMs[0];
+        const maxMs = sortedValidMs[sortedValidMs.length - 1];
+        return {
+            min: new Date(minMs),
+            max: new Date(maxMs),
+            durationMs: maxMs - minMs
+        };
     });
 
     // Display time range (can be constrained by map view)
@@ -412,64 +426,48 @@
         onShowAll?.();
     }
 
-    // Count photos in view window
-    let photosInWindow = $derived.by(() => {
-        return photos.filter(p => {
-            const date = parsePhotoDate(p.metadata?.date_taken);
-            if (!date) return false;
-            return date >= viewWindow.start && date <= viewWindow.end;
-        }).length;
-    });
+    // === Single-pass derived: overview positions, detail positions, edge stacking, window count ===
+    // Merges 3 former $derived blocks into ONE loop over parsedDatesMs (pure number comparisons).
+    let timelineData = $derived.by(() => {
+        const windowStartMs = viewWindow.startMs;
+        const windowEndMs = viewWindow.endMs;
+        const rangeMinMs = timeRange.min.getTime();
+        const rangeDurationMs = timeRangeDurationMs;
+        const vDurationMs = viewDurationMs;
 
-    // Photo positions for overview (percentage 0-100)
-    let photoPositions = $derived.by(() => {
-        if (timeRangeDurationMs === 0) return [];
-
-        const positions: number[] = [];
-        const minMs = timeRange.min.getTime();
-        for (const p of photos) {
-            const date = parsePhotoDate(p.metadata?.date_taken);
-            if (!date) continue;
-            const pos = ((date.getTime() - minMs) / timeRangeDurationMs) * 100;
-            positions.push(pos);
-        }
-        return positions;
-    });
-
-    // Photo positions for detail view (percentage 0-100 within view window)
-    // Also collect data for edge stacking
-    let detailPhotoData = $derived.by(() => {
-        if (viewDurationMs === 0) return {
-            positions: [],
-            leftCount: 0,
-            rightCount: 0,
-            leftLineCount: 0,
-            rightLineCount: 0
-        };
-
-        const positions: number[] = [];
+        const overviewPositions: number[] = [];
+        const detailPositions: number[] = [];
         const leftTimestamps: number[] = [];
         const rightTimestamps: number[] = [];
+        let windowCount = 0;
 
-        for (const p of photos) {
-            const date = parsePhotoDate(p.metadata?.date_taken);
-            if (!date) continue;
-            const dateMs = date.getTime();
-            const pos = ((dateMs - viewWindow.startMs) / viewDurationMs) * 100;
+        for (let i = 0; i < parsedDatesMs.length; i++) {
+            const ms = parsedDatesMs[i];
+            if (isNaN(ms)) continue;
 
-            if (dateMs < viewWindow.startMs) {
-                leftTimestamps.push(dateMs);
-            } else if (dateMs > viewWindow.endMs) {
-                rightTimestamps.push(dateMs);
-            } else {
-                positions.push(pos);
+            // Overview position (percentage 0-100 within full time range)
+            if (rangeDurationMs > 0) {
+                overviewPositions.push(((ms - rangeMinMs) / rangeDurationMs) * 100);
+            }
+
+            // Detail: classify as left / center / right
+            if (vDurationMs > 0) {
+                if (ms < windowStartMs) {
+                    leftTimestamps.push(ms);
+                } else if (ms > windowEndMs) {
+                    rightTimestamps.push(ms);
+                } else {
+                    detailPositions.push(((ms - windowStartMs) / vDurationMs) * 100);
+                    windowCount++;
+                }
+            } else if (ms >= windowStartMs && ms <= windowEndMs) {
+                windowCount++;
             }
         }
 
-        // Calculate unique line count based on time intervals
-        // Two photos overlap if their time difference is less than what 1 pixel represents
-        // Assume canvas width ~350px, so 1px = viewDurationMs / 350
-        const msPerPixel = viewDurationMs / 350;
+        // Edge stacking: count unique lines based on time intervals
+        // Two photos overlap if their time difference < 1px worth of time
+        const msPerPixel = vDurationMs / 350;
 
         function countUniqueLines(timestamps: number[]): number {
             if (timestamps.length === 0) return 0;
@@ -486,19 +484,23 @@
         }
 
         return {
-            positions,
+            overviewPositions,
+            detailPositions,
             leftCount: leftTimestamps.length,
             rightCount: rightTimestamps.length,
             leftLineCount: countUniqueLines(leftTimestamps),
-            rightLineCount: countUniqueLines(rightTimestamps)
+            rightLineCount: countUniqueLines(rightTimestamps),
+            windowCount
         };
     });
 
-    let detailPhotoPositions = $derived(detailPhotoData.positions);
-    let leftCount = $derived(detailPhotoData.leftCount);
-    let rightCount = $derived(detailPhotoData.rightCount);
-    let leftLineCount = $derived(detailPhotoData.leftLineCount);
-    let rightLineCount = $derived(detailPhotoData.rightLineCount);
+    let photosInWindow = $derived(timelineData.windowCount);
+    let photoPositions = $derived(timelineData.overviewPositions);
+    let detailPhotoPositions = $derived(timelineData.detailPositions);
+    let leftCount = $derived(timelineData.leftCount);
+    let rightCount = $derived(timelineData.rightCount);
+    let leftLineCount = $derived(timelineData.leftLineCount);
+    let rightLineCount = $derived(timelineData.rightLineCount);
 
     // === Canvas drawing ===
     let overviewCanvas: HTMLCanvasElement;

@@ -846,17 +846,28 @@
         };
     }
 
+    // Debounce timer for map move → timeline sync
+    let mapMoveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
     function handleMapMove() {
         if (syncSource === 'timeline') return;
 
-        const timeRange = getVisiblePhotosTimeRange();
-        if (timeRange) {
-            syncSource = 'map';
-            mapVisibleTimeRange = timeRange;
-            setTimeout(() => {
-                syncSource = null;
-            }, 100);
-        }
+        // Debounce: during continuous drag/inertia, only fire after 300ms idle.
+        // This avoids ~5 × O(n) recalculations per moveend event in TimelineSlider.
+        if (mapMoveDebounceTimer) clearTimeout(mapMoveDebounceTimer);
+        mapMoveDebounceTimer = setTimeout(() => {
+            mapMoveDebounceTimer = null;
+            if (syncSource === 'timeline') return;
+
+            const timeRange = getVisiblePhotosTimeRange();
+            if (timeRange) {
+                syncSource = 'map';
+                mapVisibleTimeRange = timeRange;
+                setTimeout(() => {
+                    syncSource = null;
+                }, 100);
+            }
+        }, 300);
     }
 
     let mapVisibleTimeRange = $state<{ start: Date; end: Date } | null>(null);
@@ -1047,6 +1058,10 @@
         photoByPath.clear();
         dateByPath.clear();
 
+        if (mapMoveDebounceTimer) {
+            clearTimeout(mapMoveDebounceTimer);
+            mapMoveDebounceTimer = null;
+        }
         if (resizeObserver) {
             resizeObserver.disconnect();
             resizeObserver = null;
