@@ -401,7 +401,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={mapPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} />
+        <MapView photos={mapPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} {locale} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">

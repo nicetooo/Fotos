@@ -5,13 +5,15 @@
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
     import type { Translations } from "../../shared/i18n/types";
+    import type { Locale } from "../../shared/i18n/types";
 
-    let { photos, onOpenPreview, theme = "dark", tileConfig, t } = $props<{
+    let { photos, onOpenPreview, theme = "dark", tileConfig, t, locale } = $props<{
         photos: any[];
         onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
         theme?: "dark" | "light";
         tileConfig?: { tiles: string[]; tileSize: number };
         t: Translations;
+        locale: Locale;
     }>();
 
     let mapContainer: HTMLDivElement;
@@ -73,12 +75,12 @@
     function formatTimeRange(start: Date | null, end: Date | null, short: boolean = false): string {
         if (!start || !end) return '';
         const sameDay = start.toDateString() === end.toDateString();
-        const formatDate = (d: Date) => d.toLocaleDateString('en-US', {
+        const formatDate = (d: Date) => d.toLocaleDateString(locale, {
             month: 'short',
             day: 'numeric',
             year: short ? '2-digit' : 'numeric'
         });
-        const formatTime = (d: Date) => d.toLocaleTimeString('en-US', {
+        const formatTime = (d: Date) => d.toLocaleTimeString(locale, {
             hour: short ? 'numeric' : '2-digit',
             minute: '2-digit'
         });
@@ -1273,6 +1275,7 @@
                     onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
                     onShowAll={handleShowAllPhotos}
                     {t}
+                    {locale}
                 />
             {/if}
         </div>

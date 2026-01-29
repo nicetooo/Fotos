@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Translations } from "../../shared/i18n/types";
+    import type { Locale } from "../../shared/i18n/types";
 
     let {
         photos,
@@ -7,7 +8,8 @@
         onTimeRangeChange,
         onMapRangeConsumed,
         onShowAll,
-        t
+        t,
+        locale
     } = $props<{
         photos: any[];
         mapViewTimeRange?: { start: Date; end: Date } | null;
@@ -15,6 +17,7 @@
         onMapRangeConsumed?: () => void;
         onShowAll?: () => void;
         t: Translations;
+        locale: Locale;
     }>();
 
     // === Constants ===
@@ -415,12 +418,12 @@
     }
 
     function formatDate(date: Date): string {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        return date.toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
     function formatDateTimeShort(date: Date): string {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
-               date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' }) + ' ' +
+               date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
     }
 
     function resetSelection() {
