@@ -35,6 +35,21 @@ export interface PhotoInfo {
     isRawOnly?: boolean;
 }
 
+/**
+ * Lightweight photo preview for map markers and timeline.
+ * Contains only the fields needed for initial UI rendering.
+ * Zero file I/O — all data comes from the database.
+ */
+export interface PhotoPreview {
+    id: number;
+    path: string;
+    thumb_path?: string;
+    lat?: number;
+    lon?: number;
+    date_taken?: string;
+    file_size: number;
+}
+
 /** 排序字段 */
 export type SortBy = "name" | "date" | "size" | "dimensions";
 

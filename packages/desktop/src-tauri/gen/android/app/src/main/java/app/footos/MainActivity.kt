@@ -14,6 +14,8 @@ import app.footos.bridge.PhotoPickerManager
  * Extends Tauri's TauriActivity for WebView integration.
  */
 class MainActivity : TauriActivity() {
+    // Enable back button to navigate WebView history (closes modals via popstate)
+    override val handleBackNavigation: Boolean = true
 
     companion object {
         private const val TAG = "MainActivity"

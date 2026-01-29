@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, uniffi::Record)]
 pub struct PhotoId {
@@ -35,6 +35,20 @@ pub struct PhotoInfo {
     pub metadata: PhotoMetadata,
     pub thumb_path: Option<String>,
     pub file_size: u64,
-    pub created_at: Option<i64>, // Unix timestamp
+    pub created_at: Option<i64>,  // Unix timestamp
     pub modified_at: Option<i64>, // Unix timestamp
+}
+
+/// Lightweight photo data for map markers and timeline.
+/// Contains only the fields needed for initial UI rendering.
+/// Zero file I/O to construct — all data comes from the database.
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
+pub struct PhotoPreview {
+    pub id: i64,
+    pub path: String,
+    pub thumb_path: Option<String>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub date_taken: Option<String>,
+    pub file_size: u64,
 }

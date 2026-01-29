@@ -9,7 +9,7 @@ pub mod index;
 
 pub use config::PhotoCoreConfig;
 pub use error::CoreError;
-pub use types::{PhotoId, PhotoInfo, PhotoMetadata, ImportResult};
+pub use types::{PhotoId, PhotoInfo, PhotoMetadata, PhotoPreview, ImportResult};
 
 pub use fs::scan_photos;
 pub use image::{Thumbnailer, ThumbnailSpec, ThumbnailError, compute_hash, extract_raw_preview};

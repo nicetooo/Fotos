@@ -8,6 +8,7 @@ export type {
     PhotoId,
     PhotoMetadata,
     PhotoInfo,
+    PhotoPreview,
     SortBy,
     SortOrder,
     Theme,

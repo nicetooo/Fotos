@@ -18,6 +18,7 @@
     // Shared utilities and types
     import {
         type PhotoInfo,
+        type PhotoPreview,
         type Theme,
         type ImportStatus,
         formatFileSize,
@@ -61,7 +62,14 @@
     });
     let isScanning = $state(false);
     let error = $state("");
+
+    // Two-phase photo loading:
+    // Phase 1 (instant): lightweight previews for map markers + timeline
+    // Phase 2 (lazy): full PhotoInfo loaded on demand for preview modal
+    let previews = $state<PhotoPreview[]>([]);
     let photos = $state<PhotoInfo[]>([]);
+    let fullDataLoaded = $state(false);
+
     let dbPath = $state("");
     let thumbDir = $state("");
     let previewPhoto = $state<PhotoInfo | null>(null);
@@ -125,10 +133,40 @@
         theme === "system" ? (systemPrefersDark ? "dark" : "light") : theme
     );
 
-    // Group RAW+JPEG pairs
+    // Group RAW+JPEG pairs (only when full data is loaded)
     let groupedPhotos = $derived(groupPhotos(photos));
 
+    // Map-compatible photos: uses lightweight previews for instant render,
+    // upgrades to full grouped data when available.
+    let mapPhotos = $derived.by(() => {
+        // Prefer full grouped data (has RAW badges, complete metadata)
+        if (fullDataLoaded && groupedPhotos.length > 0) {
+            return groupedPhotos;
+        }
+        // Fast path: normalize previews to Map-compatible shape
+        if (previews.length > 0) {
+            return previews.map(p => ({
+                id: { id: p.id },
+                path: p.path,
+                thumb_path: p.thumb_path,
+                metadata: {
+                    lat: p.lat,
+                    lon: p.lon,
+                    date_taken: p.date_taken,
+                    width: 0,
+                    height: 0,
+                },
+                hash: "",
+                file_size: p.file_size,
+            }));
+        }
+        return groupedPhotos;
+    });
+
     onMount(async () => {
+        // Back button support: close modals on browser history navigation
+        window.addEventListener('popstate', handlePopState);
+
         try {
             // Check if iOS platform for specific features
             if (isIOSPlatform(platformService)) {
@@ -163,19 +201,29 @@
                     lastPath: progress.lastPath,
                 };
                 if (progress.current <= 5 || progress.current % 50 === 0) {
-                    loadPhotos();
+                    loadPreviews();
                 }
             });
 
             platformService.onImportComplete((result) => {
                 console.log("[App] Import complete callback triggered:", result);
-                loadPhotos();
+                loadPreviews();
+                // Load full data in background after import completes
+                loadFullPhotos();
             });
 
             // Listen for reload-photos event (e.g., after clear cache)
-            await listen("reload-photos", () => loadPhotos());
+            await listen("reload-photos", () => {
+                fullDataLoaded = false;
+                loadPreviews();
+                loadFullPhotos();
+            });
 
-            await loadPhotos();
+            // Phase 1: Fast preview loading (zero file I/O, <50ms)
+            await loadPreviews();
+
+            // Phase 2: Full data in background (for preview modal metadata)
+            loadFullPhotos();
 
             // iOS: Auto-sync photos if user has full access
             if (iosPlatformService) {
@@ -203,22 +251,55 @@
         }
 
         return () => {
+            window.removeEventListener('popstate', handlePopState);
             platformService.cleanup();
         };
     });
 
-    async function loadPhotos() {
-        console.log("[App] loadPhotos called, dbPath:", dbPath, "thumbDir:", thumbDir);
+    /**
+     * Phase 1: Fast preview loading.
+     * Fetches lightweight PhotoPreview data (id, path, thumb_path, lat, lon, date_taken).
+     * Zero file I/O — completes in <50ms even for 10K+ photos.
+     * Used for map markers and timeline rendering.
+     */
+    async function loadPreviews() {
+        console.log("[App] loadPreviews called, dbPath:", dbPath);
         if (!dbPath) {
-            console.log("[App] loadPhotos: dbPath is empty, skipping");
+            console.log("[App] loadPreviews: dbPath is empty, skipping");
             return;
         }
         try {
-            const result = await invoke("list_photos", { dbPath, thumbDir });
-            console.log("[App] loadPhotos: got", result?.length, "photos");
-            photos = result as any[];
+            const startTime = performance.now();
+            const result = await invoke("list_photos_preview", { dbPath });
+            const elapsed = (performance.now() - startTime).toFixed(1);
+            const previewList = result as PhotoPreview[];
+            console.log(`[App] loadPreviews: got ${previewList.length} previews in ${elapsed}ms`);
+            previews = previewList;
         } catch (e) {
-            console.error("[App] Failed to list photos", e);
+            console.error("[App] Failed to list previews", e);
+            // Fallback: try full load
+            loadFullPhotos();
+        }
+    }
+
+    /**
+     * Phase 2: Full data loading.
+     * Fetches complete PhotoInfo with metadata, hash, etc.
+     * Used for preview modal (dimensions, camera info, file size).
+     * Runs in background after initial render.
+     */
+    async function loadFullPhotos() {
+        if (!dbPath) return;
+        try {
+            const startTime = performance.now();
+            const result = await invoke("list_photos", { dbPath, thumbDir });
+            const elapsed = (performance.now() - startTime).toFixed(1);
+            const photoList = result as PhotoInfo[];
+            console.log(`[App] loadFullPhotos: got ${photoList.length} photos in ${elapsed}ms`);
+            photos = photoList;
+            fullDataLoaded = true;
+        } catch (e) {
+            console.error("[App] Failed to load full photos", e);
         }
     }
 
@@ -232,14 +313,38 @@
         }
     }
 
-    function openPreview(photo: PhotoInfo, customList?: PhotoInfo[]) {
+    function openPreview(photo: any, customList?: any[]) {
+        // When opening from map preview, we may receive a lightweight preview object.
+        // Find the full PhotoInfo if available, otherwise use the preview data.
+        if (fullDataLoaded && photos.length > 0) {
+            const fullPhoto = photos.find(p => p.path === photo.path);
+            if (fullPhoto) {
+                previewPhoto = fullPhoto;
+                if (customList) {
+                    // Map customList paths to full PhotoInfo
+                    const fullList = customList
+                        .map(cp => photos.find(p => p.path === cp.path))
+                        .filter((p): p is PhotoInfo => p !== undefined);
+                    previewPhotoList = fullList.length > 0 ? fullList : null;
+                } else {
+                    previewPhotoList = null;
+                }
+                history.pushState({ modal: 'preview' }, '');
+                return;
+            }
+        }
+        // Fallback: use whatever data we have (lightweight preview)
         previewPhoto = photo;
         previewPhotoList = customList || null;
+        history.pushState({ modal: 'preview' }, '');
     }
 
     function closePreview() {
+        if (!previewPhoto) return;
         previewPhoto = null;
         previewPhotoList = null;
+        isClosingManually = true;
+        history.back();
     }
 
     // Get the photo list to use for navigation
@@ -259,12 +364,44 @@
         }
         previewPhoto = photoList[newIndex];
     }
+
+    // Back button support: manage browser history for modal states
+    // When a modal opens, we pushState. When user presses hardware back button,
+    // the browser navigates back (popstate), and we close the topmost modal.
+    // When user closes manually (X button/backdrop), we also go back in history.
+    let isClosingManually = false;
+
+    function openSettings() {
+        showSettings = true;
+        history.pushState({ modal: 'settings' }, '');
+    }
+
+    function closeSettings() {
+        if (!showSettings) return;
+        showSettings = false;
+        isClosingManually = true;
+        history.back();
+    }
+
+    function handlePopState() {
+        if (isClosingManually) {
+            isClosingManually = false;
+            return;
+        }
+        // Hardware/system back button pressed: close topmost modal
+        if (previewPhoto) {
+            previewPhoto = null;
+            previewPhotoList = null;
+        } else if (showSettings) {
+            showSettings = false;
+        }
+    }
 </script>
 
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} />
+        <MapView photos={mapPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
@@ -282,7 +419,7 @@
 
             <!-- Settings button -->
             <button
-                onclick={() => showSettings = true}
+                onclick={openSettings}
                 class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all"
                 title={t.common.settings}
             >
@@ -316,7 +453,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
         class="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-end justify-center"
-        onclick={() => showSettings = false}
+        onclick={closeSettings}
     >
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
@@ -326,7 +463,7 @@
             <div class="flex items-center justify-between px-6 py-4 border-b theme-border">
                 <h2 class="text-lg font-medium theme-text-primary">{t.settings.title}</h2>
                 <button
-                    onclick={() => showSettings = false}
+                    onclick={closeSettings}
                     class="p-2 rounded-lg hover:theme-bg-tertiary theme-text-muted hover:theme-text-primary transition-colors"
                 >
                     <i class="fa-solid fa-xmark"></i>
