@@ -878,11 +878,12 @@
     /**
      * Get time range of photos visible in current map bounds.
      */
-    function getVisiblePhotosTimeRange(): { start: Date; end: Date } | null {
+    function getVisiblePhotosTimeRange(): { start: Date; end: Date; photos: any[] } | null {
         if (!map || allPhotosData.length === 0) return null;
 
         const bounds = map.getBounds();
         const visibleDates: Date[] = [];
+        const visiblePhotos: any[] = [];
 
         for (const photo of allPhotosData) {
             const lat = photo.metadata?.lat;
@@ -890,6 +891,7 @@
             if (!lat || !lon) continue;
 
             if (bounds.contains(new maplibregl.LngLat(lon, lat))) {
+                visiblePhotos.push(photo);
                 const date = dateByPath.get(photo.path);
                 if (date) visibleDates.push(date);
             }
@@ -900,7 +902,8 @@
         visibleDates.sort((a, b) => a.getTime() - b.getTime());
         return {
             start: visibleDates[0],
-            end: visibleDates[visibleDates.length - 1]
+            end: visibleDates[visibleDates.length - 1],
+            photos: visiblePhotos
         };
     }
 
@@ -917,10 +920,11 @@
             mapMoveDebounceTimer = null;
             if (syncSource === 'timeline') return;
 
-            const timeRange = getVisiblePhotosTimeRange();
-            if (timeRange) {
+            const result = getVisiblePhotosTimeRange();
+            if (result) {
                 syncSource = 'map';
-                mapVisibleTimeRange = timeRange;
+                mapVisibleTimeRange = { start: result.start, end: result.end };
+                mapVisiblePhotos = result.photos;
                 setTimeout(() => {
                     syncSource = null;
                 }, 100);
@@ -929,6 +933,8 @@
     }
 
     let mapVisibleTimeRange = $state<{ start: Date; end: Date } | null>(null);
+    let mapVisiblePhotos = $state<any[] | null>(null);
+    let timelinePhotos = $derived(mapVisiblePhotos ?? photosWithMarkers);
 
     function handleShowAllPhotos() {
         if (!map || allPhotosData.length === 0) return;
@@ -1242,7 +1248,7 @@
         <div class="flex-shrink-0 min-h-[120px]">
             {#if map && isReady && photosWithMarkers.length > 0}
                 <TimelineSlider
-                    photos={photosWithMarkers}
+                    photos={timelinePhotos}
                     mapViewTimeRange={mapVisibleTimeRange}
                     onTimeRangeChange={handleTimeRangeChange}
                     onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}

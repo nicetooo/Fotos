@@ -234,6 +234,31 @@ SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去�
 - **防循环**：`syncSource` 状态标记（`'map'` / `'timeline'`）。地图拖动触发的时间轴更新（`syncSource === 'map'`）不会反向更新 GeoJSON 数据，避免 cluster ID 重生成 → 缩略图闪白
 - ❌ 禁止在 `handleTimeRangeChange` 中无条件调用 `setData()`（会导致拖动时白色闪烁）
 
+**地图驱动时间轴的数据流**：
+
+地图视口变化时，时间轴必须同时收到两样东西：
+1. `mapVisibleTimeRange`：可见照片的时间范围（控制概览时间轴的坐标轴）
+2. `mapVisiblePhotos`：可见照片列表（控制黄线分布，通过 `timelinePhotos` 传入 `photos` prop）
+
+```
+handleMapMove → getVisiblePhotosTimeRange()
+  ├─ mapVisibleTimeRange = { start, end }   → TimelineSlider.mapViewTimeRange → displayTimeRange
+  └─ mapVisiblePhotos = visiblePhotos[]     → timelinePhotos → TimelineSlider.photos → parsedDatesMs → 黄线
+```
+
+- `timelinePhotos = mapVisiblePhotos ?? photosWithMarkers`：地图驱动时用子集，否则用全部
+- `mapVisiblePhotos` 由每次 `moveend` 事件自然更新，无需手动清除
+
+**`onMapRangeConsumed` 只清除时间范围，不清除照片列表**：
+
+`onMapRangeConsumed` 在用户操作时间轴时触发（预设按钮、拖动、缩放等）：
+- ✅ 清除 `mapVisibleTimeRange = null`（释放时间轴坐标轴约束）
+- ❌ 禁止清除 `mapVisiblePhotos`（否则 `photos` prop 突变 → TimelineSlider 的 `prevPhotosLength` 检测到变化 → 强制重置 `viewDurationMs` 为全量，覆盖用户刚选择的预设）
+
+**主题切换后的样式恢复**：
+
+`map.once('style.load')` 在 Android WebView 中对内联样式不可靠，使用 `requestAnimationFrame` + `map.isStyleLoaded()` 轮询代替。切换前 `map.off()` 移除所有事件监听，样式就绪后重新注册。
+
 ### TimelineSlider 计算优化
 
 - **日期预解析**：`parsedDatesMs`（`$derived.by`）将所有照片日期一次性解析为毫秒数数组，与 `photos` 索引对齐
