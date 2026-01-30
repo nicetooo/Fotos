@@ -134,9 +134,9 @@
     const GLYPHS_URL = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
 
     // Thumbnail rendering constants
-    const THUMB_CANVAS_SIZE = 88;    // Canvas pixels (renders at 44px with pixelRatio 2)
-    const THUMB_BORDER_WIDTH = 4;    // Border width in canvas pixels
-    const THUMB_PIXEL_RATIO = 2;     // For retina displays
+    const THUMB_CANVAS_SIZE = 66;    // Canvas pixels (renders at 44px with pixelRatio 1.5)
+    const THUMB_BORDER_WIDTH = 3;    // Border width in canvas pixels
+    const THUMB_PIXEL_RATIO = 1.5;   // Balance between clarity and GPU memory
 
     // Track previous photo count to detect add vs remove
     let prevPhotoCount = 0;
@@ -973,10 +973,10 @@
                 [sourceId]: {
                     type: 'raster',
                     tiles: [
-                        `https://a.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
-                        `https://b.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
-                        `https://c.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
-                        `https://d.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`
+                        `https://a.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}.png`,
+                        `https://b.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}.png`,
+                        `https://c.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}.png`,
+                        `https://d.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}.png`
                     ],
                     tileSize: 256,
                     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -1002,7 +1002,8 @@
             style: getMapStyle(theme === 'dark'),
             center: [0, 20],
             zoom: 2,
-            attributionControl: false
+            attributionControl: false,
+            maxTileCacheSize: 50,
         });
 
         setupMapControls();
