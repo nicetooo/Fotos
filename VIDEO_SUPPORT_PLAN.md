@@ -1759,27 +1759,28 @@ Phase 1  ────────────────  Core 数据基础    
   1.6 fs/live_photo.rs 配对检测             ✅
   └─ cargo test 全部通过                    ✅ (40/40, 2 pre-existing thumbnail failures unrelated)
 
-Phase 2  ────────────────  平台视频处理         ~3-4 天
-  2.1 Tauri 新增命令（ffmpeg、系统播放器）
-  2.2 import_photos 管线修改
-  2.3 iOS 平台修改
-  2.4 Android 平台修改
+Phase 2  ────────────────  平台视频处理         ✅ DONE
+  2.1 Tauri 新增命令（ffmpeg、系统播放器）  ✅
+  2.2 import_photos 管线修改               ✅
+  2.3 iOS 平台修改                         ✅ (openInSystemPlayer via WebKit bridge)
+  2.4 Android 平台修改                     ✅ (openInSystemPlayer via postMessage)
 
-Phase 3  ────────────────  前端 UI              ~3-4 天
-  3.1 shared/types.ts
-  3.2 platform/desktop.ts
-  3.3 photo-grouping.ts
-  3.4 VirtualPhotoGrid badge
-  3.5 Desktop ImagePreview
-  3.6 Mobile ImagePreview
-  3.7 平台服务接口
-  3.8 Map 组件
-  3.9 App.svelte 传参
+Phase 3  ────────────────  前端 UI              ✅ DONE
+  3.1 shared/types.ts                      ✅
+  3.2 platform/desktop.ts                  ✅
+  3.3 photo-grouping.ts                    ✅
+  3.4 VirtualPhotoGrid badge               ✅
+  3.5 Desktop ImagePreview                 ✅
+  3.6 Mobile ImagePreview                  ✅
+  3.7 平台服务接口                          ✅
+  3.8 Map 组件                             ✅
+  3.9 App.svelte 传参                      ✅
 
-Phase 4  ────────────────  Live Photo 专项      ~2-3 天
-  4.1 iOS Swift 原生识别
-  4.2 Desktop 配对验证
-  4.3 端到端测试
+Phase 4  ────────────────  Live Photo 专项      ✅ DONE (partial)
+  4.1 iOS Swift 原生识别                   ⏳ Deferred (no Swift files in repo yet)
+  4.2 Desktop 配对验证                     ✅ (detect_live_photo_pairs in Core + import pipeline)
+  4.3 Android 处理                         ⏳ Deferred (Samsung/Google Motion Photo = future)
 
 总估时：~11-15 天（单人全职）
+实际完成：Phase 1-3 全部 + Phase 4 Desktop 部分
 ```
