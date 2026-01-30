@@ -28,8 +28,7 @@
     // Sync mode: prevent circular updates
     let syncSource = $state<'map' | 'timeline' | null>(null);
 
-    // Hover popup
-    let hoverPopup: maplibregl.Popup | null = null;
+
 
     // Resize observer
     let resizeObserver: ResizeObserver | null = null;
@@ -845,50 +844,7 @@
         }
     }
 
-    /**
-     * Show cursor pointer when hovering over clusters or photos.
-     */
-    function handleMouseEnter() {
-        if (map) map.getCanvas().style.cursor = 'pointer';
-    }
 
-    function handleMouseLeave() {
-        if (map) map.getCanvas().style.cursor = '';
-        if (hoverPopup) hoverPopup.remove();
-    }
-
-    /**
-     * Show popup on hover over unclustered photo.
-     */
-    function handlePhotoHover(e: maplibregl.MapMouseEvent & { features?: maplibregl.GeoJSONFeature[] }) {
-        if (!map || !hoverPopup || !e.features || e.features.length === 0) return;
-
-        const feature = e.features[0];
-        const path = feature.properties?.path;
-        const thumbPath = feature.properties?.thumb_path;
-        const dateTaken = feature.properties?.date_taken?.replace(/"/g, '') || '';
-        const hasRaw = feature.properties?.hasRaw;
-        const filename = path?.split('/').pop() || '';
-        const coords = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
-
-        const url = getThumbnailUrl(thumbPath || path);
-        const originalUrl = getThumbnailUrl(path);
-        const rawBadge = hasRaw ? '<div class="popup-raw-badge">RAW</div>' : '';
-        const dateInfo = dateTaken ? `<div class="popup-date">${dateTaken}</div>` : '';
-
-        const html = `
-            <div class="photo-popup">
-                <img src="${url}" alt="${filename}" onerror="this.onerror=null; this.src='${originalUrl}';" />
-                <div class="popup-info">
-                    <div class="popup-filename">${filename}</div>
-                    ${dateInfo}
-                </div>
-                ${rawBadge}
-            </div>
-        `;
-
-        hoverPopup.setLngLat(coords).setHTML(html).addTo(map);
-    }
 
     // ============================================================
     // Map sync (for timeline)
@@ -1073,14 +1029,6 @@
             map?.resize();
         }, 100);
 
-        // Create hover popup
-        hoverPopup = new maplibregl.Popup({
-            closeButton: false,
-            closeOnClick: false,
-            maxWidth: '300px',
-            offset: [0, -20]
-        });
-
         function onMapReady() {
             if (!map || mapLoaded) return;
             mapLoaded = true;
@@ -1092,13 +1040,6 @@
             // Use global click handler with queryRenderedFeatures for reliable
             // touch event handling on Android WebView
             map.on('click', handleMapClick);
-
-            // Mouse hover handlers (desktop only, harmless on mobile)
-            map.on('mouseenter', CLUSTER_LAYER_ID, handleMouseEnter);
-            map.on('mouseleave', CLUSTER_LAYER_ID, handleMouseLeave);
-            map.on('mouseenter', UNCLUSTERED_LAYER_ID, handleMouseEnter);
-            map.on('mouseleave', UNCLUSTERED_LAYER_ID, handleMouseLeave);
-            map.on('mouseenter', UNCLUSTERED_LAYER_ID, handlePhotoHover);
 
             // Load thumbnail images for visible unclustered points
             map.on('idle', loadVisibleThumbnails);
@@ -1143,10 +1084,6 @@
             resizeObserver.disconnect();
             resizeObserver = null;
         }
-        if (hoverPopup) {
-            hoverPopup.remove();
-            hoverPopup = null;
-        }
         if (map) {
             map.remove();
             map = null;
@@ -1183,11 +1120,6 @@
                 // Re-register interaction handlers after style change
                 if (map) {
                     map.on('click', handleMapClick);
-                    map.on('mouseenter', CLUSTER_LAYER_ID, handleMouseEnter);
-                    map.on('mouseleave', CLUSTER_LAYER_ID, handleMouseLeave);
-                    map.on('mouseenter', UNCLUSTERED_LAYER_ID, handleMouseEnter);
-                    map.on('mouseleave', UNCLUSTERED_LAYER_ID, handleMouseLeave);
-                    map.on('mouseenter', UNCLUSTERED_LAYER_ID, handlePhotoHover);
                     map.on('idle', loadVisibleThumbnails);
                     map.on('styleimagemissing', handleMissingImage);
                 }
@@ -1372,72 +1304,6 @@
     :global(.maplibregl-ctrl-show-all:focus) {
         outline: none;
         box-shadow: none;
-    }
-
-    /* Photo popup styles - Dark theme (default) */
-    :global(.maplibregl-popup-content) {
-        background: rgba(15, 23, 42, 0.95) !important;
-        border-radius: 12px !important;
-        padding: 0 !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        overflow: hidden;
-    }
-    :global(.maplibregl-popup-tip) {
-        border-top-color: rgba(15, 23, 42, 0.95) !important;
-    }
-    :global(.photo-popup) {
-        position: relative;
-        width: 280px;
-    }
-    :global(.photo-popup img) {
-        width: 100%;
-        height: 200px;
-        object-fit: cover;
-        display: block;
-    }
-    :global(.popup-info) {
-        padding: 10px 12px;
-        color: white;
-    }
-    :global(.popup-filename) {
-        font-size: 12px;
-        font-weight: 600;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    :global(.popup-date) {
-        font-size: 11px;
-        color: #94a3b8;
-        margin-top: 4px;
-    }
-
-    /* Photo popup styles - Light theme */
-    :global(:root.light .maplibregl-popup-content) {
-        background: rgba(255, 255, 255, 0.98) !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15) !important;
-        border: 1px solid rgba(0, 0, 0, 0.1) !important;
-    }
-    :global(:root.light .maplibregl-popup-tip) {
-        border-top-color: rgba(255, 255, 255, 0.98) !important;
-    }
-    :global(:root.light .popup-info) {
-        color: #1e293b;
-    }
-    :global(:root.light .popup-date) {
-        color: #64748b;
-    }
-    :global(.popup-raw-badge) {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        background: #d97706;
-        color: white;
-        font-size: 10px;
-        font-weight: bold;
-        padding: 2px 6px;
-        border-radius: 4px;
     }
 
     /* Mobile: move bottom-right controls up above attribution */
