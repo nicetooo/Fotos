@@ -72,6 +72,14 @@
             syncSource = null;
             return;
         }
+        // Skip if values haven't changed (prevents redundant Effect C → setData)
+        const startMs = start.getTime();
+        const endMs = end.getTime();
+        if (timeFilterStart && timeFilterEnd &&
+            timeFilterStart.getTime() === startMs &&
+            timeFilterEnd.getTime() === endMs) {
+            return;
+        }
         syncSource = 'timeline';
         timeFilterStart = start;
         timeFilterEnd = end;
@@ -1049,7 +1057,6 @@
 
     onMount(() => {
         if (!mapContainer) return;
-
         map = new maplibregl.Map({
             container: mapContainer,
             style: getMapStyle(theme === 'dark'),

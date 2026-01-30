@@ -21,26 +21,32 @@
         t: Translations;
     }>();
 
-    // Parse dates from photos
-    function parsePhotoDate(dateStr: string | null): Date | null {
-        if (!dateStr) return null;
+    // Parse date string to milliseconds (0 = invalid/missing)
+    function parseDateToMs(dateStr: string | null | undefined): number {
+        if (!dateStr) return 0;
         const cleaned = dateStr.replace(/"/g, '').trim();
-        const date = new Date(cleaned.replace(' ', 'T'));
-        return isNaN(date.getTime()) ? null : date;
+        const ts = new Date(cleaned.replace(' ', 'T')).getTime();
+        return isNaN(ts) ? 0 : ts;
     }
 
-    // Get time range from all photos
-    let fullTimeRange = $derived.by(() => {
-        const dates = photos
-            .map(p => parsePhotoDate(p.metadata?.date_taken))
-            .filter((d): d is Date => d !== null)
-            .sort((a, b) => a.getTime() - b.getTime());
+    // Pre-parsed dates as milliseconds array — ONE O(n) pass, shared by all derived
+    let parsedDatesMs = $derived.by(() => {
+        return photos.map((p: any) => parseDateToMs(p.metadata?.date_taken));
+    });
 
-        if (dates.length === 0) {
-            const now = new Date();
-            return { min: now, max: now };
+    // Get time range from all photos (reads parsedDatesMs, no string parsing)
+    let fullTimeRange = $derived.by(() => {
+        let minMs = Infinity, maxMs = -Infinity;
+        for (const ms of parsedDatesMs) {
+            if (ms === 0) continue;
+            if (ms < minMs) minMs = ms;
+            if (ms > maxMs) maxMs = ms;
         }
-        return { min: dates[0], max: dates[dates.length - 1] };
+        if (minMs === Infinity) {
+            const now = Date.now();
+            return { min: new Date(now), max: new Date(now) };
+        }
+        return { min: new Date(minMs), max: new Date(maxMs) };
     });
 
     // Display time range (can be constrained by map view)
@@ -347,44 +353,41 @@
         onShowAll?.(); // Tell map to show all photos
     }
 
-    // Count photos in view window
+    // Count photos in view window (reads parsedDatesMs, no string parsing)
     let photosInWindow = $derived.by(() => {
-        return photos.filter(p => {
-            const date = parsePhotoDate(p.metadata?.date_taken);
-            if (!date) return false;
-            return date >= viewWindow.start && date <= viewWindow.end;
-        }).length;
+        const startMs = viewWindow.start.getTime();
+        const endMs = viewWindow.end.getTime();
+        let count = 0;
+        for (const ms of parsedDatesMs) {
+            if (ms !== 0 && ms >= startMs && ms <= endMs) count++;
+        }
+        return count;
     });
 
-    // Photo positions for overview (percentage 0-100)
+    // Photo positions for overview (percentage 0-100, reads parsedDatesMs)
     let photoPositions = $derived.by(() => {
-        const totalMs = timeRange.max.getTime() - timeRange.min.getTime();
+        const minMs = timeRange.min.getTime();
+        const totalMs = timeRange.max.getTime() - minMs;
         if (totalMs === 0) return [];
 
         const positions: number[] = [];
-        for (const p of photos) {
-            const date = parsePhotoDate(p.metadata?.date_taken);
-            if (!date) continue;
-            const pos = ((date.getTime() - timeRange.min.getTime()) / totalMs) * 100;
-            positions.push(pos);
+        for (const ms of parsedDatesMs) {
+            if (ms === 0) continue;
+            positions.push(((ms - minMs) / totalMs) * 100);
         }
         return positions;
     });
 
-    // Photo positions for zoomed view (only selected range)
+    // Photo positions for zoomed view (only selected range, reads parsedDatesMs)
     let zoomedPhotoPositions = $derived.by(() => {
         if (!isZoomed) return [];
         const { startMs, endMs, durationMs } = selectedRange;
         if (durationMs === 0) return [];
 
         const positions: number[] = [];
-        for (const p of photos) {
-            const date = parsePhotoDate(p.metadata?.date_taken);
-            if (!date) continue;
-            const dateMs = date.getTime();
-            if (dateMs < startMs || dateMs > endMs) continue;
-            const pos = ((dateMs - startMs) / durationMs) * 100;
-            positions.push(pos);
+        for (const ms of parsedDatesMs) {
+            if (ms === 0 || ms < startMs || ms > endMs) continue;
+            positions.push(((ms - startMs) / durationMs) * 100);
         }
         return positions;
     });
