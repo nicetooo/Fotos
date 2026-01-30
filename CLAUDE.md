@@ -143,6 +143,13 @@ lsof -i:1420 || echo "Port 1420 is free"
 - **Port 1420 is already in use**：先用上面的命令杀掉占用进程
 - **beforeDevCommand terminated**：通常是 Vite 启动失败，检查端口或依赖
 
+## 缩略图规格
+
+- **唯一真相源**：`core/src/config.rs` 中的 `DEFAULT_THUMBNAIL_SIZE`（当前值 `256`）
+- `ThumbnailSpec::default()` 自动使用该常量，所有平台（Tauri `lib.rs`、`platform-desktop`、`platform-ios`、`platform-android`）统一引用
+- ❌ 禁止在任何 crate 中硬编码缩略图尺寸魔数（如 `ThumbnailSpec { width: 300, height: 300 }`）
+- ⚠️ 修改 `DEFAULT_THUMBNAIL_SIZE` 会改变缓存 key（`thumbnail_key` 将 width/height 哈希进 FNV-1a），导致所有已有缩略图缓存失效，需配合缓存清除
+
 ## 数据库
 
 SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去重)、`lat/lon`(地理位置)、`date_taken`

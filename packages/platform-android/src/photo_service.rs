@@ -64,7 +64,7 @@ impl AndroidPhotoService {
 
         // Generate thumbnail
         let thumbnailer = Thumbnailer::new(PathBuf::from(thumbnail_dir));
-        let spec = ThumbnailSpec { width: 300, height: 300 };
+        let spec = ThumbnailSpec::default();
         thumbnailer.generate(path, &spec).map_err(|e| e.to_string())?;
 
         // Store with content:// URI as path
@@ -159,7 +159,7 @@ impl PhotoService for AndroidPhotoService {
             .collect();
 
         let thumbnailer = Thumbnailer::new(PathBuf::from(thumbnail_dir));
-        let thumb_spec = ThumbnailSpec { width: 300, height: 300 };
+        let thumb_spec = ThumbnailSpec::default();
 
         let mut deleted_count = 0u32;
         for id in &ids {
@@ -233,7 +233,7 @@ impl PhotoService for AndroidPhotoService {
             .map_err(|e| PlatformError::Platform(e.to_string()))?;
 
         let thumbnailer = Thumbnailer::new(PathBuf::from(thumbnail_dir));
-        let thumb_spec = ThumbnailSpec { width: 300, height: 300 };
+        let thumb_spec = ThumbnailSpec::default();
         let mut regenerated = 0u32;
 
         for photo in photos {

@@ -1,4 +1,4 @@
-use footos_core::{run_import_pipeline, PhotoCoreConfig, PhotoIndex};
+use footos_core::{run_import_pipeline, PhotoCoreConfig, PhotoIndex, DEFAULT_THUMBNAIL_SIZE};
 use std::fs;
 use std::path::PathBuf;
 
@@ -19,27 +19,36 @@ fn main() {
 
     // Create a mock image file
     let img_path = src_dir.join("test.jpg");
-    fs::write(&img_path, b"this is not a real image but the pipeline will try to process it").unwrap();
+    fs::write(
+        &img_path,
+        b"this is not a real image but the pipeline will try to process it",
+    )
+    .unwrap();
     println!("Created mock file: {:?}", img_path);
 
-    let index = PhotoIndex::open(db_path.to_string_lossy().to_string()).expect("Failed to open index");
+    let index =
+        PhotoIndex::open(db_path.to_string_lossy().to_string()).expect("Failed to open index");
     let config = PhotoCoreConfig {
         thumbnail_dir: thumb_dir.to_string_lossy().to_string(),
-        thumbnail_size: 256,
+        thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
     };
 
     println!("Starting import pipeline...");
-    let result = run_import_pipeline(src_dir.to_string_lossy().to_string(), index.clone(), config).expect("Pipeline failed");
+    let result = run_import_pipeline(src_dir.to_string_lossy().to_string(), index.clone(), config)
+        .expect("Pipeline failed");
 
     println!("Import Results:");
     println!("  Success: {}", result.success);
-    println!("  Failure: {} (expected, as the source is not a valid image)", result.failure);
+    println!(
+        "  Failure: {} (expected, as the source is not a valid image)",
+        result.failure
+    );
 
     println!("Database entries:");
     let photos = index.list().expect("Failed to list photos");
     for p in photos {
         println!("  - {:?}", p.path);
     }
-    
+
     println!("Demo finished.");
 }

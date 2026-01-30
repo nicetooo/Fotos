@@ -1,4 +1,4 @@
-use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview};
+use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // Global cancellation flag for import operations
@@ -70,8 +70,9 @@ async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo
     // Only resolve thumb_path/file_size for photos that don't have them in the DB.
     // Photos imported after the preview aggregation update will already have these values.
     let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-    let spec = footos_core::ThumbnailSpec { width: 256, height: 256 };
+    let spec = footos_core::ThumbnailSpec::default();
     let mut backfill_count = 0u32;
+    let use_txn = index.begin_transaction().is_ok();
     for photo in &mut photos {
         // Skip if already populated from DB
         if photo.thumb_path.is_some() && photo.file_size > 0 {
@@ -106,6 +107,9 @@ async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo
             );
             backfill_count += 1;
         }
+    }
+    if use_txn && backfill_count > 0 {
+        let _ = index.commit_transaction();
     }
 
     if backfill_count > 0 {
@@ -165,7 +169,7 @@ async fn import_photos(
 
     let config = PhotoCoreConfig {
         thumbnail_dir: thumb_dir,
-        thumbnail_size: 256,
+        thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
     };
 
     let root_path_buf = std::path::Path::new(&root_path);
@@ -237,11 +241,21 @@ async fn import_photos(
         println!("[Import] No photos to import");
         return Ok(result);
     }
+    // Transaction batch size: commit every N writes for safety + performance.
+    // Within a transaction, SQLite batches disk syncs → 10-50x faster.
+    const BATCH_SIZE: usize = 100;
+    let mut batch_writes = 0usize;
+    let use_txn = index.begin_transaction().is_ok();
+
     let mut skipped = 0usize;
     for (i, path) in photos.into_iter().enumerate() {
         // Check for cancellation
         if IMPORT_CANCELLED.load(Ordering::SeqCst) {
             println!("[Import] CANCELLED at {}/{}", i + 1, total);
+            // Commit any pending writes before stopping
+            if use_txn && batch_writes > 0 {
+                let _ = index.commit_transaction();
+            }
             use tauri::Emitter;
             let _ = window.emit("import-cancelled", serde_json::json!({
                 "current": i,
@@ -327,6 +341,7 @@ async fn import_photos(
             Ok(true) => {
                 println!("[Import] SUCCESS: {}", path_str);
                 result.success += 1;
+                batch_writes += 1;
             },
             Ok(false) => {
                 // Duplicate - already counted above
@@ -336,6 +351,13 @@ async fn import_photos(
                 println!("[Import] FAILED: {} - {}", path_str, e);
                 result.failure += 1;
             },
+        }
+
+        // Intermediate commit every BATCH_SIZE writes for crash safety
+        if use_txn && batch_writes >= BATCH_SIZE {
+            let _ = index.commit_transaction();
+            let _ = index.begin_transaction();
+            batch_writes = 0;
         }
 
         // Emit progress every photo
@@ -348,6 +370,11 @@ async fn import_photos(
             "duplicates": result.duplicates,
             "last_path": path_str
         }));
+    }
+
+    // Commit any remaining writes
+    if use_txn && batch_writes > 0 {
+        let _ = index.commit_transaction();
     }
 
     println!("[Import] Complete! Success: {}, Failure: {}", result.success, result.failure);
@@ -372,7 +399,7 @@ async fn delete_photos_from_app(
     let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
 
     let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-    let spec = footos_core::ThumbnailSpec { width: 256, height: 256 };
+    let spec = footos_core::ThumbnailSpec::default();
 
     let mut result = DeleteResult::default();
 
@@ -405,7 +432,7 @@ async fn delete_photos_completely(
     let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
 
     let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-    let spec = footos_core::ThumbnailSpec { width: 256, height: 256 };
+    let spec = footos_core::ThumbnailSpec::default();
 
     let mut result = DeleteResult::default();
 
@@ -467,11 +494,16 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
     
     let config = PhotoCoreConfig {
         thumbnail_dir: thumb_dir,
-        thumbnail_size: 256,
+        thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
     };
 
     let mut success = 0;
     let mut failure = 0;
+
+    // Batch transaction for thumbnail DB updates
+    const BATCH_SIZE: usize = 100;
+    let mut batch_writes = 0usize;
+    let use_txn = index.begin_transaction().is_ok();
 
     for (i, photo) in photos.iter().enumerate() {
         let path = std::path::PathBuf::from(&photo.path);
@@ -481,6 +513,7 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
         match &file_result {
             Ok(thumb_path) => {
                 success += 1;
+                batch_writes += 1;
                 // Persist the new thumbnail path in DB
                 let thumb_str = thumb_path.to_string_lossy().to_string();
                 let file_size = std::fs::metadata(&path)
@@ -494,6 +527,13 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
             }
             Err(_) => failure += 1,
         }
+
+        // Intermediate commit every BATCH_SIZE writes
+        if use_txn && batch_writes >= BATCH_SIZE {
+            let _ = index.commit_transaction();
+            let _ = index.begin_transaction();
+            batch_writes = 0;
+        }
         
         // Emit progress
         use tauri::Emitter;
@@ -504,6 +544,11 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
             "failure": failure,
             "last_path": photo.path
         }));
+    }
+
+    // Commit any remaining writes
+    if use_txn && batch_writes > 0 {
+        let _ = index.commit_transaction();
     }
     
     Ok(())
@@ -610,7 +655,7 @@ async fn process_ios_photo(
     // Generate thumbnail
     let config = footos_core::PhotoCoreConfig {
         thumbnail_dir: thumb_dir.clone(),
-        thumbnail_size: 256,
+        thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
     };
     let thumb_path_result = footos_core::generate_thumbnail(source_path, &config);
     let thumb_path_str = thumb_path_result.as_ref().ok()
