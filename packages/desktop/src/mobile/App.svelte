@@ -183,6 +183,9 @@
             dbPath = await join(appData, "footos.db");
             thumbDir = await join(appData, "thumbnails");
 
+            // Initialize shared DB connection (single connection for all commands)
+            await invoke("init_app", { dbPath, thumbDir });
+
             // Initialize platform service
             await platformService.initialize(dbPath, thumbDir);
 
@@ -270,7 +273,7 @@
         }
         try {
             const startTime = performance.now();
-            const result = await invoke("list_photos_preview", { dbPath });
+            const result = await invoke("list_photos_preview");
             const elapsed = (performance.now() - startTime).toFixed(1);
             const previewList = result as PhotoPreview[];
             console.log(`[App] loadPreviews: got ${previewList.length} previews in ${elapsed}ms`);
@@ -292,7 +295,7 @@
         if (!dbPath) return;
         try {
             const startTime = performance.now();
-            const result = await invoke("list_photos", { dbPath, thumbDir });
+            const result = await invoke("list_photos");
             const elapsed = (performance.now() - startTime).toFixed(1);
             const photoList = result as PhotoInfo[];
             console.log(`[App] loadFullPhotos: got ${photoList.length} photos in ${elapsed}ms`);

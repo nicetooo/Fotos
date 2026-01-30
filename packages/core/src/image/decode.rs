@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::error::CoreError;
+use std::path::Path;
 
 pub struct ImageDimensions {
     pub width: u32,

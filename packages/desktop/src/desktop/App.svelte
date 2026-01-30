@@ -170,6 +170,9 @@
             dbPath = await join(appData, "footos.db");
             thumbDir = await join(appData, "thumbnails");
 
+            // Initialize shared DB connection (single connection for all commands)
+            await invoke("init_app", { dbPath, thumbDir });
+
             // Initialize platform service
             await platformService.initialize(dbPath, thumbDir);
 
@@ -212,7 +215,7 @@
     async function loadPhotos() {
         if (!dbPath) return;
         try {
-            photos = await invoke("list_photos", { dbPath, thumbDir });
+            photos = await invoke("list_photos");
             uniqueTs = Date.now();
         } catch (e) {
             console.error("Failed to list photos", e);
@@ -300,7 +303,7 @@
             }
 
             const command = mode === 'complete' ? 'delete_photos_completely' : 'delete_photos_from_app';
-            const result = await invoke(command, { ids, dbPath, thumbDir });
+            const result = await invoke(command, { ids });
             console.log('Delete result:', result);
 
             const currentList = navigationPhotos;

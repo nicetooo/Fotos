@@ -1,2 +1,2 @@
 pub mod exif;
-pub use exif::{read_metadata, read_date_taken};
+pub use exif::{read_date_taken, read_metadata};

@@ -308,8 +308,6 @@ class AndroidPlatformService implements PlatformService {
             try {
                 const result: any = await invoke("import_photos", {
                     rootPath: "file://" + paths[i],
-                    dbPath: db,
-                    thumbDir: thumb,
                 });
                 totalSuccess += result.success || 0;
                 totalDuplicates += result.duplicates || 0;

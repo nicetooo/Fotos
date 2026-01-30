@@ -39,13 +39,8 @@ class DesktopPlatformService implements PlatformService {
     private unlistenProgress?: UnlistenFn;
     private unlistenCancelled?: UnlistenFn;
     private unlistenReload?: UnlistenFn;
-    private dbPath = '';
-    private thumbDir = '';
 
-    async initialize(dbPath: string, thumbDir: string): Promise<void> {
-        this.dbPath = dbPath;
-        this.thumbDir = thumbDir;
-
+    async initialize(_dbPath: string, _thumbDir: string): Promise<void> {
         this.unlistenProgress = await listen("import-progress", (event: any) => {
             const payload = event.payload;
             const progress: ImportProgress = {
@@ -112,8 +107,6 @@ class DesktopPlatformService implements PlatformService {
         try {
             const result = await invoke("import_photos", {
                 rootPath,
-                dbPath: this.dbPath,
-                thumbDir: this.thumbDir,
             }) as ImportResult;
 
             this.completeCallbacks.forEach(cb => cb(result));
@@ -137,8 +130,6 @@ class DesktopPlatformService implements PlatformService {
             try {
                 const result: any = await invoke("import_photos", {
                     rootPath: path,
-                    dbPath: this.dbPath,
-                    thumbDir: this.thumbDir,
                 });
                 totalSuccess += result.success || 0;
                 totalDuplicates += result.duplicates || 0;

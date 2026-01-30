@@ -241,8 +241,6 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
                 
                 const result: any = await invoke("import_photos", {
                     rootPath: pathToImport,
-                    dbPath: db,
-                    thumbDir: thumb,
                 });
                 totalSuccess += result.success || 0;
                 totalDuplicates += result.duplicates || 0;

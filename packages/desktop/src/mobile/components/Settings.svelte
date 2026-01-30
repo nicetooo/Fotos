@@ -26,7 +26,7 @@
 
         clearCacheLoading = true;
         try {
-            await invoke("clear_app_data", { thumbDir, dbPath });
+            await invoke("clear_app_data");
             await emit("reload-photos");
         } catch (e) {
             alert(t.errors.clearFailed + ": " + e);

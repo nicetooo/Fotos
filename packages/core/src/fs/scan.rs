@@ -4,12 +4,12 @@ use walkdir::WalkDir;
 use crate::error::CoreError;
 
 /// Scans the given directory for supported photo files.
-/// 
+///
 /// ### ⚠️ Performance & Scale Note
 /// Current implementation returns a full `Vec<PathBuf>` once processing is complete.
-/// For directories containing a very large number of files (e.g., 100k+), this may 
+/// For directories containing a very large number of files (e.g., 100k+), this may
 /// consume substantial memory.
-/// 
+///
 /// **Recommendations for Callers:**
 /// - Control the scale of the root directory passed to this function.
 /// - Be mindful of the frequency of calls in low-memory environments.
@@ -39,12 +39,14 @@ fn is_supported_image(path: &Path) -> bool {
             .and_then(|s| s.to_str())
             .map(|s| s.to_lowercase())
             .as_deref(),
-        Some("jpg" | "jpeg" | "png" | "webp" |
+        Some(
+            "jpg" | "jpeg" | "png" | "webp" |
              // HEIC/HEIF (iOS photos)
              "heic" | "heif" |
              // RAW formats
              "cr2" | "cr3" | "nef" | "nrw" | "arw" | "srf" | "sr2" |
-             "dng" | "raf" | "orf" | "rw2" | "pef" | "raw")
+             "dng" | "raf" | "orf" | "rw2" | "pef" | "raw"
+        )
     )
 }
 
@@ -56,7 +58,9 @@ mod tests {
     #[test]
     fn test_scan_stability_filters() {
         let temp_dir = std::env::temp_dir().join("footos_scan_test");
-        if temp_dir.exists() { fs::remove_dir_all(&temp_dir).unwrap(); }
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir).unwrap();
+        }
         fs::create_dir_all(&temp_dir).unwrap();
 
         // 1. Valid file (size > 0 required)
@@ -67,14 +71,14 @@ mod tests {
         // 2. 0-byte file (should be filtered)
         let zero = temp_dir.join("zero.png");
         File::create(&zero).unwrap();
-        
+
         // 3. Unsupported extension
         let txt = temp_dir.join("doc.txt");
         File::create(&txt).unwrap();
         fs::write(&txt, b"text data").unwrap();
 
         let results = scan_photos(&temp_dir).expect("Scan failed");
-        
+
         assert!(results.iter().any(|p| p.ends_with("valid.jpg")));
         assert!(!results.iter().any(|p| p.ends_with("zero.png")));
         assert!(!results.iter().any(|p| p.ends_with("doc.txt")));

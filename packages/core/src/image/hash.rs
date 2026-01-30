@@ -1,7 +1,7 @@
-use image_hasher::{HasherConfig, HashAlg};
-use std::path::Path;
-use std::io::{BufReader, Read, Seek, Cursor};
 use crate::error::CoreError;
+use image_hasher::{HashAlg, HasherConfig};
+use std::io::{BufReader, Cursor, Read, Seek};
+use std::path::Path;
 
 /// Compute perceptual hash of an image.
 /// Optimized to use EXIF embedded thumbnail when available (much faster for camera photos).
@@ -84,17 +84,24 @@ fn try_extract_thumbnail_data(path: &Path) -> Result<Vec<u8>, CoreError> {
     header_buf.truncate(bytes_read);
 
     let exif_reader = exif::Reader::new();
-    let exif = exif_reader.read_from_container(&mut Cursor::new(&header_buf))
+    let exif = exif_reader
+        .read_from_container(&mut Cursor::new(&header_buf))
         .map_err(|_| CoreError::Io("no exif".into()))?;
 
-    let thumbnail_field = exif.get_field(exif::Tag::JPEGInterchangeFormat, exif::In::THUMBNAIL)
+    let thumbnail_field = exif
+        .get_field(exif::Tag::JPEGInterchangeFormat, exif::In::THUMBNAIL)
         .ok_or_else(|| CoreError::Io("no thumb offset".into()))?;
-    let length_field = exif.get_field(exif::Tag::JPEGInterchangeFormatLength, exif::In::THUMBNAIL)
+    let length_field = exif
+        .get_field(exif::Tag::JPEGInterchangeFormatLength, exif::In::THUMBNAIL)
         .ok_or_else(|| CoreError::Io("no thumb length".into()))?;
 
-    let tiff_offset = thumbnail_field.value.get_uint(0)
+    let tiff_offset = thumbnail_field
+        .value
+        .get_uint(0)
         .ok_or_else(|| CoreError::Io("invalid offset".into()))? as usize;
-    let length = length_field.value.get_uint(0)
+    let length = length_field
+        .value
+        .get_uint(0)
         .ok_or_else(|| CoreError::Io("invalid length".into()))? as usize;
 
     // Calculate absolute offset based on file type
@@ -117,11 +124,13 @@ fn try_extract_thumbnail_data(path: &Path) -> Result<Vec<u8>, CoreError> {
     let file = std::fs::File::open(path).map_err(|_| CoreError::Io("open failed".into()))?;
     let mut reader = BufReader::new(file);
 
-    reader.seek(std::io::SeekFrom::Start(absolute_offset))
+    reader
+        .seek(std::io::SeekFrom::Start(absolute_offset))
         .map_err(|_| CoreError::Io("seek failed".into()))?;
 
     let mut thumb_data = vec![0u8; length];
-    reader.read_exact(&mut thumb_data)
+    reader
+        .read_exact(&mut thumb_data)
         .map_err(|_| CoreError::Io("read thumb failed".into()))?;
 
     Ok(thumb_data)
@@ -133,31 +142,41 @@ fn find_jpeg_tiff_header_offset(path: &Path) -> Result<u64, CoreError> {
     let mut reader = BufReader::new(file);
 
     let mut buf = [0u8; 2];
-    reader.read_exact(&mut buf).map_err(|_| CoreError::Io("read failed".into()))?;
+    reader
+        .read_exact(&mut buf)
+        .map_err(|_| CoreError::Io("read failed".into()))?;
     if buf != [0xFF, 0xD8] {
         return Err(CoreError::Io("not jpeg".into()));
     }
 
     // Find APP1 EXIF segment
     loop {
-        reader.read_exact(&mut buf).map_err(|_| CoreError::Io("read failed".into()))?;
+        reader
+            .read_exact(&mut buf)
+            .map_err(|_| CoreError::Io("read failed".into()))?;
         if buf[0] != 0xFF {
             return Err(CoreError::Io("invalid marker".into()));
         }
         if buf[1] == 0xE1 {
             // APP1 - potential EXIF segment
             let mut len_buf = [0u8; 2];
-            reader.read_exact(&mut len_buf).map_err(|_| CoreError::Io("read failed".into()))?;
+            reader
+                .read_exact(&mut len_buf)
+                .map_err(|_| CoreError::Io("read failed".into()))?;
             let seg_len = u16::from_be_bytes(len_buf) as i64;
             let mut exif_id = [0u8; 6];
-            reader.read_exact(&mut exif_id).map_err(|_| CoreError::Io("read failed".into()))?;
+            reader
+                .read_exact(&mut exif_id)
+                .map_err(|_| CoreError::Io("read failed".into()))?;
             if &exif_id == b"Exif\0\0" {
-                return reader.stream_position()
+                return reader
+                    .stream_position()
                     .map_err(|_| CoreError::Io("position failed".into()));
             }
             // Not EXIF APP1, skip rest of segment
             if seg_len > 8 {
-                reader.seek(std::io::SeekFrom::Current(seg_len - 8))
+                reader
+                    .seek(std::io::SeekFrom::Current(seg_len - 8))
                     .map_err(|_| CoreError::Io("seek failed".into()))?;
             }
         } else if buf[1] == 0xD9 || buf[1] == 0xDA {
@@ -172,10 +191,13 @@ fn find_jpeg_tiff_header_offset(path: &Path) -> Result<u64, CoreError> {
         } else {
             // All other markers have length field - skip them
             let mut len_buf = [0u8; 2];
-            reader.read_exact(&mut len_buf).map_err(|_| CoreError::Io("read failed".into()))?;
+            reader
+                .read_exact(&mut len_buf)
+                .map_err(|_| CoreError::Io("read failed".into()))?;
             let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
             if seg_len > 0 {
-                reader.seek(std::io::SeekFrom::Current(seg_len))
+                reader
+                    .seek(std::io::SeekFrom::Current(seg_len))
                     .map_err(|_| CoreError::Io("seek failed".into()))?;
             }
         }

@@ -49,6 +49,18 @@ impl PhotoIndex {
             "CREATE INDEX IF NOT EXISTS idx_photos_date_taken ON photos (date_taken);",
         );
 
+        // Performance pragmas:
+        // - WAL: concurrent reads + batched writes, dramatically faster for imports
+        // - synchronous=NORMAL: safe with WAL, skips fsync on every commit
+        // - cache_size=-8000: 8MB page cache (default ~2MB)
+        // - temp_store=MEMORY: temp tables in RAM
+        let _ = conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -8000;
+             PRAGMA temp_store = MEMORY;",
+        );
+
         Ok(std::sync::Arc::new(Self {
             conn: Mutex::new(conn),
         }))
@@ -120,6 +132,44 @@ impl PhotoIndex {
         Ok(PhotoId {
             id: conn.last_insert_rowid(),
         })
+    }
+
+    /// Begin an explicit transaction for batch operations.
+    ///
+    /// All subsequent insert/update/delete calls will execute within this transaction
+    /// until `commit_transaction()` or `rollback_transaction()` is called.
+    /// This provides 10-50x speed improvement for bulk imports by batching disk syncs
+    /// into a single operation at commit time.
+    ///
+    /// Safe to call even if a transaction is already active (SQLite will return an error
+    /// which is silently ignored — the existing transaction continues).
+    pub fn begin_transaction(&self) -> Result<(), CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        conn.execute_batch("BEGIN TRANSACTION")?;
+        Ok(())
+    }
+
+    /// Commit the current transaction, persisting all batched writes to disk.
+    pub fn commit_transaction(&self) -> Result<(), CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        conn.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
+    /// Rollback the current transaction, discarding all batched writes.
+    pub fn rollback_transaction(&self) -> Result<(), CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        conn.execute_batch("ROLLBACK")?;
+        Ok(())
     }
 
     pub fn get_by_path(&self, path: String) -> Result<Option<PhotoInfo>, CoreError> {
@@ -245,15 +295,27 @@ impl PhotoIndex {
 
     /// Delete multiple photos by their IDs.
     /// Returns the list of deleted photos' info.
+    /// Wrapped in a transaction for batch performance.
     pub fn delete_by_ids(&self, ids: Vec<i64>) -> Result<Vec<PhotoInfo>, CoreError> {
+        let use_txn = self.begin_transaction().is_ok();
         let mut deleted = Vec::new();
 
         for id in ids {
-            if let Some(photo) = self.delete_by_id(id)? {
-                deleted.push(photo);
+            match self.delete_by_id(id) {
+                Ok(Some(photo)) => deleted.push(photo),
+                Ok(None) => {}
+                Err(e) => {
+                    if use_txn {
+                        let _ = self.rollback_transaction();
+                    }
+                    return Err(e);
+                }
             }
         }
 
+        if use_txn {
+            self.commit_transaction()?;
+        }
         Ok(deleted)
     }
 

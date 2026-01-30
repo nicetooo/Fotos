@@ -1,8 +1,76 @@
 use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 // Global cancellation flag for import operations
 static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Application state: shared PhotoIndex connection + cached paths.
+///
+/// Registered as Tauri managed state at app startup.
+/// All DB-using commands receive `State<AppState>` instead of opening
+/// a new `PhotoIndex` per call — eliminates repeated schema checks,
+/// PRAGMA setup, and connection overhead.
+struct AppState {
+    index: Mutex<Option<Arc<PhotoIndex>>>,
+    db_path: Mutex<String>,
+    thumb_dir: Mutex<String>,
+}
+
+impl AppState {
+    fn new() -> Self {
+        Self {
+            index: Mutex::new(None),
+            db_path: Mutex::new(String::new()),
+            thumb_dir: Mutex::new(String::new()),
+        }
+    }
+
+    /// Initialize (or re-initialize) the database connection and store paths.
+    /// Called once at app startup from `init_app`, and again after `clear_app_data`.
+    fn init(&self, db_path: String, thumb_dir: String) -> Result<(), String> {
+        if let Some(parent) = std::path::Path::new(&db_path).parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
+
+        let index = PhotoIndex::open(db_path.clone()).map_err(|e| {
+            println!("[AppState::init] Failed to open DB: {}", e);
+            e.to_string()
+        })?;
+
+        *self.db_path.lock().map_err(|e| e.to_string())? = db_path;
+        *self.thumb_dir.lock().map_err(|e| e.to_string())? = thumb_dir;
+        *self.index.lock().map_err(|e| e.to_string())? = Some(index);
+
+        Ok(())
+    }
+
+    /// Get the shared PhotoIndex, or error if not initialized.
+    fn get_index(&self) -> Result<Arc<PhotoIndex>, String> {
+        self.index
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| "Database not initialized. Call init_app first.".to_string())
+    }
+
+    fn get_db_path(&self) -> Result<String, String> {
+        Ok(self.db_path.lock().map_err(|e| e.to_string())?.clone())
+    }
+
+    fn get_thumb_dir(&self) -> Result<String, String> {
+        Ok(self.thumb_dir.lock().map_err(|e| e.to_string())?.clone())
+    }
+
+    /// Drop the cached connection (before deleting DB files).
+    fn reset_index(&self) -> Result<(), String> {
+        *self.index.lock().map_err(|e| e.to_string())? = None;
+        Ok(())
+    }
+}
 
 #[tauri::command]
 fn cancel_import() {
@@ -19,54 +87,46 @@ fn get_core_version() -> String {
     footos_core::get_version()
 }
 
+/// Initialize the app state with database and thumbnail paths.
+/// Must be called once from the frontend at startup, before any DB commands.
+#[tauri::command]
+fn init_app(state: tauri::State<'_, AppState>, db_path: String, thumb_dir: String) -> Result<(), String> {
+    println!("[init_app] db: {}, thumbs: {}", db_path, thumb_dir);
+    state.init(db_path, thumb_dir)
+}
+
 /// Lightweight preview list for map markers and timeline.
 /// Returns only the fields needed for initial UI rendering.
-/// Zero file I/O — all data comes from the database.
+/// Zero file I/O -- all data comes from the database.
 /// Typically completes in <50ms even for 10K+ photos.
 #[tauri::command]
-async fn list_photos_preview(db_path: String) -> Result<Vec<PhotoPreview>, String> {
-    println!("[list_photos_preview] Called with db_path: {}", db_path);
+async fn list_photos_preview(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoPreview>, String> {
+    println!("[list_photos_preview] Called");
 
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    let index = PhotoIndex::open(db_path.clone())
-        .map_err(|e| {
-            println!("[list_photos_preview] Failed to open db: {}", e);
-            e.to_string()
-        })?;
+    let index = state.get_index()?;
 
     let previews = index.list_previews().map_err(|e| {
         println!("[list_photos_preview] Error: {}", e);
         e.to_string()
     })?;
-    println!("[list_photos_preview] Found {} previews in db at {}", previews.len(), db_path);
+    println!("[list_photos_preview] Found {} previews", previews.len());
 
     Ok(previews)
 }
 
 #[tauri::command]
-async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo>, String> {
-    println!("[list_photos] Called with db_path: {}", db_path);
-    
-    // Ensure parent directory exists
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+async fn list_photos(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoInfo>, String> {
+    println!("[list_photos] Called");
 
-    let index = PhotoIndex::open(db_path.clone())
-        .map_err(|e| {
-            println!("[list_photos] Failed to open db: {}", e);
-            e.to_string()
-        })?;
-    
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
+
     let mut photos = index.list().map_err(|e| {
         println!("[list_photos] Error listing photos: {}", e);
         e.to_string()
     })?;
-    println!("[list_photos] Found {} photos in db at {}", photos.len(), db_path);
-    
+    println!("[list_photos] Found {} photos", photos.len());
+
     // Only resolve thumb_path/file_size for photos that don't have them in the DB.
     // Photos imported after the preview aggregation update will already have these values.
     let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
@@ -122,13 +182,13 @@ async fn list_photos(db_path: String, thumb_dir: String) -> Result<Vec<PhotoInfo
 #[tauri::command]
 async fn import_photos(
     window: tauri::Window,
+    state: tauri::State<'_, AppState>,
     root_path: String,
-    db_path: String,
-    thumb_dir: String,
 ) -> Result<ImportResult, String> {
     println!("[Import] Starting import for: {}", root_path);
-    println!("[Import] DB path: {}", db_path);
-    println!("[Import] Thumb dir: {}", thumb_dir);
+
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
 
     // Handle file:// URIs (iOS returns these)
     // Keep stripping file:// prefix until we get a plain path
@@ -149,26 +209,8 @@ async fn import_photos(
     // Reset cancellation flag at start
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
 
-    // Ensure parent directories exist
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            println!("[Import] Failed to create db parent dir: {}", e);
-            e.to_string()
-        })?;
-    }
-    std::fs::create_dir_all(&thumb_dir).map_err(|e| {
-        println!("[Import] Failed to create thumb dir: {}", e);
-        e.to_string()
-    })?;
-
-    let index = PhotoIndex::open(db_path)
-        .map_err(|e| {
-            println!("[Import] Failed to open DB: {}", e);
-            e.to_string()
-        })?;
-
     let config = PhotoCoreConfig {
-        thumbnail_dir: thumb_dir,
+        thumbnail_dir: thumb_dir.clone(),
         thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
     };
 
@@ -242,7 +284,7 @@ async fn import_photos(
         return Ok(result);
     }
     // Transaction batch size: commit every N writes for safety + performance.
-    // Within a transaction, SQLite batches disk syncs → 10-50x faster.
+    // Within a transaction, SQLite batches disk syncs -> 10-50x faster.
     const BATCH_SIZE: usize = 100;
     let mut batch_writes = 0usize;
     let use_txn = index.begin_transaction().is_ok();
@@ -392,11 +434,11 @@ struct DeleteResult {
 /// Delete photos from app only (DB + thumbnails), keep original files
 #[tauri::command]
 async fn delete_photos_from_app(
+    state: tauri::State<'_, AppState>,
     ids: Vec<i64>,
-    db_path: String,
-    thumb_dir: String,
 ) -> Result<DeleteResult, String> {
-    let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
 
     let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
     let spec = footos_core::ThumbnailSpec::default();
@@ -425,11 +467,11 @@ async fn delete_photos_from_app(
 /// Delete photos completely (DB + thumbnails + original files)
 #[tauri::command]
 async fn delete_photos_completely(
+    state: tauri::State<'_, AppState>,
     ids: Vec<i64>,
-    db_path: String,
-    thumb_dir: String,
 ) -> Result<DeleteResult, String> {
-    let index = PhotoIndex::open(db_path).map_err(|e| e.to_string())?;
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
 
     let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
     let spec = footos_core::ThumbnailSpec::default();
@@ -461,37 +503,48 @@ async fn delete_photos_completely(
 }
 
 #[tauri::command]
-async fn clear_app_data(thumb_dir: String, db_path: String) -> Result<(), String> {
+async fn clear_app_data(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let thumb_dir = state.get_thumb_dir()?;
+    let db_path = state.get_db_path()?;
+
+    // Drop the cached DB connection before deleting files
+    state.reset_index()?;
+
     // Clear thumbnails
     if std::path::Path::new(&thumb_dir).exists() {
         std::fs::remove_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
     }
     std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
 
-    // Clear database
+    // Clear database (main file + WAL + SHM)
     if std::path::Path::new(&db_path).exists() {
         std::fs::remove_file(&db_path).map_err(|e| e.to_string())?;
     }
+    let wal_path = format!("{}-wal", db_path);
+    let shm_path = format!("{}-shm", db_path);
+    let _ = std::fs::remove_file(&wal_path);
+    let _ = std::fs::remove_file(&shm_path);
+
+    // Re-initialize with a fresh database
+    state.init(db_path, thumb_dir)?;
 
     // Note: map_tiles directory is preserved
     Ok(())
 }
 
 #[tauri::command]
-async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir: String) -> Result<(), String> {
-    
-    // Ensure parent directories exist
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+async fn regenerate_thumbnails(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
+
     std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
 
-    let index = PhotoIndex::open(db_path.clone())
-        .map_err(|e| e.to_string())?;
-    
     let photos = index.list().map_err(|e| e.to_string())?;
     let total = photos.len();
-    
+
     let config = PhotoCoreConfig {
         thumbnail_dir: thumb_dir,
         thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
@@ -507,7 +560,7 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
 
     for (i, photo) in photos.iter().enumerate() {
         let path = std::path::PathBuf::from(&photo.path);
-        
+
         let file_result = footos_core::generate_thumbnail(&path, &config);
 
         match &file_result {
@@ -534,7 +587,7 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
             let _ = index.begin_transaction();
             batch_writes = 0;
         }
-        
+
         // Emit progress
         use tauri::Emitter;
         let _ = window.emit("import-progress", serde_json::json!({
@@ -550,7 +603,7 @@ async fn regenerate_thumbnails(window: tauri::Window, db_path: String, thumb_dir
     if use_txn && batch_writes > 0 {
         let _ = index.commit_transaction();
     }
-    
+
     Ok(())
 }
 
@@ -597,11 +650,12 @@ async fn get_raw_preview(path: String, cache_dir: String) -> Result<String, Stri
 #[tauri::command]
 async fn request_photo_library_access(
     window: tauri::Window,
-    db_path: String,
-    thumb_dir: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     #[cfg(target_os = "ios")]
     {
+        let db_path = state.get_db_path()?;
+        let thumb_dir = state.get_thumb_dir()?;
         // On iOS, we trigger the Swift photo picker via JavaScript
         // The Swift code will call back with selected photos
         use tauri::Emitter;
@@ -613,7 +667,7 @@ async fn request_photo_library_access(
     }
     #[cfg(not(target_os = "ios"))]
     {
-        let _ = (window, db_path, thumb_dir);
+        let _ = (window, state);
         Err("Photo library access is only available on iOS. Use folder/file import on desktop.".to_string())
     }
 }
@@ -621,11 +675,13 @@ async fn request_photo_library_access(
 /// Process a photo from iOS photo picker
 #[tauri::command]
 async fn process_ios_photo(
+    state: tauri::State<'_, AppState>,
     photo_json: String,
-    db_path: String,
-    thumb_dir: String,
 ) -> Result<bool, String> {
     use serde_json::Value;
+
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
 
     let photo: Value = serde_json::from_str(&photo_json)
         .map_err(|e| format!("Invalid photo JSON: {}", e))?;
@@ -635,12 +691,6 @@ async fn process_ios_photo(
 
     let identifier = photo["identifier"].as_str()
         .unwrap_or("unknown");
-
-    // Ensure directories exist
-    std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
 
     let source_path = std::path::Path::new(path);
 
@@ -654,7 +704,7 @@ async fn process_ios_photo(
 
     // Generate thumbnail
     let config = footos_core::PhotoCoreConfig {
-        thumbnail_dir: thumb_dir.clone(),
+        thumbnail_dir: thumb_dir,
         thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
     };
     let thumb_path_result = footos_core::generate_thumbnail(source_path, &config);
@@ -665,10 +715,6 @@ async fn process_ios_photo(
     let file_size = std::fs::metadata(source_path)
         .map(|m| m.len())
         .unwrap_or(0);
-
-    // Open database and insert
-    let index = footos_core::PhotoIndex::open(db_path)
-        .map_err(|e| format!("Failed to open database: {}", e))?;
 
     // Use iOS photo identifier as the path prefix for reference
     let stored_path = format!("ios-photo://{}", identifier);
@@ -729,12 +775,14 @@ async fn download_tile(cache_dir: String, z: u32, x: u32, y: u32, url: String) -
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppState::new())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_core_version,
+            init_app,
             import_photos,
             cancel_import,
             list_photos,
@@ -760,12 +808,12 @@ pub fn run() {
 #[tauri::command]
 async fn import_all_ios_photos(
     window: tauri::Window,
-    db_path: String,
-    thumb_dir: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<ImportResult, String> {
     #[cfg(target_os = "ios")]
     {
-        use std::process::Command;
+        let db_path = state.get_db_path()?;
+        let thumb_dir = state.get_thumb_dir()?;
 
         // On iOS, we need to use the native PhotoKit API
         // For now, emit an event to trigger Swift code via JavaScript injection
@@ -785,7 +833,7 @@ async fn import_all_ios_photos(
 
     #[cfg(not(target_os = "ios"))]
     {
-        let _ = (window, db_path, thumb_dir);
+        let _ = (window, state);
         Err("This command is only available on iOS".to_string())
     }
 }

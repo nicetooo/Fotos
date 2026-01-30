@@ -1,9 +1,9 @@
-use std::fs::File;
-use std::io::{BufReader, Read, Cursor};
-use std::path::Path;
 use crate::error::CoreError;
 use crate::types::PhotoMetadata;
-use exif::{In, Tag, Reader, Value};
+use exif::{In, Reader, Tag, Value};
+use std::fs::File;
+use std::io::{BufReader, Cursor, Read};
+use std::path::Path;
 
 /// Reads comprehensive EXIF metadata from a photo.
 /// Optimized: reads first 256KB into memory to avoid slow disk seeks on external drives.
@@ -124,13 +124,19 @@ pub fn read_date_taken(path: &Path) -> Result<Option<String>, CoreError> {
 
 fn get_gps_coord(exif: &exif::Exif, tag: Tag, ref_tag: Tag) -> Option<f64> {
     let value = exif.get_field(tag, In::PRIMARY)?.value.clone();
-    let ref_val = exif.get_field(ref_tag, In::PRIMARY)?.value.display_as(ref_tag).to_string();
+    let ref_val = exif
+        .get_field(ref_tag, In::PRIMARY)?
+        .value
+        .display_as(ref_tag)
+        .to_string();
 
     if let Value::Rational(v) = value {
         if v.len() >= 3 {
             // Debug: log the raw rational values
-            println!("[EXIF GPS] Raw values: {:?}/{:?}, {:?}/{:?}, {:?}/{:?}, ref={}",
-                v[0].num, v[0].denom, v[1].num, v[1].denom, v[2].num, v[2].denom, ref_val);
+            println!(
+                "[EXIF GPS] Raw values: {:?}/{:?}, {:?}/{:?}, {:?}/{:?}, ref={}",
+                v[0].num, v[0].denom, v[1].num, v[1].denom, v[2].num, v[2].denom, ref_val
+            );
 
             let deg = v[0].to_f64();
             let min = v[1].to_f64();
@@ -138,7 +144,10 @@ fn get_gps_coord(exif: &exif::Exif, tag: Tag, ref_tag: Tag) -> Option<f64> {
 
             // Check for NaN values (can happen with zero denominators)
             if deg.is_nan() || min.is_nan() || sec.is_nan() {
-                println!("[EXIF GPS] NaN detected: deg={}, min={}, sec={}", deg, min, sec);
+                println!(
+                    "[EXIF GPS] NaN detected: deg={}, min={}, sec={}",
+                    deg, min, sec
+                );
                 return None;
             }
 
@@ -168,7 +177,9 @@ mod tests {
     #[test]
     fn test_metadata_graceful_failure_invariant() {
         let temp_dir = std::env::temp_dir().join("footos_metadata_test");
-        if temp_dir.exists() { std::fs::remove_dir_all(&temp_dir).unwrap(); }
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let corrupt_path = temp_dir.join("corrupt.jpg");
