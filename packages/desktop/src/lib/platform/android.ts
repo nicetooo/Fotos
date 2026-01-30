@@ -187,7 +187,7 @@ class AndroidPlatformService implements PlatformService {
         const bridgeAvailable = window.AndroidWebViewInterface || window.__ANDROID_BRIDGE_READY__;
 
         if (bridgeAvailable) {
-            console.log("[Android] Using AndroidWebViewInterface");
+            console.log("[Android] Using AndroidWebViewInterface → requestImport");
             this.postMessage({
                 command: "requestImport",
                 dbPath: this.dbPath,
@@ -202,7 +202,7 @@ class AndroidPlatformService implements PlatformService {
 
         const ready = await this.waitForBridge(3000);
         if (ready) {
-            console.log("[Android] Bridge became ready, proceeding");
+            console.log("[Android] Bridge became ready, proceeding → requestImport");
             this.postMessage({
                 command: "requestImport",
                 dbPath: this.dbPath,
@@ -300,42 +300,69 @@ class AndroidPlatformService implements PlatformService {
 
         this.scanningCallbacks.forEach(cb => cb(true));
 
-        let totalSuccess = 0;
-        let totalDuplicates = 0;
-        let totalFailure = 0;
+        try {
+            // Find common parent directory for batch import (enables rayon parallelism).
+            // MediaStoreSync exports all photos to the same cache directory,
+            // so passing the directory lets import_photos scan + process in parallel.
+            const parentDir = paths[0].substring(0, paths[0].lastIndexOf('/'));
+            const allSameDir = paths.every(p => p.substring(0, p.lastIndexOf('/')) === parentDir);
 
-        for (let i = 0; i < paths.length; i++) {
-            try {
+            if (allSameDir && paths.length > 1) {
+                console.log("[Android] Batch import via directory:", parentDir, "(" + paths.length + " files)");
                 const result: any = await invoke("import_photos", {
-                    rootPath: "file://" + paths[i],
+                    rootPath: parentDir,
                 });
-                totalSuccess += result.success || 0;
-                totalDuplicates += result.duplicates || 0;
-                totalFailure += result.failure || 0;
-            } catch (err) {
-                console.error("[Android] Failed to import:", paths[i], err);
-                totalFailure++;
-            }
+                console.log("[Android] Batch import complete:", JSON.stringify(result));
 
-            const progress: ImportProgress = {
-                success: totalSuccess,
-                failure: totalFailure,
-                duplicates: totalDuplicates,
-                current: i + 1,
-                total: paths.length,
-                lastPath: paths[i].split('/').pop() || paths[i],
-            };
-            this.progressCallbacks.forEach(cb => cb(progress));
+                const importResult: ImportResult = {
+                    success: result.success || 0,
+                    failure: result.failure || 0,
+                    duplicates: result.duplicates || 0,
+                };
+                this.completeCallbacks.forEach(cb => cb(importResult));
+            } else {
+                // Fallback: individual file imports (different directories or single file)
+                let totalSuccess = 0;
+                let totalDuplicates = 0;
+                let totalFailure = 0;
+
+                for (let i = 0; i < paths.length; i++) {
+                    try {
+                        const result: any = await invoke("import_photos", {
+                            rootPath: "file://" + paths[i],
+                        });
+                        totalSuccess += result.success || 0;
+                        totalDuplicates += result.duplicates || 0;
+                        totalFailure += result.failure || 0;
+                    } catch (err) {
+                        console.error("[Android] Failed to import:", paths[i], err);
+                        totalFailure++;
+                    }
+
+                    const progress: ImportProgress = {
+                        success: totalSuccess,
+                        failure: totalFailure,
+                        duplicates: totalDuplicates,
+                        current: i + 1,
+                        total: paths.length,
+                        lastPath: paths[i].split('/').pop() || paths[i],
+                    };
+                    this.progressCallbacks.forEach(cb => cb(progress));
+                }
+
+                console.log("[Android] Sequential import complete:", { totalSuccess, totalDuplicates, totalFailure });
+
+                const result: ImportResult = {
+                    success: totalSuccess,
+                    failure: totalFailure,
+                    duplicates: totalDuplicates,
+                };
+                this.completeCallbacks.forEach(cb => cb(result));
+            }
+        } catch (err) {
+            console.error("[Android] Import failed:", err);
         }
 
-        console.log("[Android] Import complete:", { totalSuccess, totalDuplicates, totalFailure });
-
-        const result: ImportResult = {
-            success: totalSuccess,
-            failure: totalFailure,
-            duplicates: totalDuplicates,
-        };
-        this.completeCallbacks.forEach(cb => cb(result));
         this.scanningCallbacks.forEach(cb => cb(false));
         this.importRunning = false;
     }

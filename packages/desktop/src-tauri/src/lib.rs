@@ -1,6 +1,7 @@
 use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE};
+use rayon::prelude::*;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, Mutex,
 };
 
@@ -179,12 +180,49 @@ async fn list_photos(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoInfo>
     Ok(photos)
 }
 
+/// Result of parallel Phase 2 processing for a single photo.
+enum ProcessResult {
+    /// Successfully processed — ready for DB insert.
+    New(ProcessedPhoto),
+    /// Processing failed (hash, metadata, or thumbnail error).
+    Failed(String),
+    /// Import was cancelled before this photo was processed.
+    Cancelled,
+}
+
+/// Extended import result with timing data (Tauri layer only).
+/// Core's ImportResult doesn't include timing — that's a platform concern.
+#[derive(serde::Serialize, Default)]
+struct ImportResultWithTiming {
+    success: u32,
+    failure: u32,
+    duplicates: u32,
+    skipped: u32,
+    total: u32,
+    total_ms: u64,
+    phase1_ms: u64,
+    phase2_ms: u64,
+    phase3_ms: u64,
+}
+
+/// All data needed to insert a photo into the DB.
+/// Produced in parallel (Phase 2), consumed sequentially (Phase 3).
+struct ProcessedPhoto {
+    path: std::path::PathBuf,
+    path_str: String,
+    hash: String,
+    metadata: footos_core::PhotoMetadata,
+    thumb_path_str: Option<String>,
+    file_size: u64,
+}
+
 #[tauri::command]
 async fn import_photos(
     window: tauri::Window,
     state: tauri::State<'_, AppState>,
     root_path: String,
-) -> Result<ImportResult, String> {
+) -> Result<ImportResultWithTiming, String> {
+    let import_start = std::time::Instant::now();
     println!("[Import] Starting import for: {}", root_path);
 
     let index = state.get_index()?;
@@ -281,118 +319,202 @@ async fn import_photos(
     // If no photos found, return early
     if total == 0 {
         println!("[Import] No photos to import");
-        return Ok(result);
+        return Ok(ImportResultWithTiming {
+            total: total as u32,
+            total_ms: import_start.elapsed().as_millis() as u64,
+            ..Default::default()
+        });
     }
-    // Transaction batch size: commit every N writes for safety + performance.
-    // Within a transaction, SQLite batches disk syncs -> 10-50x faster.
+
+    // ── Phase 1 (Sequential): Filter already-imported photos ──
+    // DB lookups are fast (~0.01ms each) and SQLite is single-threaded anyway.
+    let phase1_start = std::time::Instant::now();
+    let mut new_photos: Vec<std::path::PathBuf> = Vec::with_capacity(total);
+    let mut skipped = 0usize;
+    for path in &photos {
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            break;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        if let Ok(Some(_)) = index.get_by_path(path_str) {
+            skipped += 1;
+        } else {
+            new_photos.push(path.clone());
+        }
+    }
+    let new_count = new_photos.len();
+    let phase1_ms = phase1_start.elapsed().as_millis();
+    println!(
+        "[Import] Phase 1 done in {}ms: {} new, {} already imported",
+        phase1_ms, new_count, skipped
+    );
+
+    // Emit initial progress (skipped photos accounted for)
+    {
+        use tauri::Emitter;
+        let _ = window.emit(
+            "import-progress",
+            serde_json::json!({
+                "current": skipped,
+                "total": total,
+                "success": 0,
+                "failure": 0,
+                "skipped": skipped,
+                "last_path": ""
+            }),
+        );
+    }
+
+    if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+        use tauri::Emitter;
+        let _ = window.emit(
+            "import-cancelled",
+            serde_json::json!({
+                "current": skipped,
+                "total": total,
+                "success": 0,
+                "failure": 0
+            }),
+        );
+        return Ok(ImportResultWithTiming {
+            skipped: skipped as u32,
+            total: total as u32,
+            phase1_ms: phase1_ms as u64,
+            total_ms: import_start.elapsed().as_millis() as u64,
+            ..Default::default()
+        });
+    }
+
+    // ── Phase 2 (Parallel): CPU+IO heavy work via rayon ──
+    // compute_hash (~50-200ms) + read_metadata (~10-50ms) +
+    // generate_thumbnail (~100-500ms) + fs::metadata (<1ms)
+    // All pure functions from footos_core — no DB access, no shared mutable state.
+    let phase2_start = std::time::Instant::now();
+    let processed_counter = AtomicUsize::new(0);
+    let window_clone = window.clone();
+
+    let processed: Vec<ProcessResult> = new_photos
+        .par_iter()
+        .map(|path| {
+            // Check cancellation early
+            if IMPORT_CANCELLED.load(Ordering::Relaxed) {
+                return ProcessResult::Cancelled;
+            }
+
+            let path_str = path.to_string_lossy().to_string();
+
+            // Compute perceptual hash
+            let hash = match footos_core::compute_hash(path) {
+                Ok(h) => h,
+                Err(e) => {
+                    println!("[Import] Hash error for {}: {}", path_str, e);
+                    return ProcessResult::Failed(path_str);
+                }
+            };
+
+            // Check cancellation between expensive steps
+            if IMPORT_CANCELLED.load(Ordering::Relaxed) {
+                return ProcessResult::Cancelled;
+            }
+
+            // Read EXIF metadata
+            let metadata = match footos_core::read_metadata(path) {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("[Import] Metadata error for {}: {}", path_str, e);
+                    return ProcessResult::Failed(path_str);
+                }
+            };
+
+            // Generate thumbnail (may fail for some formats — OK, frontend uses original)
+            let thumb_path_str = footos_core::generate_thumbnail(path, &config)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string());
+
+            // Get file size
+            let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
+            // Emit progress every ~10 photos to avoid IPC flooding
+            let count = processed_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            if count % 10 == 0 || count == new_count {
+                use tauri::Emitter;
+                let _ = window_clone.emit(
+                    "import-progress",
+                    serde_json::json!({
+                        "current": skipped + count,
+                        "total": total,
+                        "success": 0,
+                        "failure": 0,
+                        "skipped": skipped,
+                        "phase": "processing",
+                        "last_path": path_str
+                    }),
+                );
+            }
+
+            ProcessResult::New(ProcessedPhoto {
+                path: path.clone(),
+                path_str,
+                hash,
+                metadata,
+                thumb_path_str,
+                file_size,
+            })
+        })
+        .collect();
+
+    let phase2_ms = phase2_start.elapsed().as_millis();
+    println!(
+        "[Import] Phase 2 done in {}ms: {} items processed in parallel",
+        phase2_ms, processed.len()
+    );
+
+    // ── Phase 3 (Sequential): Deduplicate by hash + DB inserts in batched transactions ──
+    let phase3_start = std::time::Instant::now();
     const BATCH_SIZE: usize = 100;
     let mut batch_writes = 0usize;
     let use_txn = index.begin_transaction().is_ok();
+    let mut cancelled = false;
 
-    let mut skipped = 0usize;
-    for (i, path) in photos.into_iter().enumerate() {
-        // Check for cancellation
-        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
-            println!("[Import] CANCELLED at {}/{}", i + 1, total);
-            // Commit any pending writes before stopping
-            if use_txn && batch_writes > 0 {
-                let _ = index.commit_transaction();
+    for (i, item) in processed.into_iter().enumerate() {
+        match item {
+            ProcessResult::Cancelled => {
+                cancelled = true;
+                break;
             }
-            use tauri::Emitter;
-            let _ = window.emit("import-cancelled", serde_json::json!({
-                "current": i,
-                "total": total,
-                "success": result.success,
-                "failure": result.failure
-            }));
-            break;
-        }
-
-        let path_str = path.to_string_lossy().to_string();
-
-        // Skip if already imported (fast path - avoid expensive metadata/hash/thumbnail work)
-        if let Ok(Some(_)) = index.get_by_path(path_str.clone()) {
-            skipped += 1;
-            // Emit progress but mark as skipped
-            use tauri::Emitter;
-            let _ = window.emit("import-progress", serde_json::json!({
-                "current": i + 1,
-                "total": total,
-                "success": result.success,
-                "failure": result.failure,
-                "skipped": skipped,
-                "last_path": path_str
-            }));
-            continue;
-        }
-
-        // Use a block to ensure we can handle errors per-file
-        // Returns: Ok(true) = new photo, Ok(false) = duplicate, Err = failure
-        let file_result = (|| -> Result<bool, String> {
-            println!("[Import] Computing hash...");
-            let hash = footos_core::compute_hash(&path).map_err(|e| {
-                println!("[Import] Hash error: {}", e);
-                e.to_string()
-            })?;
-            println!("[Import] Hash: {}", &hash[..hash.len().min(16)]);
-
-            // Check if this photo already exists (by hash)
-            if index.exists_by_hash(&hash).unwrap_or(false) {
-                println!("[Import] DUPLICATE (already imported): {}", path_str);
-                // Clean up the copied file since we don't need it
-                let _ = std::fs::remove_file(&path);
-                return Ok(false); // Duplicate
-            }
-
-            println!("[Import] Reading metadata for: {}", path_str);
-            let metadata = footos_core::read_metadata(&path).map_err(|e| {
-                println!("[Import] Metadata error: {}", e);
-                e.to_string()
-            })?;
-            println!("[Import] Metadata: {:?}", metadata);
-
-            // Thumbnail generation may fail if no EXIF thumbnail - that's OK, frontend uses original
-            println!("[Import] Generating thumbnail...");
-            let thumb_path_result = footos_core::generate_thumbnail(&path, &config);
-            let thumb_path_str = thumb_path_result.as_ref().ok()
-                .map(|p| p.to_string_lossy().to_string());
-            println!("[Import] Thumbnail result: {:?}", thumb_path_result.is_ok());
-
-            // Get file size for preview aggregation (one-time cost during import)
-            let file_size = std::fs::metadata(&path)
-                .map(|m| m.len())
-                .unwrap_or(0);
-
-            println!("[Import] Inserting into DB...");
-            index.insert(path_str.clone(), hash.clone(), metadata).map_err(|e| {
-                println!("[Import] DB insert error: {}", e);
-                e.to_string()
-            })?;
-
-            // Persist thumb_path and file_size for instant preview loading
-            let _ = index.update_thumb_info(
-                path_str.clone(),
-                thumb_path_str,
-                file_size,
-            );
-
-            Ok(true) // New photo
-        })();
-
-        match file_result {
-            Ok(true) => {
-                println!("[Import] SUCCESS: {}", path_str);
-                result.success += 1;
-                batch_writes += 1;
-            },
-            Ok(false) => {
-                // Duplicate - already counted above
-                result.duplicates += 1;
-            },
-            Err(e) => {
-                println!("[Import] FAILED: {} - {}", path_str, e);
+            ProcessResult::Failed(_path_str) => {
                 result.failure += 1;
-            },
+            }
+            ProcessResult::New(photo) => {
+                // Deduplicate by hash (another photo with same content may already exist)
+                if index.exists_by_hash(&photo.hash).unwrap_or(false) {
+                    println!("[Import] DUPLICATE (by hash): {}", photo.path_str);
+                    // Clean up copied file for single-file imports (iOS)
+                    let _ = std::fs::remove_file(&photo.path);
+                    result.duplicates += 1;
+                } else {
+                    // Insert into DB
+                    match index.insert(
+                        photo.path_str.clone(),
+                        photo.hash,
+                        photo.metadata,
+                    ) {
+                        Ok(_) => {
+                            let _ = index.update_thumb_info(
+                                photo.path_str,
+                                photo.thumb_path_str,
+                                photo.file_size,
+                            );
+                            result.success += 1;
+                            batch_writes += 1;
+                        }
+                        Err(e) => {
+                            println!("[Import] DB insert error: {}", e);
+                            result.failure += 1;
+                        }
+                    }
+                }
+            }
         }
 
         // Intermediate commit every BATCH_SIZE writes for crash safety
@@ -402,16 +524,20 @@ async fn import_photos(
             batch_writes = 0;
         }
 
-        // Emit progress every photo
+        // Emit progress during Phase 3 (every photo, DB inserts are fast)
         use tauri::Emitter;
-        let _ = window.emit("import-progress", serde_json::json!({
-            "current": i + 1,
-            "total": total,
-            "success": result.success,
-            "failure": result.failure,
-            "duplicates": result.duplicates,
-            "last_path": path_str
-        }));
+        let _ = window.emit(
+            "import-progress",
+            serde_json::json!({
+                "current": skipped + i + 1,
+                "total": total,
+                "success": result.success,
+                "failure": result.failure,
+                "duplicates": result.duplicates,
+                "skipped": skipped,
+                "phase": "importing"
+            }),
+        );
     }
 
     // Commit any remaining writes
@@ -419,8 +545,46 @@ async fn import_photos(
         let _ = index.commit_transaction();
     }
 
-    println!("[Import] Complete! Success: {}, Failure: {}", result.success, result.failure);
-    Ok(result)
+    if cancelled {
+        use tauri::Emitter;
+        let _ = window.emit(
+            "import-cancelled",
+            serde_json::json!({
+                "current": skipped + result.success as usize + result.failure as usize + result.duplicates as usize,
+                "total": total,
+                "success": result.success,
+                "failure": result.failure
+            }),
+        );
+    }
+
+    let phase3_ms = phase3_start.elapsed().as_millis() as u64;
+    let total_ms = import_start.elapsed().as_millis() as u64;
+    let phase1_ms = phase1_ms as u64;
+    let phase2_ms = phase2_ms as u64;
+    println!(
+        "[Import] Phase 3 done in {}ms",
+        phase3_ms
+    );
+    println!(
+        "[Import] Complete! Total: {}ms (Phase1: {}ms, Phase2: {}ms, Phase3: {}ms)",
+        total_ms, phase1_ms, phase2_ms, phase3_ms
+    );
+    println!(
+        "[Import] Results: Success: {}, Failure: {}, Duplicates: {}, Skipped: {}",
+        result.success, result.failure, result.duplicates, skipped
+    );
+    Ok(ImportResultWithTiming {
+        success: result.success,
+        failure: result.failure,
+        duplicates: result.duplicates,
+        skipped: skipped as u32,
+        total: total as u32,
+        total_ms,
+        phase1_ms,
+        phase2_ms,
+        phase3_ms,
+    })
 }
 
 /// Delete result struct

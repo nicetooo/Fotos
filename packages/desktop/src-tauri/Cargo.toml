@@ -26,6 +26,7 @@ footos-platform-desktop = { path = "../../platform-desktop" }
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 tauri-plugin-os = "2.3.2"
 urlencoding = "2.1"
+rayon = "1.10"
 
 [patch.crates-io]
 # Fix iOS crash in wry::wkwebview::platform_webview_version when NSBundle crashes
