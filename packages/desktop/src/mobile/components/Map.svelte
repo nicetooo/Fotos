@@ -803,21 +803,46 @@
             [e.point.x + tolerance, e.point.y + tolerance]
         ];
 
+        // Find the feature closest to the tap point among candidates
+        function closestFeature(features: maplibregl.GeoJSONFeature[], point: maplibregl.Point): maplibregl.GeoJSONFeature {
+            if (features.length === 1) return features[0];
+            let best = features[0];
+            let bestDist = Infinity;
+            for (const f of features) {
+                const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+                const projected = map!.project(coords);
+                const dx = projected.x - point.x;
+                const dy = projected.y - point.y;
+                const dist = dx * dx + dy * dy;
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = f;
+                }
+            }
+            return best;
+        }
+
         // Check clusters first (higher priority — check all cluster layers)
         const clusterFeatures = map.queryRenderedFeatures(bbox, {
             layers: [CLUSTER_THUMB_LAYER_ID, CLUSTER_LAYER_ID, CLUSTER_COUNT_LAYER_ID]
         });
         if (clusterFeatures.length > 0) {
-            const feature = clusterFeatures[0];
+            const feature = closestFeature(clusterFeatures, e.point);
             const clusterId = feature.properties?.cluster_id;
             if (clusterId !== undefined) {
                 const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource;
-                source.getClusterExpansionZoom(clusterId).then((zoom) => {
-                    if (!map) return;
-                    const coords = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
-                    map.easeTo({
-                        center: coords,
-                        zoom: zoom,
+                // Use getClusterChildren to compute bounding box for accurate zoom
+                source.getClusterChildren(clusterId).then((children) => {
+                    if (!map || children.length === 0) return;
+                    // Compute bounds that contain all children
+                    const bounds = new maplibregl.LngLatBounds();
+                    for (const child of children) {
+                        const coords = (child.geometry as GeoJSON.Point).coordinates as [number, number];
+                        bounds.extend(coords);
+                    }
+                    map.fitBounds(bounds, {
+                        padding: 80,
+                        maxZoom: 15,
                         duration: 300
                     });
                 });
@@ -830,7 +855,7 @@
             layers: [UNCLUSTERED_THUMB_LAYER_ID, UNCLUSTERED_LAYER_ID, UNCLUSTERED_BORDER_LAYER_ID]
         });
         if (photoFeatures.length > 0) {
-            const feature = photoFeatures[0];
+            const feature = closestFeature(photoFeatures, e.point);
             const path = feature.properties?.path;
             if (!path) return;
 
