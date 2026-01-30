@@ -50,7 +50,7 @@ impl AndroidPhotoService {
             .map_err(|e| e.to_string())?;
 
         // Create temp file for processing
-        let hash_preview = format!("{:x}", md5_hash(photo_data));
+        let hash_preview = format!("{:x}", quick_hash(photo_data));
         let temp_path = format!("{}/temp_{}.jpg", thumbnail_dir, hash_preview);
         fs::write(&temp_path, photo_data).map_err(|e| e.to_string())?;
 
@@ -78,13 +78,37 @@ impl AndroidPhotoService {
     }
 }
 
-/// Simple hash for temp filename
-fn md5_hash(data: &[u8]) -> u64 {
+/// Simple rolling hash for generating unique temp filenames.
+/// NOT a cryptographic hash -- uses polynomial rolling hash over first 1024 bytes.
+fn quick_hash(data: &[u8]) -> u64 {
     let mut hash: u64 = 0;
     for byte in data.iter().take(1024) {
         hash = hash.wrapping_mul(31).wrapping_add(*byte as u64);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quick_hash_deterministic() {
+        let data = b"hello world photo data";
+        assert_eq!(quick_hash(data), quick_hash(data));
+    }
+
+    #[test]
+    fn test_quick_hash_different_inputs() {
+        let a = b"photo_a.jpg";
+        let b = b"photo_b.jpg";
+        assert_ne!(quick_hash(a), quick_hash(b));
+    }
+
+    #[test]
+    fn test_quick_hash_empty_input() {
+        assert_eq!(quick_hash(b""), 0);
+    }
 }
 
 impl Default for AndroidPhotoService {

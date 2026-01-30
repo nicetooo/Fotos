@@ -32,7 +32,7 @@ pub fn run_import_pipeline(
 ) -> Result<ImportResult, CoreError> {
     let root_path = std::path::Path::new(&root);
     let photos = scan_photos(root_path)?;
-    println!("Found {} photos to process", photos.len());
+    tracing::info!(count = photos.len(), "Found photos to process");
     let mut result = ImportResult::default();
 
     // Batch transaction: commit every N writes for 10-50x speed improvement
@@ -42,7 +42,7 @@ pub fn run_import_pipeline(
 
     for (i, path) in photos.iter().enumerate() {
         if i % 10 == 0 {
-            println!("Processing [{}/{}] ...", i, photos.len());
+            tracing::debug!(current = i, total = photos.len(), "Processing photos");
         }
         // Individual file processing failures increment failure count but don't stop the pipeline
 

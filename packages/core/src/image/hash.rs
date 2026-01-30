@@ -1,4 +1,5 @@
 use crate::error::CoreError;
+use crate::image::parse::{find_jpeg_tiff_header_offset, is_heic_file, is_tiff_based};
 use image_hasher::{HashAlg, HasherConfig};
 use std::io::{BufReader, Cursor, Read, Seek};
 use std::path::Path;
@@ -30,17 +31,6 @@ pub fn compute_hash(path: &Path) -> Result<String, CoreError> {
     compute_file_hash(path)
 }
 
-/// Check if file is HEIC/HEIF format
-fn is_heic_file(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase())
-            .as_deref(),
-        Some("heic" | "heif")
-    )
-}
-
 /// Compute a simple file-based hash for files that can't be decoded
 fn compute_file_hash(path: &Path) -> Result<String, CoreError> {
     use std::collections::hash_map::DefaultHasher;
@@ -54,22 +44,6 @@ fn compute_file_hash(path: &Path) -> Result<String, CoreError> {
     file_size.hash(&mut hasher);
 
     Ok(format!("file:{:016x}", hasher.finish()))
-}
-
-/// Detects if file is JPEG or TIFF-based (RAW) by checking magic bytes.
-fn is_tiff_based(path: &Path) -> bool {
-    let mut file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-
-    let mut magic = [0u8; 2];
-    if file.read_exact(&mut magic).is_err() {
-        return false;
-    }
-
-    // TIFF: starts with II (little-endian) or MM (big-endian)
-    magic == [0x49, 0x49] || magic == [0x4D, 0x4D]
 }
 
 /// Extract embedded JPEG thumbnail data from EXIF.
@@ -134,74 +108,4 @@ fn try_extract_thumbnail_data(path: &Path) -> Result<Vec<u8>, CoreError> {
         .map_err(|_| CoreError::Io("read thumb failed".into()))?;
 
     Ok(thumb_data)
-}
-
-/// Find the TIFF header position in a JPEG file by scanning for EXIF APP1 segment.
-fn find_jpeg_tiff_header_offset(path: &Path) -> Result<u64, CoreError> {
-    let file = std::fs::File::open(path).map_err(|_| CoreError::Io("open failed".into()))?;
-    let mut reader = BufReader::new(file);
-
-    let mut buf = [0u8; 2];
-    reader
-        .read_exact(&mut buf)
-        .map_err(|_| CoreError::Io("read failed".into()))?;
-    if buf != [0xFF, 0xD8] {
-        return Err(CoreError::Io("not jpeg".into()));
-    }
-
-    // Find APP1 EXIF segment
-    loop {
-        reader
-            .read_exact(&mut buf)
-            .map_err(|_| CoreError::Io("read failed".into()))?;
-        if buf[0] != 0xFF {
-            return Err(CoreError::Io("invalid marker".into()));
-        }
-        if buf[1] == 0xE1 {
-            // APP1 - potential EXIF segment
-            let mut len_buf = [0u8; 2];
-            reader
-                .read_exact(&mut len_buf)
-                .map_err(|_| CoreError::Io("read failed".into()))?;
-            let seg_len = u16::from_be_bytes(len_buf) as i64;
-            let mut exif_id = [0u8; 6];
-            reader
-                .read_exact(&mut exif_id)
-                .map_err(|_| CoreError::Io("read failed".into()))?;
-            if &exif_id == b"Exif\0\0" {
-                return reader
-                    .stream_position()
-                    .map_err(|_| CoreError::Io("position failed".into()));
-            }
-            // Not EXIF APP1, skip rest of segment
-            if seg_len > 8 {
-                reader
-                    .seek(std::io::SeekFrom::Current(seg_len - 8))
-                    .map_err(|_| CoreError::Io("seek failed".into()))?;
-            }
-        } else if buf[1] == 0xD9 || buf[1] == 0xDA {
-            // EOI or SOS - no more segments to check
-            break;
-        } else if (buf[1] >= 0xD0 && buf[1] <= 0xD7) || buf[1] == 0x01 {
-            // RST markers (0xD0-0xD7) and TEM (0x01) have no length
-            continue;
-        } else if buf[1] == 0x00 {
-            // Stuffed byte (0xFF 0x00), skip
-            continue;
-        } else {
-            // All other markers have length field - skip them
-            let mut len_buf = [0u8; 2];
-            reader
-                .read_exact(&mut len_buf)
-                .map_err(|_| CoreError::Io("read failed".into()))?;
-            let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
-            if seg_len > 0 {
-                reader
-                    .seek(std::io::SeekFrom::Current(seg_len))
-                    .map_err(|_| CoreError::Io("seek failed".into()))?;
-            }
-        }
-    }
-
-    Err(CoreError::Io("no exif app1".into()))
 }

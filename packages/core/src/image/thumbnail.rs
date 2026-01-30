@@ -1,3 +1,4 @@
+use crate::image::parse::{find_jpeg_tiff_header_offset, is_raw_file, is_tiff_based};
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
@@ -97,40 +98,6 @@ fn generate_image_file(
 }
 
 /// Check if file is a RAW format based on extension
-pub fn is_raw_file(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase())
-            .as_deref(),
-        Some(
-            "cr2"
-                | "cr3"
-                | "nef"
-                | "nrw"
-                | "arw"
-                | "srf"
-                | "sr2"
-                | "dng"
-                | "raf"
-                | "orf"
-                | "rw2"
-                | "pef"
-                | "raw"
-        )
-    )
-}
-
-/// Check if file is HEIC/HEIF format based on extension
-pub fn is_heic_file(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase())
-            .as_deref(),
-        Some("heic" | "heif")
-    )
-}
 
 /// Extract the embedded JPEG preview from a RAW file.
 /// Returns the full-resolution preview JPEG bytes with orientation correction applied.
@@ -303,25 +270,6 @@ fn apply_orientation_to_image(img: image::DynamicImage, orientation: u32) -> ima
 }
 
 /// Detects if file is JPEG or TIFF-based (RAW) by checking magic bytes.
-/// Returns true for TIFF-based files, false for JPEG.
-fn is_tiff_based(source: &Path) -> bool {
-    use std::io::Read;
-
-    let mut file = match std::fs::File::open(source) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-
-    let mut magic = [0u8; 2];
-    if file.read_exact(&mut magic).is_err() {
-        return false;
-    }
-
-    // TIFF: starts with II (little-endian) or MM (big-endian)
-    // JPEG: starts with 0xFF 0xD8
-    magic == [0x49, 0x49] || magic == [0x4D, 0x4D]
-}
-
 /// Attempts to extract and resize embedded EXIF thumbnail.
 /// Returns the JPEG bytes if successful, or an error if not available or too small.
 /// Optimized: reads first 256KB into memory to avoid slow disk seeks.
@@ -384,7 +332,9 @@ fn try_extract_embedded_thumbnail(
                 tiff_offset as u64
             } else {
                 // JPEG: offset is relative to TIFF header in APP1 segment
-                find_jpeg_tiff_header_offset(source)? + tiff_offset as u64
+                find_jpeg_tiff_header_offset(source)
+                    .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?
+                    + tiff_offset as u64
             };
 
             // Try to extract from buffer first (fast path)
@@ -578,85 +528,6 @@ fn extract_jpeg_from_offset(
 
     Err(ThumbnailError::DecodeError(
         "No valid JPEG found".to_string(),
-    ))
-}
-
-/// Find the TIFF header position in a JPEG file by scanning for EXIF APP1 segment.
-fn find_jpeg_tiff_header_offset(source: &Path) -> Result<u64, ThumbnailError> {
-    use std::io::{BufReader, Read, Seek};
-
-    let file =
-        std::fs::File::open(source).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-    let mut reader = BufReader::new(file);
-
-    let mut buf = [0u8; 2];
-    reader
-        .read_exact(&mut buf)
-        .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-    if buf != [0xFF, 0xD8] {
-        return Err(ThumbnailError::DecodeError("Not a JPEG file".to_string()));
-    }
-
-    // Scan for APP1 marker (0xFFE1)
-    loop {
-        reader
-            .read_exact(&mut buf)
-            .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-        if buf[0] != 0xFF {
-            return Err(ThumbnailError::DecodeError(
-                "Invalid JPEG marker".to_string(),
-            ));
-        }
-        if buf[1] == 0xE1 {
-            // APP1 - potential EXIF segment
-            let mut len_buf = [0u8; 2];
-            reader
-                .read_exact(&mut len_buf)
-                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            let seg_len = u16::from_be_bytes(len_buf) as i64;
-            // Check for "Exif\0\0"
-            let mut exif_id = [0u8; 6];
-            reader
-                .read_exact(&mut exif_id)
-                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            if &exif_id == b"Exif\0\0" {
-                // TIFF header starts here
-                return reader
-                    .stream_position()
-                    .map_err(|e| ThumbnailError::DecodeError(e.to_string()));
-            }
-            // Not EXIF APP1, skip rest of segment
-            if seg_len > 8 {
-                reader
-                    .seek(std::io::SeekFrom::Current(seg_len - 8))
-                    .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            }
-        } else if buf[1] == 0xD9 || buf[1] == 0xDA {
-            // EOI or SOS - no EXIF found
-            break;
-        } else if (buf[1] >= 0xD0 && buf[1] <= 0xD7) || buf[1] == 0x01 {
-            // RST markers (0xD0-0xD7) and TEM (0x01) have no length
-            continue;
-        } else if buf[1] == 0x00 {
-            // Stuffed byte (0xFF 0x00), skip
-            continue;
-        } else {
-            // All other markers have length field - skip them
-            let mut len_buf = [0u8; 2];
-            reader
-                .read_exact(&mut len_buf)
-                .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            let seg_len = u16::from_be_bytes(len_buf) as i64 - 2;
-            if seg_len > 0 {
-                reader
-                    .seek(std::io::SeekFrom::Current(seg_len))
-                    .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-            }
-        }
-    }
-
-    Err(ThumbnailError::DecodeError(
-        "EXIF APP1 not found".to_string(),
     ))
 }
 

@@ -27,8 +27,6 @@ export interface PhotoInfo {
     metadata: PhotoMetadata;
     thumb_path?: string;
     file_size: number;
-    created_at?: number;
-    modified_at?: number;
     // For grouped RAW+JPEG pairs
     rawPath?: string;
     hasRaw?: boolean;

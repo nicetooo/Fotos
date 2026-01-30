@@ -38,7 +38,7 @@ impl AppState {
         std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
 
         let index = PhotoIndex::open(db_path.clone()).map_err(|e| {
-            println!("[AppState::init] Failed to open DB: {}", e);
+            tracing::error!(error = %e, "AppState::init: failed to open DB");
             e.to_string()
         })?;
 
@@ -92,7 +92,7 @@ fn get_core_version() -> String {
 /// Must be called once from the frontend at startup, before any DB commands.
 #[tauri::command]
 fn init_app(state: tauri::State<'_, AppState>, db_path: String, thumb_dir: String) -> Result<(), String> {
-    println!("[init_app] db: {}, thumbs: {}", db_path, thumb_dir);
+    tracing::info!(db = %db_path, thumbs = %thumb_dir, "init_app");
     state.init(db_path, thumb_dir)
 }
 
@@ -102,31 +102,31 @@ fn init_app(state: tauri::State<'_, AppState>, db_path: String, thumb_dir: Strin
 /// Typically completes in <50ms even for 10K+ photos.
 #[tauri::command]
 async fn list_photos_preview(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoPreview>, String> {
-    println!("[list_photos_preview] Called");
+    tracing::trace!("list_photos_preview: called");
 
     let index = state.get_index()?;
 
     let previews = index.list_previews().map_err(|e| {
-        println!("[list_photos_preview] Error: {}", e);
+        tracing::error!(error = %e, "list_photos_preview: query failed");
         e.to_string()
     })?;
-    println!("[list_photos_preview] Found {} previews", previews.len());
+    tracing::debug!(count = previews.len(), "list_photos_preview: done");
 
     Ok(previews)
 }
 
 #[tauri::command]
 async fn list_photos(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoInfo>, String> {
-    println!("[list_photos] Called");
+    tracing::trace!("list_photos: called");
 
     let index = state.get_index()?;
     let thumb_dir = state.get_thumb_dir()?;
 
     let mut photos = index.list().map_err(|e| {
-        println!("[list_photos] Error listing photos: {}", e);
+        tracing::error!(error = %e, "list_photos: query failed");
         e.to_string()
     })?;
-    println!("[list_photos] Found {} photos", photos.len());
+    tracing::debug!(count = photos.len(), "list_photos: done");
 
     // Only resolve thumb_path/file_size for photos that don't have them in the DB.
     // Photos imported after the preview aggregation update will already have these values.
@@ -174,7 +174,7 @@ async fn list_photos(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoInfo>
     }
 
     if backfill_count > 0 {
-        println!("[list_photos] Backfilled thumb info for {} photos", backfill_count);
+        tracing::debug!(count = backfill_count, "list_photos: backfilled thumb info");
     }
 
     Ok(photos)
@@ -223,7 +223,7 @@ async fn import_photos(
     root_path: String,
 ) -> Result<ImportResultWithTiming, String> {
     let import_start = std::time::Instant::now();
-    println!("[Import] Starting import for: {}", root_path);
+    tracing::info!(path = %root_path, "Import: starting");
 
     let index = state.get_index()?;
     let thumb_dir = state.get_thumb_dir()?;
@@ -236,13 +236,13 @@ async fn import_photos(
             let decoded = urlencoding::decode(&root_path[7..])
                 .map_err(|e| format!("Failed to decode file URI: {}", e))?
                 .into_owned();
-            println!("[Import] Decoded file URI: {} -> {}", root_path, decoded);
+            tracing::debug!(from = %root_path, to = %decoded, "Import: decoded file URI");
             root_path = decoded;
         } else {
             break;
         }
     }
-    println!("[Import] Final path: {}", root_path);
+    tracing::debug!(path = %root_path, "Import: resolved path");
 
     // Reset cancellation flag at start
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
@@ -255,13 +255,16 @@ async fn import_photos(
     let root_path_buf = std::path::Path::new(&root_path);
 
     // Check if path exists
-    println!("[Import] Checking path exists: {}", root_path_buf.exists());
-    println!("[Import] Is file: {}", root_path_buf.is_file());
-    println!("[Import] Is dir: {}", root_path_buf.is_dir());
+    tracing::debug!(
+        exists = root_path_buf.exists(),
+        is_file = root_path_buf.is_file(),
+        is_dir = root_path_buf.is_dir(),
+        "Import: path check"
+    );
 
     // Quick check: if file doesn't exist, return early with error
     if !root_path_buf.exists() {
-        println!("[Import] File does not exist: {}", root_path);
+        tracing::error!(path = %root_path, "Import: path does not exist");
         return Err(format!("File does not exist: {}", root_path));
     }
 
@@ -270,17 +273,17 @@ async fn import_photos(
         .map(|p| p.join("Photos"))
         .unwrap_or_else(|| std::path::PathBuf::from(&config.thumbnail_dir).join("Photos"));
     std::fs::create_dir_all(&photos_dir).map_err(|e| {
-        println!("[Import] Failed to create photos dir: {}", e);
+        tracing::error!(error = %e, "Import: failed to create photos dir");
         e.to_string()
     })?;
-    println!("[Import] Photos storage dir: {:?}", photos_dir);
+    tracing::debug!(dir = ?photos_dir, "Import: photos storage dir ready");
 
     // Support both single file and directory import
     let photos = if root_path_buf.is_file() {
-        println!("[Import] Processing as single file");
+        tracing::debug!("Import: processing as single file");
         // Verify file is readable
         if let Err(e) = std::fs::metadata(&root_path_buf) {
-            println!("[Import] Cannot read file metadata: {}", e);
+            tracing::error!(error = %e, "Import: cannot read file metadata");
             return Err(format!("Cannot read file: {}", e));
         }
 
@@ -295,9 +298,9 @@ async fn import_photos(
 
         // Only copy if source and dest are different
         if root_path_buf != dest_path {
-            println!("[Import] Copying to permanent storage: {:?}", dest_path);
+            tracing::debug!(dest = ?dest_path, "Import: copying to permanent storage");
             std::fs::copy(&root_path_buf, &dest_path).map_err(|e| {
-                println!("[Import] Failed to copy file: {}", e);
+                tracing::error!(error = %e, "Import: failed to copy file");
                 e.to_string()
             })?;
             vec![dest_path]
@@ -305,20 +308,20 @@ async fn import_photos(
             vec![root_path_buf.to_path_buf()]
         }
     } else {
-        println!("[Import] Processing as directory");
+        tracing::debug!("Import: processing as directory");
         footos_core::scan_photos(root_path_buf).map_err(|e| {
-            println!("[Import] Scan error: {}", e);
+            tracing::error!(error = %e, "Import: scan failed");
             e.to_string()
         })?
     };
     let total = photos.len();
-    println!("[Import] Found {} photos to process", total);
+    tracing::info!(count = total, "Import: found photos to process");
 
     let mut result = ImportResult::default();
 
     // If no photos found, return early
     if total == 0 {
-        println!("[Import] No photos to import");
+        tracing::info!("Import: no photos to import");
         return Ok(ImportResultWithTiming {
             total: total as u32,
             total_ms: import_start.elapsed().as_millis() as u64,
@@ -344,9 +347,11 @@ async fn import_photos(
     }
     let new_count = new_photos.len();
     let phase1_ms = phase1_start.elapsed().as_millis();
-    println!(
-        "[Import] Phase 1 done in {}ms: {} new, {} already imported",
-        phase1_ms, new_count, skipped
+    tracing::info!(
+        duration_ms = %phase1_ms,
+        new = new_count,
+        skipped = skipped,
+        "Import: Phase 1 (filter) complete"
     );
 
     // Emit initial progress (skipped photos accounted for)
@@ -407,7 +412,7 @@ async fn import_photos(
             let hash = match footos_core::compute_hash(path) {
                 Ok(h) => h,
                 Err(e) => {
-                    println!("[Import] Hash error for {}: {}", path_str, e);
+                    tracing::error!(path = %path_str, error = %e, "Import: hash failed");
                     return ProcessResult::Failed(path_str);
                 }
             };
@@ -421,7 +426,7 @@ async fn import_photos(
             let metadata = match footos_core::read_metadata(path) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("[Import] Metadata error for {}: {}", path_str, e);
+                    tracing::error!(path = %path_str, error = %e, "Import: metadata read failed");
                     return ProcessResult::Failed(path_str);
                 }
             };
@@ -464,9 +469,10 @@ async fn import_photos(
         .collect();
 
     let phase2_ms = phase2_start.elapsed().as_millis();
-    println!(
-        "[Import] Phase 2 done in {}ms: {} items processed in parallel",
-        phase2_ms, processed.len()
+    tracing::info!(
+        duration_ms = %phase2_ms,
+        count = processed.len(),
+        "Import: Phase 2 (parallel processing) complete"
     );
 
     // ── Phase 3 (Sequential): Deduplicate by hash + DB inserts in batched transactions ──
@@ -488,7 +494,7 @@ async fn import_photos(
             ProcessResult::New(photo) => {
                 // Deduplicate by hash (another photo with same content may already exist)
                 if index.exists_by_hash(&photo.hash).unwrap_or(false) {
-                    println!("[Import] DUPLICATE (by hash): {}", photo.path_str);
+                    tracing::warn!(path = %photo.path_str, "Import: duplicate by hash, skipping");
                     // Clean up copied file for single-file imports (iOS)
                     let _ = std::fs::remove_file(&photo.path);
                     result.duplicates += 1;
@@ -509,7 +515,7 @@ async fn import_photos(
                             batch_writes += 1;
                         }
                         Err(e) => {
-                            println!("[Import] DB insert error: {}", e);
+                            tracing::error!(error = %e, "Import: DB insert failed");
                             result.failure += 1;
                         }
                     }
@@ -562,17 +568,20 @@ async fn import_photos(
     let total_ms = import_start.elapsed().as_millis() as u64;
     let phase1_ms = phase1_ms as u64;
     let phase2_ms = phase2_ms as u64;
-    println!(
-        "[Import] Phase 3 done in {}ms",
-        phase3_ms
+    tracing::info!(duration_ms = phase3_ms, "Import: Phase 3 (DB insert) complete");
+    tracing::info!(
+        total_ms,
+        phase1_ms,
+        phase2_ms,
+        phase3_ms,
+        "Import: all phases complete"
     );
-    println!(
-        "[Import] Complete! Total: {}ms (Phase1: {}ms, Phase2: {}ms, Phase3: {}ms)",
-        total_ms, phase1_ms, phase2_ms, phase3_ms
-    );
-    println!(
-        "[Import] Results: Success: {}, Failure: {}, Duplicates: {}, Skipped: {}",
-        result.success, result.failure, result.duplicates, skipped
+    tracing::info!(
+        success = result.success,
+        failure = result.failure,
+        duplicates = result.duplicates,
+        skipped = skipped,
+        "Import: results"
     );
     Ok(ImportResultWithTiming {
         success: result.success,
@@ -938,6 +947,13 @@ async fn download_tile(cache_dir: String, z: u32, x: u32, y: u32, url: String) -
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "footos=info".into()),
+        )
+        .init();
+
     tauri::Builder::default()
         .manage(AppState::new())
         .plugin(tauri_plugin_opener::init())

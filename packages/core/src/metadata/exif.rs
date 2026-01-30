@@ -132,10 +132,15 @@ fn get_gps_coord(exif: &exif::Exif, tag: Tag, ref_tag: Tag) -> Option<f64> {
 
     if let Value::Rational(v) = value {
         if v.len() >= 3 {
-            // Debug: log the raw rational values
-            println!(
-                "[EXIF GPS] Raw values: {:?}/{:?}, {:?}/{:?}, {:?}/{:?}, ref={}",
-                v[0].num, v[0].denom, v[1].num, v[1].denom, v[2].num, v[2].denom, ref_val
+            tracing::debug!(
+                deg_num = v[0].num,
+                deg_den = v[0].denom,
+                min_num = v[1].num,
+                min_den = v[1].denom,
+                sec_num = v[2].num,
+                sec_den = v[2].denom,
+                ref_val,
+                "EXIF GPS raw values"
             );
 
             let deg = v[0].to_f64();
@@ -144,10 +149,7 @@ fn get_gps_coord(exif: &exif::Exif, tag: Tag, ref_tag: Tag) -> Option<f64> {
 
             // Check for NaN values (can happen with zero denominators)
             if deg.is_nan() || min.is_nan() || sec.is_nan() {
-                println!(
-                    "[EXIF GPS] NaN detected: deg={}, min={}, sec={}",
-                    deg, min, sec
-                );
+                tracing::warn!(deg, min, sec, "EXIF GPS NaN detected in coordinates");
                 return None;
             }
 
@@ -155,7 +157,7 @@ fn get_gps_coord(exif: &exif::Exif, tag: Tag, ref_tag: Tag) -> Option<f64> {
 
             // Final NaN check
             if res.is_nan() {
-                println!("[EXIF GPS] Final result is NaN");
+                tracing::warn!("EXIF GPS final result is NaN");
                 return None;
             }
 

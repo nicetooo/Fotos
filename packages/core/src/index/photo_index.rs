@@ -204,8 +204,6 @@ impl PhotoIndex {
                 },
                 thumb_path: None,
                 file_size: 0,
-                created_at: None,
-                modified_at: None,
             })
         })?;
 
@@ -264,8 +262,6 @@ impl PhotoIndex {
                 },
                 thumb_path: None,
                 file_size: 0,
-                created_at: None,
-                modified_at: None,
             })
         })?;
 
@@ -375,7 +371,7 @@ impl PhotoIndex {
             match row {
                 Ok(preview) => results.push(preview),
                 Err(e) => {
-                    println!("[PhotoIndex::list_previews] Row error: {}", e);
+                    tracing::warn!(error = %e, "PhotoIndex::list_previews row error");
                 }
             }
         }
@@ -401,7 +397,7 @@ impl PhotoIndex {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM photos", [], |row| row.get(0))
             .unwrap_or(-1);
-        println!("[PhotoIndex::list] Raw count from DB: {}", count);
+        tracing::debug!(count, "PhotoIndex::list raw count from DB");
 
         let mut stmt = conn.prepare(
             "SELECT 
@@ -432,8 +428,6 @@ impl PhotoIndex {
                 // Read thumb_path and file_size from DB (persisted during import)
                 thumb_path: row.get(14)?,
                 file_size: row.get::<_, Option<i64>>(15)?.unwrap_or(0) as u64,
-                created_at: None,
-                modified_at: None,
             })
         })?;
 
@@ -450,16 +444,13 @@ impl PhotoIndex {
                 Err(e) => {
                     error_count += 1;
                     if error_count <= 3 {
-                        println!("[PhotoIndex::list] Row error: {}", e);
+                        tracing::warn!(error = %e, "PhotoIndex::list row error");
                     }
                 }
             }
         }
 
-        println!(
-            "[PhotoIndex::list] Success: {}, Errors: {}",
-            success_count, error_count
-        );
+        tracing::debug!(success_count, error_count, "PhotoIndex::list completed");
         Ok(results)
     }
 }
