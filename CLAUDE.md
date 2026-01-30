@@ -200,6 +200,12 @@ SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去�
 - 缩略图通过 `map.addImage()` 注入 GL atlas，由 `styleimagemissing` 事件按需加载
 - 聚类层 ID：`CLUSTER_THUMB_LAYER_ID`（聚类缩略图）、`UNCLUSTERED_THUMB_LAYER_ID`（单点缩略图）
 
+### 聚类点击定位：fitBounds + getClusterChildren
+
+- ✅ 点击聚类时，必须用 `getClusterChildren(clusterId)` 获取子要素，计算边界框，再 `fitBounds` 定位
+- ❌ 禁止使用 `getClusterExpansionZoom` + `easeTo`（该 API 返回聚类首次分裂的 zoom，可能**低于**当前 zoom，导致地图缩小而非放大）
+- 点击处理使用 `queryRenderedFeatures(bbox)` + `closestFeature()` 选取离触摸点最近的要素（bbox 内可能有多个聚类）
+
 ### 缩略图内存管理：LRU + Atlas 淘汰
 
 - **JS 堆**：`thumbDataCache`（LRU Map，最大 120 条，~3.6MB）。`thumbCacheGet()` 访问时移到末尾，`thumbCacheSet()` 超限时淘汰最旧
