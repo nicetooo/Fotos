@@ -25,6 +25,8 @@
         getRawFileSize,
     } from "../shared";
 
+    type MediaFilter = 'all' | 'photo' | 'video' | 'live_photo';
+
     // i18n
     import { createI18nState, type Locale } from "../shared/i18n";
 
@@ -87,7 +89,19 @@
         return "desc";
     })());
 
-    // Save sort options when changed
+    // Media type filter state with localStorage persistence
+    const MEDIA_FILTER_KEY = "footos-media-filter";
+    let mediaFilter = $state<MediaFilter>((() => {
+        if (typeof localStorage !== "undefined") {
+            const saved = localStorage.getItem(MEDIA_FILTER_KEY);
+            if (saved === "all" || saved === "photo" || saved === "video" || saved === "live_photo") {
+                return saved;
+            }
+        }
+        return "all";
+    })());
+
+    // Save sort options and filter when changed
     $effect(() => {
         if (typeof localStorage !== "undefined") {
             localStorage.setItem(SORT_BY_KEY, sortBy);
@@ -96,6 +110,11 @@
     $effect(() => {
         if (typeof localStorage !== "undefined") {
             localStorage.setItem(SORT_ORDER_KEY, sortOrder);
+        }
+    });
+    $effect(() => {
+        if (typeof localStorage !== "undefined") {
+            localStorage.setItem(MEDIA_FILTER_KEY, mediaFilter);
         }
     });
 
@@ -161,8 +180,15 @@
     // Group RAW+JPEG pairs
     let groupedPhotos = $derived(groupPhotos(photos));
 
+    // Filter by media type
+    let filteredPhotos = $derived(
+        mediaFilter === 'all'
+            ? groupedPhotos
+            : groupedPhotos.filter(p => (p.media_type || 'photo') === mediaFilter)
+    );
+
     // Sort photos
-    let sortedPhotos = $derived(sortPhotos(groupedPhotos, sortBy, sortOrder));
+    let sortedPhotos = $derived(sortPhotos(filteredPhotos, sortBy, sortOrder));
 
     onMount(async () => {
         try {
@@ -464,7 +490,9 @@
                         <i class="fa-solid fa-images theme-text-muted text-sm"></i>
                         <span class="theme-text-primary font-medium">
                             {sortedPhotos.length} {t.nav.photos}
-                            {#if sortedPhotos.length !== photos.length}
+                            {#if mediaFilter !== 'all' && sortedPhotos.length !== groupedPhotos.length}
+                                <span class="theme-text-muted text-xs">/ {groupedPhotos.length}</span>
+                            {:else if sortedPhotos.length !== photos.length}
                                 <span class="theme-text-muted text-xs">({photos.length} {t.nav.files})</span>
                             {/if}
                         </span>
@@ -525,6 +553,42 @@
                     >
                         <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
                     </button>
+
+                    <!-- Media type filter pills -->
+                    <div class="flex items-center gap-0.5 ml-1.5 px-0.5 py-0.5 rounded theme-bg-primary">
+                        <button
+                            onclick={() => mediaFilter = 'all'}
+                            class="h-[22px] px-2 rounded text-[11px] transition-all {mediaFilter === 'all'
+                                ? 'theme-bg-tertiary theme-text-primary font-medium shadow-sm'
+                                : 'theme-text-muted hover:theme-text-secondary'}"
+                        >
+                            {t.library.filterAll}
+                        </button>
+                        <button
+                            onclick={() => mediaFilter = 'photo'}
+                            class="h-[22px] px-2 rounded text-[11px] transition-all {mediaFilter === 'photo'
+                                ? 'theme-bg-tertiary theme-text-primary font-medium shadow-sm'
+                                : 'theme-text-muted hover:theme-text-secondary'}"
+                        >
+                            <i class="fa-solid fa-image text-[9px] mr-1"></i>{t.library.filterPhotos}
+                        </button>
+                        <button
+                            onclick={() => mediaFilter = 'video'}
+                            class="h-[22px] px-2 rounded text-[11px] transition-all {mediaFilter === 'video'
+                                ? 'theme-bg-tertiary theme-text-primary font-medium shadow-sm'
+                                : 'theme-text-muted hover:theme-text-secondary'}"
+                        >
+                            <i class="fa-solid fa-video text-[9px] mr-1"></i>{t.library.filterVideos}
+                        </button>
+                        <button
+                            onclick={() => mediaFilter = 'live_photo'}
+                            class="h-[22px] px-2 rounded text-[11px] transition-all {mediaFilter === 'live_photo'
+                                ? 'theme-bg-tertiary theme-text-primary font-medium shadow-sm'
+                                : 'theme-text-muted hover:theme-text-secondary'}"
+                        >
+                            <i class="fa-solid fa-bolt text-[9px] mr-1"></i>{t.library.filterLivePhotos}
+                        </button>
+                    </div>
 
                     <div class="flex-1"></div>
 

@@ -50,6 +50,10 @@ export const ru: Translations = {
         sortSize: 'Размеру',
         ascending: 'По возрастанию',
         descending: 'По убыванию',
+        filterAll: 'Все',
+        filterPhotos: 'Фото',
+        filterVideos: 'Видео',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

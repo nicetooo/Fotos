@@ -76,6 +76,10 @@ export interface Translations {
         sortSize: string;
         ascending: string;
         descending: string;
+        filterAll: string;
+        filterPhotos: string;
+        filterVideos: string;
+        filterLivePhotos: string;
     };
 
     // Preview

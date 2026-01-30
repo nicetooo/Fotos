@@ -50,6 +50,10 @@ export const tr: Translations = {
         sortSize: 'Boyut',
         ascending: 'Artan',
         descending: 'Azalan',
+        filterAll: 'Tümü',
+        filterPhotos: 'Fotoğraflar',
+        filterVideos: 'Videolar',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

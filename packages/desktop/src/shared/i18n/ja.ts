@@ -50,6 +50,10 @@ export const ja: Translations = {
         sortSize: 'サイズ',
         ascending: '昇順',
         descending: '降順',
+        filterAll: 'すべて',
+        filterPhotos: '写真',
+        filterVideos: '動画',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

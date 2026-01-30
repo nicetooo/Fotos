@@ -50,6 +50,10 @@ export const nl: Translations = {
         sortSize: 'Grootte',
         ascending: 'Oplopend',
         descending: 'Aflopend',
+        filterAll: 'Alles',
+        filterPhotos: "Foto's",
+        filterVideos: "Video's",
+        filterLivePhotos: 'Live',
     },
 
     preview: {

@@ -50,6 +50,10 @@ export const it: Translations = {
         sortSize: 'Dimensione',
         ascending: 'Crescente',
         descending: 'Decrescente',
+        filterAll: 'Tutto',
+        filterPhotos: 'Foto',
+        filterVideos: 'Video',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

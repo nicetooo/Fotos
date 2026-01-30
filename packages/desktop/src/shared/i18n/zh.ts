@@ -50,6 +50,10 @@ export const zh: Translations = {
         sortSize: '大小',
         ascending: '升序',
         descending: '降序',
+        filterAll: '全部',
+        filterPhotos: '照片',
+        filterVideos: '视频',
+        filterLivePhotos: '实况',
     },
 
     preview: {

@@ -50,6 +50,10 @@ export const th: Translations = {
         sortSize: 'ขนาด',
         ascending: 'น้อยไปมาก',
         descending: 'มากไปน้อย',
+        filterAll: 'ทั้งหมด',
+        filterPhotos: 'รูปภาพ',
+        filterVideos: 'วิดีโอ',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

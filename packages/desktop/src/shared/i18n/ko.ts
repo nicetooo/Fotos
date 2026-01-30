@@ -50,6 +50,10 @@ export const ko: Translations = {
         sortSize: '크기',
         ascending: '오름차순',
         descending: '내림차순',
+        filterAll: '전체',
+        filterPhotos: '사진',
+        filterVideos: '동영상',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

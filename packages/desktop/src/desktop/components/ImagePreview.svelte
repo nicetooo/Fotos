@@ -210,35 +210,16 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#if mediaType === 'video'}
-    <!-- Video preview: thumbnail + centered play button -->
+    <!-- Video preview: inline playback -->
     <div class="relative w-full h-full flex items-center justify-center bg-black">
-        {#if imageSrc}
-            <img
-                src={imageSrc}
-                {alt}
-                class="max-w-full max-h-full object-contain opacity-70"
-                onload={handleLoad}
-                onerror={handleError}
-            />
-        {:else if thumbPath}
-            <img
-                src={convertFileSrc(thumbPath)}
-                {alt}
-                class="max-w-full max-h-full object-contain opacity-70"
-                onload={handleLoad}
-                onerror={handleError}
-            />
-        {/if}
-        <button
-            class="absolute inset-0 flex items-center justify-center cursor-pointer"
-            onclick={openInSystemPlayer}
-        >
-            <div class="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm
-                        flex items-center justify-center
-                        hover:bg-white/30 transition-colors">
-                <i class="fa-solid fa-play text-white text-3xl ml-1"></i>
-            </div>
-        </button>
+        <video
+            src={convertFileSrc(src)}
+            controls
+            autoplay
+            loop
+            class="max-w-full max-h-full object-contain"
+            poster={thumbPath ? convertFileSrc(thumbPath) : undefined}
+        ></video>
     </div>
 
 {:else if mediaType === 'live_photo'}

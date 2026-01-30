@@ -7,6 +7,7 @@ pub struct PhotoId {
 
 /// Media type classification for photos, videos, and Live Photos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, uniffi::Enum)]
+#[serde(rename_all = "snake_case")]
 pub enum MediaType {
     Photo,
     Video,

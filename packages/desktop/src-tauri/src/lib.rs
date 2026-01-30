@@ -452,9 +452,37 @@ async fn import_photos(
                 return ProcessResult::Cancelled;
             }
 
-            // Read metadata (video uses mp4 parser, photo uses EXIF)
+            // Read metadata (video uses mp4 parser + ffprobe, photo uses EXIF)
             let metadata = if is_video {
-                footos_core::read_video_metadata(path).unwrap_or_default()
+                let mut meta = footos_core::read_video_metadata(path).unwrap_or_default();
+                // Always call ffprobe for videos:
+                // - Core mp4 crate doesn't extract GPS at all
+                // - Non-MP4 formats (MKV, AVI, WebM) need ffprobe for everything
+                if let Some(probe) = ffprobe_metadata(&path_str) {
+                    if meta.duration_ms.is_none() {
+                        meta.duration_ms = probe.duration_ms;
+                    }
+                    if meta.width == 0 && meta.height == 0 {
+                        meta.width = probe.width;
+                        meta.height = probe.height;
+                    }
+                    if meta.video_codec.is_none() {
+                        meta.video_codec = probe.video_codec;
+                    }
+                    if meta.audio_codec.is_none() {
+                        meta.audio_codec = probe.audio_codec;
+                    }
+                    if meta.date_taken.is_none() {
+                        meta.date_taken = probe.date_taken;
+                    }
+                    if meta.lat.is_none() {
+                        meta.lat = probe.lat;
+                    }
+                    if meta.lon.is_none() {
+                        meta.lon = probe.lon;
+                    }
+                }
+                meta
             } else {
                 match footos_core::read_metadata(path) {
                     Ok(m) => m,
@@ -787,15 +815,22 @@ async fn regenerate_thumbnails(
 
     for (i, photo) in photos.iter().enumerate() {
         let path = std::path::PathBuf::from(&photo.path);
+        let is_video = photo.media_type == MediaType::Video || photo.media_type == MediaType::LivePhoto
+            || footos_core::is_supported_video(&path);
 
-        let file_result = footos_core::generate_thumbnail(&path, &config);
+        // Video: use FFmpeg; Photo: use image decoder
+        let thumb_result: Option<String> = if is_video {
+            extract_video_thumbnail_sync(&path, &config.thumbnail_dir)
+        } else {
+            footos_core::generate_thumbnail(&path, &config)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        };
 
-        match &file_result {
-            Ok(thumb_path) => {
+        match thumb_result {
+            Some(thumb_str) => {
                 success += 1;
                 batch_writes += 1;
-                // Persist the new thumbnail path in DB
-                let thumb_str = thumb_path.to_string_lossy().to_string();
                 let file_size = std::fs::metadata(&path)
                     .map(|m| m.len())
                     .unwrap_or(photo.file_size);
@@ -805,7 +840,7 @@ async fn regenerate_thumbnails(
                     file_size,
                 );
             }
-            Err(_) => failure += 1,
+            None => failure += 1,
         }
 
         // Intermediate commit every BATCH_SIZE writes
@@ -1130,6 +1165,129 @@ async fn read_video_metadata_ffprobe(path: String) -> Result<serde_json::Value, 
 
     serde_json::from_slice(&output.stdout)
         .map_err(|e| format!("Parse ffprobe output failed: {}", e))
+}
+
+/// Metadata extracted from ffprobe (platform fallback for non-MP4 formats)
+struct FfprobeMetadata {
+    duration_ms: Option<u64>,
+    width: u32,
+    height: u32,
+    video_codec: Option<String>,
+    audio_codec: Option<String>,
+    date_taken: Option<String>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+}
+
+/// Parse ISO 6709 location string into (lat, lon).
+/// Formats: "+35.6762+139.6503/" or "+35.6762+139.6503+026.000/"
+fn parse_iso6709(s: &str) -> Option<(Option<f64>, Option<f64>)> {
+    // Strip trailing "/" or other suffixes
+    let s = s.trim_end_matches('/');
+    if s.is_empty() {
+        return None;
+    }
+
+    // Find the second +/- sign (start of longitude)
+    // First char is always +/- for latitude
+    let lon_start = s[1..].find(|c: char| c == '+' || c == '-').map(|i| i + 1)?;
+
+    // Longitude ends at the next +/- (altitude) or end of string
+    let lon_end = s[lon_start + 1..]
+        .find(|c: char| c == '+' || c == '-')
+        .map(|i| lon_start + 1 + i)
+        .unwrap_or(s.len());
+
+    let lat: f64 = s[..lon_start].parse().ok()?;
+    let lon: f64 = s[lon_start..lon_end].parse().ok()?;
+
+    // Sanity check
+    if lat.abs() > 90.0 || lon.abs() > 180.0 {
+        return None;
+    }
+
+    Some((Some(lat), Some(lon)))
+}
+
+/// Extract video metadata using ffprobe CLI.
+/// Used as fallback when Core's mp4 parser returns empty results.
+fn ffprobe_metadata(path: &str) -> Option<FfprobeMetadata> {
+    let output = std::process::Command::new("ffprobe")
+        .args([
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            path,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+
+    // Duration from format section (seconds as string)
+    let duration_ms = json["format"]["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|secs| (secs * 1000.0) as u64);
+
+    // Find video stream for dimensions and codec
+    let streams = json["streams"].as_array();
+    let video_stream = streams.and_then(|arr| {
+        arr.iter().find(|s| s["codec_type"].as_str() == Some("video"))
+    });
+    let audio_stream = streams.and_then(|arr| {
+        arr.iter().find(|s| s["codec_type"].as_str() == Some("audio"))
+    });
+
+    let width = video_stream
+        .and_then(|s| s["width"].as_u64())
+        .unwrap_or(0) as u32;
+    let height = video_stream
+        .and_then(|s| s["height"].as_u64())
+        .unwrap_or(0) as u32;
+    let video_codec = video_stream
+        .and_then(|s| s["codec_name"].as_str())
+        .map(|s| s.to_string());
+    let audio_codec = audio_stream
+        .and_then(|s| s["codec_name"].as_str())
+        .map(|s| s.to_string());
+
+    // Creation time from format tags
+    let tags = &json["format"]["tags"];
+    let date_taken = tags["creation_time"]
+        .as_str()
+        .and_then(|s| {
+            // ffprobe returns ISO 8601: "2024-01-15T09:30:00.000000Z"
+            // Convert to EXIF format: "2024-01-15 09:30:00"
+            s.get(..19).map(|t| t.replace('T', " "))
+        });
+
+    // GPS from format tags
+    // Apple: com.apple.quicktime.location.ISO6709 = "+35.6762+139.6503+026.000/"
+    // Android: location = "+35.6762+139.6503/"
+    let (lat, lon) = tags["com.apple.quicktime.location.ISO6709"]
+        .as_str()
+        .or_else(|| tags["location"].as_str())
+        .and_then(parse_iso6709)
+        .unwrap_or((None, None));
+
+    Some(FfprobeMetadata {
+        duration_ms,
+        width,
+        height,
+        video_codec,
+        audio_codec,
+        date_taken,
+        lat,
+        lon,
+    })
 }
 
 /// FFmpeg video thumbnail extraction (sync version, for rayon parallel processing)

@@ -50,6 +50,10 @@ export const ar: Translations = {
         sortSize: 'الحجم',
         ascending: 'تصاعدي',
         descending: 'تنازلي',
+        filterAll: 'الكل',
+        filterPhotos: 'صور',
+        filterVideos: 'فيديو',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

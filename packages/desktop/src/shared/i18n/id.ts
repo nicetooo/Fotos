@@ -50,6 +50,10 @@ export const id: Translations = {
         sortSize: 'Ukuran',
         ascending: 'Menaik',
         descending: 'Menurun',
+        filterAll: 'Semua',
+        filterPhotos: 'Foto',
+        filterVideos: 'Video',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

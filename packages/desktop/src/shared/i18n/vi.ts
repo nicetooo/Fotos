@@ -50,6 +50,10 @@ export const vi: Translations = {
         sortSize: 'Kích thước',
         ascending: 'Tăng dần',
         descending: 'Giảm dần',
+        filterAll: 'Tất cả',
+        filterPhotos: 'Ảnh',
+        filterVideos: 'Video',
+        filterLivePhotos: 'Live',
     },
 
     preview: {

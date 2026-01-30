@@ -132,12 +132,26 @@
                     onclick={() => onPhotoClick(photo)}
                     title={photo.path.split("/").pop()}
                 >
-                    <img
-                        src={convertFileSrc(photo.thumb_path || photo.path)}
-                        alt=""
-                        class="w-full h-full object-cover"
-                        loading="lazy"
-                    />
+                    {#if photo.thumb_path}
+                        <img
+                            src={convertFileSrc(photo.thumb_path)}
+                            alt=""
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                        />
+                    {:else if photo.media_type === 'video' || photo.media_type === 'live_photo'}
+                        <!-- Video without thumbnail: show placeholder instead of loading raw video -->
+                        <div class="w-full h-full flex items-center justify-center theme-bg-tertiary">
+                            <i class="fa-solid fa-film text-2xl theme-text-muted"></i>
+                        </div>
+                    {:else}
+                        <img
+                            src={convertFileSrc(photo.path)}
+                            alt=""
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                        />
+                    {/if}
                     {#if photo.hasRaw}
                         <div class="absolute top-1 right-1 bg-amber-600 text-white text-[8px] font-bold px-1 rounded">R</div>
                     {:else if photo.isRawOnly}
