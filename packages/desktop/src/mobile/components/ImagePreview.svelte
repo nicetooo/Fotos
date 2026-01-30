@@ -4,11 +4,13 @@
     import { appDataDir } from "@tauri-apps/api/path";
     import type { Translations } from "../../shared/i18n/types";
 
-    let { src, alt = "Preview", thumbPath = "", t } = $props<{
+    let { src, alt = "Preview", thumbPath = "", t, mediaType = "photo", videoPath = "" } = $props<{
         src: string;
         alt?: string;
         thumbPath?: string;
         t: Translations;
+        mediaType?: string;
+        videoPath?: string;
     }>();
 
     let container: HTMLDivElement | undefined = $state();
@@ -23,6 +25,16 @@
     let rawPreviewFailed = $state(false);
     let loading = $state(false);
     let lastSrc = "";
+    let liveVideoPlaying = $state(false);
+
+    // Video helper: open in system player
+    async function openInSystemPlayer() {
+        try {
+            await invoke("open_in_system_player", { path: src });
+        } catch (e) {
+            console.error("Failed to open in system player:", e);
+        }
+    }
 
     // Check if file is a RAW format
     const RAW_EXTENSIONS = ["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng", "raf", "orf", "rw2", "pef", "raw"];
@@ -197,60 +209,137 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-    bind:this={container}
-    class="w-full h-full overflow-auto bg-transparent"
-    onwheel={handleWheel}
-    ondblclick={handleDoubleClick}
->
-    <div
-        class="flex items-center justify-center"
-        style="min-width: {Math.max(containerWidth, zoomedWidth)}px; min-height: {Math.max(containerHeight, zoomedHeight)}px;"
-    >
-        {#if error && !loading}
-            <div class="flex flex-col items-center justify-center text-neutral-500 gap-3">
-                <i class="fa-solid fa-image-slash text-4xl"></i>
-                <p class="text-sm">{t.imageError.unableToLoad}</p>
-                <p class="text-xs text-neutral-600">
-                    {#if isRaw}
-                        {t.imageError.rawPreviewFailed}
-                    {:else}
-                        {t.imageError.fileMissing}
-                    {/if}
-                </p>
-            </div>
-        {:else if !loaded || loading}
-            <div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                <i class="fa-solid fa-spinner fa-spin text-neutral-500 text-2xl"></i>
-                {#if isRaw && loading}
-                    <p class="text-neutral-500 text-xs">{t.imageError.extractingRaw}</p>
-                {/if}
-            </div>
-        {/if}
+{#if mediaType === 'video'}
+    <!-- Video preview: thumbnail + centered play button -->
+    <div class="relative w-full h-full flex items-center justify-center bg-black">
         {#if imageSrc}
-        <img
-            src={imageSrc}
-            {alt}
-            class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
-            style="width: {zoomedWidth}px; height: {zoomedHeight}px;"
-            onload={handleLoad}
-            onerror={handleError}
-            draggable="false"
-        />
+            <img
+                src={imageSrc}
+                {alt}
+                class="max-w-full max-h-full object-contain opacity-70"
+                onload={handleLoad}
+                onerror={handleError}
+            />
+        {:else if thumbPath}
+            <img
+                src={convertFileSrc(thumbPath)}
+                {alt}
+                class="max-w-full max-h-full object-contain opacity-70"
+                onload={handleLoad}
+                onerror={handleError}
+            />
         {/if}
+        <button
+            class="absolute inset-0 flex items-center justify-center cursor-pointer"
+            onclick={openInSystemPlayer}
+        >
+            <div class="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm
+                        flex items-center justify-center
+                        hover:bg-white/30 transition-colors">
+                <i class="fa-solid fa-play text-white text-3xl ml-1"></i>
+            </div>
+        </button>
     </div>
-</div>
 
-{#if zoom !== 1}
-    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 px-2 py-1 rounded bg-black/60 text-xs text-neutral-300 pointer-events-none">
-        {Math.round(zoom * 100)}%
-    </div>
-{/if}
+{:else if mediaType === 'live_photo'}
+    <!-- Live Photo mobile: long-press to play video -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        ontouchstart={() => { if (videoPath) liveVideoPlaying = true; }}
+        ontouchend={() => liveVideoPlaying = false}
+        ontouchcancel={() => liveVideoPlaying = false}
+        class="relative w-full h-full"
+    >
+        {#if liveVideoPlaying && videoPath}
+            <video
+                src={convertFileSrc(videoPath)}
+                autoplay
+                loop
+                muted
+                playsinline
+                class="w-full h-full object-contain"
+            />
+        {:else if imageSrc}
+            <div
+                class="flex items-center justify-center w-full h-full"
+            >
+                <img
+                    src={imageSrc}
+                    {alt}
+                    class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''} max-w-full max-h-full object-contain"
+                    onload={handleLoad}
+                    onerror={handleError}
+                    draggable="false"
+                />
+            </div>
+        {/if}
 
-{#if isRaw && rawPreviewFailed && thumbPath && loaded}
-    <div class="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-amber-900/80 text-xs text-amber-200 pointer-events-none">
-        <i class="fa-solid fa-triangle-exclamation mr-1.5"></i>
-        {t.imageError.showingThumbnail}
+        <!-- Live Photo badge -->
+        <div class="absolute top-3 left-3 px-2 py-1 rounded-full
+                    bg-white/20 backdrop-blur-sm text-xs text-white
+                    flex items-center gap-1 pointer-events-none">
+            <i class="fa-solid fa-circle-dot"></i>
+            LIVE
+        </div>
     </div>
+
+{:else}
+    <!-- Standard photo/RAW preview (existing logic) -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        bind:this={container}
+        class="w-full h-full overflow-auto bg-transparent"
+        onwheel={handleWheel}
+        ondblclick={handleDoubleClick}
+    >
+        <div
+            class="flex items-center justify-center"
+            style="min-width: {Math.max(containerWidth, zoomedWidth)}px; min-height: {Math.max(containerHeight, zoomedHeight)}px;"
+        >
+            {#if error && !loading}
+                <div class="flex flex-col items-center justify-center text-neutral-500 gap-3">
+                    <i class="fa-solid fa-image-slash text-4xl"></i>
+                    <p class="text-sm">{t.imageError.unableToLoad}</p>
+                    <p class="text-xs text-neutral-600">
+                        {#if isRaw}
+                            {t.imageError.rawPreviewFailed}
+                        {:else}
+                            {t.imageError.fileMissing}
+                        {/if}
+                    </p>
+                </div>
+            {:else if !loaded || loading}
+                <div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                    <i class="fa-solid fa-spinner fa-spin text-neutral-500 text-2xl"></i>
+                    {#if isRaw && loading}
+                        <p class="text-neutral-500 text-xs">{t.imageError.extractingRaw}</p>
+                    {/if}
+                </div>
+            {/if}
+            {#if imageSrc}
+            <img
+                src={imageSrc}
+                {alt}
+                class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
+                style="width: {zoomedWidth}px; height: {zoomedHeight}px;"
+                onload={handleLoad}
+                onerror={handleError}
+                draggable="false"
+            />
+            {/if}
+        </div>
+    </div>
+
+    {#if zoom !== 1}
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 px-2 py-1 rounded bg-black/60 text-xs text-neutral-300 pointer-events-none">
+            {Math.round(zoom * 100)}%
+        </div>
+    {/if}
+
+    {#if isRaw && rawPreviewFailed && thumbPath && loaded}
+        <div class="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-amber-900/80 text-xs text-amber-200 pointer-events-none">
+            <i class="fa-solid fa-triangle-exclamation mr-1.5"></i>
+            {t.imageError.showingThumbnail}
+        </div>
+    {/if}
 {/if}

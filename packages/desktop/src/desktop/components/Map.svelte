@@ -270,6 +270,8 @@
                     date_ts: dateTs,
                     date_taken: photo.metadata?.date_taken || '',
                     hasRaw: photo.hasRaw || false,
+                    mediaType: photo.media_type || 'photo',
+                    durationMs: photo.metadata?.duration_ms || 0,
                 }
             });
         }

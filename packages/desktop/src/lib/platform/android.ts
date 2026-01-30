@@ -387,6 +387,10 @@ class AndroidPlatformService implements PlatformService {
         return () => this.scanningCallbacks.delete(callback);
     }
 
+    async openInSystemPlayer(path: string): Promise<void> {
+        this.postMessage({ command: "openVideo", path });
+    }
+
     getMapTileConfig(): MapTileConfig | null {
         // Return null to use default CARTO tiles with dark/light theme support
         return null;

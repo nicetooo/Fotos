@@ -18,6 +18,9 @@ export interface PhotoMetadata {
     model?: string;
     lat?: number;
     lon?: number;
+    duration_ms?: number;
+    video_codec?: string;
+    audio_codec?: string;
 }
 
 export interface PhotoInfo {
@@ -31,6 +34,9 @@ export interface PhotoInfo {
     rawPath?: string;
     hasRaw?: boolean;
     isRawOnly?: boolean;
+    // Video / Live Photo support
+    media_type?: 'photo' | 'video' | 'live_photo';
+    video_path?: string;
 }
 
 /**
@@ -46,6 +52,8 @@ export interface PhotoPreview {
     lon?: number;
     date_taken?: string;
     file_size: number;
+    media_type?: string;
+    duration_ms?: number;
 }
 
 /** 排序字段 */

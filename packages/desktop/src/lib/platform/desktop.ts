@@ -21,6 +21,13 @@ const IMAGE_EXTENSIONS = [
     "dng", "raf", "orf", "rw2", "pef", "raw"
 ];
 
+const VIDEO_EXTENSIONS = [
+    "mp4", "mov", "m4v", "avi", "mkv", "webm",
+    "flv", "wmv", "3gp", "ts"
+];
+
+const MEDIA_EXTENSIONS = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS];
+
 class DesktopPlatformService implements PlatformService {
     readonly platform = 'desktop' as const;
     readonly isMobile = false;
@@ -78,8 +85,8 @@ class DesktopPlatformService implements PlatformService {
             multiple: true,
             directory: false,
             filters: [{
-                name: "Images",
-                extensions: IMAGE_EXTENSIONS
+                name: "Media Files",
+                extensions: MEDIA_EXTENSIONS
             }]
         });
 
@@ -94,8 +101,8 @@ class DesktopPlatformService implements PlatformService {
             directory: mode === 'folder',
             multiple: false,
             filters: mode === 'file' ? [{
-                name: "Images",
-                extensions: IMAGE_EXTENSIONS
+                name: "Media Files",
+                extensions: MEDIA_EXTENSIONS
             }] : undefined
         });
 
@@ -175,6 +182,10 @@ class DesktopPlatformService implements PlatformService {
     onScanningChange(callback: (isScanning: boolean) => void): () => void {
         this.scanningCallbacks.add(callback);
         return () => this.scanningCallbacks.delete(callback);
+    }
+
+    async openInSystemPlayer(path: string): Promise<void> {
+        await invoke("open_in_system_player", { path });
     }
 
     getMapTileConfig(): MapTileConfig {

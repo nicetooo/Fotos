@@ -524,6 +524,8 @@
                     alt={previewPhoto.path.split("/").pop() || "Preview"}
                     thumbPath={previewPhoto.thumb_path || ""}
                     {t}
+                    mediaType={previewPhoto.media_type || 'photo'}
+                    videoPath={previewPhoto.video_path || ''}
                 />
             {/key}
         </div>

@@ -9,6 +9,20 @@
 
     let { photos, onPhotoClick }: Props = $props();
 
+    /** Format video duration (ms -> "m:ss" or "h:mm:ss") */
+    function formatDuration(ms?: number): string {
+        if (!ms) return "0:00";
+        const totalSec = Math.floor(ms / 1000);
+        const min = Math.floor(totalSec / 60);
+        const sec = totalSec % 60;
+        if (min >= 60) {
+            const hr = Math.floor(min / 60);
+            const remainMin = min % 60;
+            return `${hr}:${remainMin.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        }
+        return `${min}:${sec.toString().padStart(2, '0')}`;
+    }
+
     // ── Layout constants ──
     const GAP = 6;       // gap-1.5 = 6px
     const PADDING = 8;   // p-2 = 8px
@@ -129,8 +143,18 @@
                     {:else if photo.isRawOnly}
                         <div class="absolute top-1 right-1 bg-rose-600 text-white text-[8px] font-bold px-1 rounded">RAW</div>
                     {/if}
+                    {#if photo.media_type === 'video'}
+                        <div class="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-black/70 text-white flex items-center gap-1">
+                            <i class="fa-solid fa-play text-[8px]"></i>
+                            {formatDuration(photo.metadata?.duration_ms)}
+                        </div>
+                    {:else if photo.media_type === 'live_photo'}
+                        <div class="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-black/70 text-white">
+                            LIVE
+                        </div>
+                    {/if}
                     {#if photo.metadata?.lat && photo.metadata?.lon}
-                        <div class="absolute bottom-1 left-1 text-white/70 text-[10px]">
+                        <div class="absolute bottom-1 {photo.media_type === 'video' || photo.media_type === 'live_photo' ? 'right-1' : 'left-1'} text-white/70 text-[10px]">
                             <i class="fa-solid fa-location-dot"></i>
                         </div>
                     {/if}

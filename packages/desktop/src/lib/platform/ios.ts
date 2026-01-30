@@ -297,6 +297,12 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         return () => this.scanningCallbacks.delete(callback);
     }
 
+    async openInSystemPlayer(path: string): Promise<void> {
+        if ((window as any).webkit?.messageHandlers?.openVideo) {
+            (window as any).webkit.messageHandlers.openVideo.postMessage({ path });
+        }
+    }
+
     getMapTileConfig(): MapTileConfig {
         return {
             tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],

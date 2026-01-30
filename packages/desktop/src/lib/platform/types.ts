@@ -80,6 +80,9 @@ export interface PlatformService {
 
     /** 获取地图瓦片配置，返回 null 则使用默认 CARTO 瓦片 */
     getMapTileConfig(): MapTileConfig | null;
+
+    /** 用系统播放器打开文件 */
+    openInSystemPlayer?(path: string): Promise<void>;
 }
 
 /** iOS 扩展接口 */

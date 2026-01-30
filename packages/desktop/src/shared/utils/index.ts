@@ -16,6 +16,7 @@ export {
 export {
     isRawFile,
     isJpegFile,
+    isVideoFile,
     getBaseName,
     getFileName,
     groupPhotos,

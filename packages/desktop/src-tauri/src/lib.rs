@@ -1,4 +1,4 @@
-use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE};
+use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE, MediaType};
 use rayon::prelude::*;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -214,6 +214,8 @@ struct ProcessedPhoto {
     metadata: footos_core::PhotoMetadata,
     thumb_path_str: Option<String>,
     file_size: u64,
+    media_type: MediaType,
+    video_path: Option<String>,
 }
 
 #[tauri::command]
@@ -390,6 +392,27 @@ async fn import_photos(
         });
     }
 
+    // ── Live Photo pairing detection ──
+    let live_pairs = footos_core::detect_live_photo_pairs(&new_photos);
+    let live_video_set: std::collections::HashSet<std::path::PathBuf> = live_pairs
+        .iter()
+        .map(|p| p.video_path.clone())
+        .collect();
+    let live_photo_map: std::collections::HashMap<std::path::PathBuf, std::path::PathBuf> =
+        live_pairs
+            .iter()
+            .map(|p| (p.image_path.clone(), p.video_path.clone()))
+            .collect();
+
+    tracing::info!(
+        pairs = live_pairs.len(),
+        "Import: Live Photo pairs detected"
+    );
+
+    // Remove Live Photo videos from processing list (they don't get indexed separately)
+    new_photos.retain(|p| !live_video_set.contains(p));
+    let new_count = new_photos.len();
+
     // ── Phase 2 (Parallel): CPU+IO heavy work via rayon ──
     // compute_hash (~50-200ms) + read_metadata (~10-50ms) +
     // generate_thumbnail (~100-500ms) + fs::metadata (<1ms)
@@ -398,6 +421,7 @@ async fn import_photos(
     let processed_counter = AtomicUsize::new(0);
     let window_clone = window.clone();
 
+    let thumb_dir_clone = thumb_dir.clone();
     let processed: Vec<ProcessResult> = new_photos
         .par_iter()
         .map(|path| {
@@ -407,9 +431,15 @@ async fn import_photos(
             }
 
             let path_str = path.to_string_lossy().to_string();
+            let is_video = footos_core::is_supported_video(path);
 
-            // Compute perceptual hash
-            let hash = match footos_core::compute_hash(path) {
+            // Compute hash (video uses content hash, photo uses perceptual hash)
+            let hash = if is_video {
+                footos_core::compute_video_hash(path)
+            } else {
+                footos_core::compute_hash(path)
+            };
+            let hash = match hash {
                 Ok(h) => h,
                 Err(e) => {
                     tracing::error!(path = %path_str, error = %e, "Import: hash failed");
@@ -422,22 +452,31 @@ async fn import_photos(
                 return ProcessResult::Cancelled;
             }
 
-            // Read EXIF metadata
-            let metadata = match footos_core::read_metadata(path) {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::error!(path = %path_str, error = %e, "Import: metadata read failed");
-                    return ProcessResult::Failed(path_str);
+            // Read metadata (video uses mp4 parser, photo uses EXIF)
+            let metadata = if is_video {
+                footos_core::read_video_metadata(path).unwrap_or_default()
+            } else {
+                match footos_core::read_metadata(path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::error!(path = %path_str, error = %e, "Import: metadata read failed");
+                        return ProcessResult::Failed(path_str);
+                    }
                 }
             };
 
-            // Generate thumbnail (may fail for some formats — OK, frontend uses original)
-            let thumb_path_str = footos_core::generate_thumbnail(path, &config)
-                .ok()
-                .map(|p| p.to_string_lossy().to_string());
+            // Generate thumbnail (video uses FFmpeg CLI, photo uses image decode)
+            let thumb_path_str = if is_video {
+                extract_video_thumbnail_sync(path, &thumb_dir_clone)
+            } else {
+                footos_core::generate_thumbnail(path, &config)
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            };
 
             // Get file size
             let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            let media_type = if is_video { MediaType::Video } else { MediaType::Photo };
 
             // Emit progress every ~10 photos to avoid IPC flooding
             let count = processed_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -464,6 +503,8 @@ async fn import_photos(
                 metadata,
                 thumb_path_str,
                 file_size,
+                media_type,
+                video_path: None,
             })
         })
         .collect();
@@ -499,11 +540,24 @@ async fn import_photos(
                     let _ = std::fs::remove_file(&photo.path);
                     result.duplicates += 1;
                 } else {
-                    // Insert into DB
-                    match index.insert(
+                    // Check if this is a Live Photo image (has a paired video)
+                    let (final_media_type, final_video_path) =
+                        if let Some(vp) = live_photo_map.get(&photo.path) {
+                            (
+                                MediaType::LivePhoto,
+                                Some(vp.to_string_lossy().to_string()),
+                            )
+                        } else {
+                            (photo.media_type, photo.video_path.clone())
+                        };
+
+                    // Insert into DB with media type
+                    match index.insert_media(
                         photo.path_str.clone(),
                         photo.hash,
                         photo.metadata,
+                        final_media_type,
+                        final_video_path,
                     ) {
                         Ok(_) => {
                             let _ = index.update_thumb_info(
@@ -945,6 +999,187 @@ async fn download_tile(cache_dir: String, z: u32, x: u32, y: u32, url: String) -
     Ok(tile_path.to_string_lossy().to_string())
 }
 
+/// Check if FFmpeg is available on the system
+#[tauri::command]
+fn check_ffmpeg_available() -> bool {
+    std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Extract a video thumbnail using FFmpeg CLI.
+/// Returns the cached thumbnail path, or error if FFmpeg is unavailable.
+#[tauri::command]
+async fn extract_video_thumbnail(
+    state: tauri::State<'_, AppState>,
+    video_path: String,
+) -> Result<String, String> {
+    let thumb_dir = state.get_thumb_dir()?;
+    let source = std::path::Path::new(&video_path);
+
+    let spec = footos_core::ThumbnailSpec::default();
+    let key = footos_core::image::thumbnail::thumbnail_key(source, &spec)
+        .map_err(|e| e.to_string())?;
+    let dest = footos_core::image::thumbnail::cache_path(
+        std::path::Path::new(&thumb_dir),
+        &key,
+    );
+
+    // Return cached if exists
+    if dest.exists() {
+        return Ok(dest.to_string_lossy().to_string());
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let dest_str = dest.to_str().ok_or("Invalid thumbnail path")?;
+    let scale_filter = format!(
+        "scale={}:{}:force_original_aspect_ratio=decrease",
+        spec.width, spec.height
+    );
+
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-ss", "1",
+            "-i", &video_path,
+            "-vframes", "1",
+            "-vf", &scale_filter,
+            "-q:v", "5",
+            "-y",
+            dest_str,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("FFmpeg execution failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = std::fs::remove_file(&dest);
+        return Err(format!("FFmpeg failed: {}", stderr));
+    }
+
+    if !dest.exists() || std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0) == 0 {
+        let _ = std::fs::remove_file(&dest);
+        return Err("FFmpeg produced empty output".to_string());
+    }
+
+    Ok(dest.to_string_lossy().to_string())
+}
+
+/// Open a file with the system's default application (e.g., video player)
+#[tauri::command]
+fn open_in_system_player(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open: {}", e))?;
+    }
+    #[cfg(target_os = "ios")]
+    {
+        return Err("Use native iOS API to open videos".to_string());
+    }
+    #[cfg(target_os = "android")]
+    {
+        return Err("Use native Android API to open videos".to_string());
+    }
+    Ok(())
+}
+
+/// Use ffprobe to read video metadata for non-MP4 formats.
+/// Fallback for formats that the Core mp4 crate cannot parse.
+#[tauri::command]
+async fn read_video_metadata_ffprobe(path: String) -> Result<serde_json::Value, String> {
+    let output = std::process::Command::new("ffprobe")
+        .args([
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            &path,
+        ])
+        .output()
+        .map_err(|e| format!("ffprobe execution failed: {}", e))?;
+
+    if !output.status.success() {
+        return Err("ffprobe failed".to_string());
+    }
+
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("Parse ffprobe output failed: {}", e))
+}
+
+/// FFmpeg video thumbnail extraction (sync version, for rayon parallel processing)
+fn extract_video_thumbnail_sync(
+    video_path: &std::path::Path,
+    thumb_dir: &str,
+) -> Option<String> {
+    let spec = footos_core::ThumbnailSpec::default();
+    let key = footos_core::image::thumbnail::thumbnail_key(video_path, &spec).ok()?;
+    let dest = footos_core::image::thumbnail::cache_path(
+        std::path::Path::new(thumb_dir),
+        &key,
+    );
+
+    if dest.exists() {
+        return Some(dest.to_string_lossy().to_string());
+    }
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+
+    let scale_filter = format!(
+        "scale={}:{}:force_original_aspect_ratio=decrease",
+        spec.width, spec.height
+    );
+
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-ss", "1",
+            "-i", &video_path.to_string_lossy(),
+            "-vframes", "1",
+            "-vf", &scale_filter,
+            "-q:v", "5",
+            "-y",
+            dest.to_str()?,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if output.status.success() && dest.exists() {
+        Some(dest.to_string_lossy().to_string())
+    } else {
+        let _ = std::fs::remove_file(&dest);
+        None
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -977,7 +1212,11 @@ pub fn run() {
             delete_photos_completely,
             request_photo_library_access,
             process_ios_photo,
-            import_all_ios_photos
+            import_all_ios_photos,
+            extract_video_thumbnail,
+            open_in_system_player,
+            check_ffmpeg_available,
+            read_video_metadata_ffprobe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

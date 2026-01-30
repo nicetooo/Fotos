@@ -14,6 +14,18 @@ const RAW_EXTENSIONS = new Set([
 /** JPEG 文件扩展名 */
 const JPEG_EXTENSIONS = new Set(["jpg", "jpeg"]);
 
+/** 视频文件扩展名 */
+const VIDEO_EXTENSIONS = new Set([
+    "mp4", "mov", "m4v", "avi", "mkv", "webm",
+    "flv", "wmv", "3gp", "ts"
+]);
+
+/** 检查是否是视频文件 */
+export function isVideoFile(path: string): boolean {
+    const ext = path.split(".").pop()?.toLowerCase() || "";
+    return VIDEO_EXTENSIONS.has(ext);
+}
+
 /** 检查是否是 RAW 文件 */
 export function isRawFile(path: string): boolean {
     const ext = path.split(".").pop()?.toLowerCase() || "";
@@ -46,8 +58,15 @@ export function getFileName(path: string): string {
 export function groupPhotos(photos: PhotoInfo[]): PhotoInfo[] {
     // 按基础名分组
     const byBaseName = new Map<string, { jpegs: PhotoInfo[]; raws: PhotoInfo[] }>();
+    const nonGroupable: PhotoInfo[] = [];
 
     for (const photo of photos) {
+        // Videos and Live Photos don't participate in RAW+JPEG grouping
+        if (photo.media_type === 'video' || photo.media_type === 'live_photo') {
+            nonGroupable.push(photo);
+            continue;
+        }
+
         const baseName = getBaseName(photo.path);
         if (!byBaseName.has(baseName)) {
             byBaseName.set(baseName, { jpegs: [], raws: [] });
@@ -63,8 +82,8 @@ export function groupPhotos(photos: PhotoInfo[]): PhotoInfo[] {
         }
     }
 
-    // 构建结果
-    const result: PhotoInfo[] = [];
+    // 构建结果 — start with non-groupable items (videos, live photos)
+    const result: PhotoInfo[] = [...nonGroupable];
     for (const [_, group] of byBaseName) {
         if (group.jpegs.length > 0) {
             // 有 JPEG - 显示 JPEG，如果有 RAW 则添加徽章

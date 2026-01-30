@@ -716,6 +716,8 @@
                     alt={previewPhoto.path.split("/").pop() || "Preview"}
                     thumbPath={previewPhoto.thumb_path || ""}
                     {t}
+                    mediaType={previewPhoto.media_type || 'photo'}
+                    videoPath={previewPhoto.video_path || ''}
                 />
             {/key}
         </div>
@@ -776,6 +778,48 @@
                         <p class="theme-text-primary font-mono text-xs">
                             {previewPhoto.metadata.lat.toFixed(6)}, {previewPhoto.metadata.lon.toFixed(6)}
                         </p>
+                    </div>
+                {/if}
+
+                {#if previewPhoto.media_type === 'video' && previewPhoto.metadata?.duration_ms}
+                    <div>
+                        <p class="theme-text-muted text-xs">Duration</p>
+                        <p class="theme-text-primary">
+                            {(() => {
+                                const ms = previewPhoto.metadata.duration_ms;
+                                const totalSec = Math.floor(ms / 1000);
+                                const min = Math.floor(totalSec / 60);
+                                const sec = totalSec % 60;
+                                if (min >= 60) {
+                                    const hr = Math.floor(min / 60);
+                                    const remainMin = min % 60;
+                                    return `${hr}:${remainMin.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+                                }
+                                return `${min}:${sec.toString().padStart(2, '0')}`;
+                            })()}
+                        </p>
+                    </div>
+                {/if}
+
+                {#if previewPhoto.metadata?.video_codec}
+                    <div>
+                        <p class="theme-text-muted text-xs">Codec</p>
+                        <p class="theme-text-primary">
+                            {previewPhoto.metadata.video_codec}
+                            {#if previewPhoto.metadata.audio_codec}
+                                / {previewPhoto.metadata.audio_codec}
+                            {/if}
+                        </p>
+                    </div>
+                {/if}
+
+                {#if previewPhoto.media_type === 'live_photo'}
+                    <div>
+                        <p class="theme-text-muted text-xs">Type</p>
+                        <p class="text-cyan-400 text-xs font-medium">Live Photo</p>
+                        {#if previewPhoto.video_path}
+                            <p class="theme-text-muted text-[10px] font-mono break-all mt-0.5">{previewPhoto.video_path}</p>
+                        {/if}
                     </div>
                 {/if}
 
