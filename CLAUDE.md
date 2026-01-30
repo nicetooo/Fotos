@@ -206,9 +206,20 @@ SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去�
 - ❌ 禁止使用 `getClusterExpansionZoom` + `easeTo`（该 API 返回聚类首次分裂的 zoom，可能**低于**当前 zoom，导致地图缩小而非放大）
 - 点击处理使用 `queryRenderedFeatures(bbox)` + `closestFeature()` 选取离触摸点最近的要素（bbox 内可能有多个聚类）
 
+### GL 内存控制：瓦片 + 帧缓冲 + 缩略图
+
+实测 GL mtrack 从 228MB 降至 94MB（交互后），总 PSS 从 490MB 降至 346MB。
+
+- **@1x 瓦片**：使用 `{z}/{x}/{y}.png` 而非 `@2x.png`。每张瓦片 256×256×4=256KB（@2x 为 1MB）
+- ❌ 禁止在移动端使用 `@2x` 瓦片（GL 内存会翻 4 倍）
+- **瓦片缓存上限**：Map 构造器设置 `maxTileCacheSize: 50`，限制 GPU 瓦片缓存
+- **帧缓冲降分辨率**：Map 构造器设置 `pixelRatio: 2`（设备默认 DPR=2.75），降低 WebGL canvas 像素数
+- **缩略图 canvas**：`THUMB_CANVAS_SIZE=66`、`THUMB_PIXEL_RATIO=1.5`（显示 44px），每张 66×66×4=17KB
+- ❌ 禁止将 `THUMB_CANVAS_SIZE` 恢复到 88 或 `pixelRatio` 恢复到 2（GPU 内存回涨）
+
 ### 缩略图内存管理：LRU + Atlas 淘汰
 
-- **JS 堆**：`thumbDataCache`（LRU Map，最大 120 条，~3.6MB）。`thumbCacheGet()` 访问时移到末尾，`thumbCacheSet()` 超限时淘汰最旧
+- **JS 堆**：`thumbDataCache`（LRU Map，最大 120 条，~2MB）。`thumbCacheGet()` 访问时移到末尾，`thumbCacheSet()` 超限时淘汰最旧
 - **GPU Atlas**：最大 180 张图。`evictNonVisibleImages()` 在 `idle` 事件后执行，查询当前可见 feature，`removeImage()` 不可见的。被淘汰的图会由 `styleimagemissing` 自动重新加载
 - ❌ 禁止无限制调用 `map.addImage()` 而不淘汰（GPU 内存会持续增长）
 

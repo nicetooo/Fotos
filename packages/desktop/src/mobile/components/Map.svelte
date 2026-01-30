@@ -1004,6 +1004,7 @@
             zoom: 2,
             attributionControl: false,
             maxTileCacheSize: 50,
+            pixelRatio: 2,
         });
 
         setupMapControls();
