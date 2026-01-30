@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use crate::{
     error::CoreError,
-    types::{PhotoId, PhotoInfo, PhotoMetadata, PhotoPreview},
+    types::{MediaType, PhotoId, PhotoInfo, PhotoMetadata, PhotoPreview},
 };
 
 #[derive(uniffi::Object)]
@@ -44,9 +44,20 @@ impl PhotoIndex {
         let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN thumb_path TEXT;");
         let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN file_size INTEGER DEFAULT 0;");
 
+        // Schema migration: add video/media type support columns.
+        let _ =
+            conn.execute_batch("ALTER TABLE photos ADD COLUMN media_type TEXT DEFAULT 'photo';");
+        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN duration_ms INTEGER;");
+        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN video_codec TEXT;");
+        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN audio_codec TEXT;");
+        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN video_path TEXT;");
+
         // Index on date_taken for timeline range queries
         let _ = conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_photos_date_taken ON photos (date_taken);",
+        );
+        let _ = conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_photos_media_type ON photos (media_type);",
         );
 
         // Performance pragmas:
@@ -71,6 +82,18 @@ impl PhotoIndex {
         path: String,
         hash: String,
         metadata: PhotoMetadata,
+    ) -> Result<PhotoId, CoreError> {
+        self.insert_media(path, hash, metadata, MediaType::Photo, None)
+    }
+
+    /// Insert a media item (photo, video, or live photo) into the index.
+    pub fn insert_media(
+        &self,
+        path: String,
+        hash: String,
+        metadata: PhotoMetadata,
+        media_type: MediaType,
+        video_path: Option<String>,
     ) -> Result<PhotoId, CoreError> {
         let conn = self
             .conn
@@ -109,9 +132,11 @@ impl PhotoIndex {
         conn.execute(
             "INSERT INTO photos (
                 path, hash, make, model, date_taken, width, height,
-                lat, lon, iso, f_number, exposure_time, orientation
+                lat, lon, iso, f_number, exposure_time, orientation,
+                media_type, duration_ms, video_codec, audio_codec, video_path
             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18)",
             params![
                 path,
                 hash,
@@ -125,7 +150,12 @@ impl PhotoIndex {
                 metadata.iso,
                 metadata.f_number,
                 metadata.exposure_time,
-                metadata.orientation
+                metadata.orientation,
+                media_type.as_str(),
+                metadata.duration_ms.map(|v| v as i64),
+                metadata.video_codec,
+                metadata.audio_codec,
+                video_path,
             ],
         )?;
 
@@ -180,7 +210,8 @@ impl PhotoIndex {
         let mut stmt = conn.prepare(
             "SELECT 
                 id, path, hash, make, model, date_taken, width, height,
-                lat, lon, iso, f_number, exposure_time, orientation 
+                lat, lon, iso, f_number, exposure_time, orientation,
+                media_type, duration_ms, video_codec, audio_codec, video_path
              FROM photos WHERE path = ?1",
         )?;
 
@@ -201,9 +232,16 @@ impl PhotoIndex {
                     f_number: row.get::<_, Option<f64>>(11)?.map(|x| x as f32),
                     exposure_time: row.get(12)?,
                     orientation: row.get::<_, i64>(13)? as u32,
+                    duration_ms: row.get::<_, Option<i64>>(15)?.map(|x| x as u64),
+                    video_codec: row.get(16)?,
+                    audio_codec: row.get(17)?,
                 },
                 thumb_path: None,
                 file_size: 0,
+                media_type: MediaType::from_str(
+                    &row.get::<_, Option<String>>(14)?.unwrap_or_default(),
+                ),
+                video_path: row.get(18)?,
             })
         })?;
 
@@ -238,7 +276,8 @@ impl PhotoIndex {
         let mut stmt = conn.prepare(
             "SELECT
                 id, path, hash, make, model, date_taken, width, height,
-                lat, lon, iso, f_number, exposure_time, orientation
+                lat, lon, iso, f_number, exposure_time, orientation,
+                media_type, duration_ms, video_codec, audio_codec, video_path
              FROM photos WHERE id = ?1",
         )?;
 
@@ -259,9 +298,16 @@ impl PhotoIndex {
                     f_number: row.get::<_, Option<f64>>(11)?.map(|x| x as f32),
                     exposure_time: row.get(12)?,
                     orientation: row.get::<_, i64>(13)? as u32,
+                    duration_ms: row.get::<_, Option<i64>>(15)?.map(|x| x as u64),
+                    video_codec: row.get(16)?,
+                    audio_codec: row.get(17)?,
                 },
                 thumb_path: None,
                 file_size: 0,
+                media_type: MediaType::from_str(
+                    &row.get::<_, Option<String>>(14)?.unwrap_or_default(),
+                ),
+                video_path: row.get(18)?,
             })
         })?;
 
@@ -335,6 +381,24 @@ impl PhotoIndex {
         Ok(())
     }
 
+    /// Update media type and video path for a record (used for Live Photo pairing).
+    pub fn update_media_info(
+        &self,
+        path: String,
+        media_type: MediaType,
+        video_path: Option<String>,
+    ) -> Result<(), CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        conn.execute(
+            "UPDATE photos SET media_type = ?1, video_path = ?2 WHERE path = ?3",
+            params![media_type.as_str(), video_path, path],
+        )?;
+        Ok(())
+    }
+
     /// Lightweight list for map markers and timeline rendering.
     /// Returns only the fields needed for initial UI display.
     /// **Zero file I/O** — all data comes directly from the database.
@@ -350,7 +414,8 @@ impl PhotoIndex {
             .map_err(|e| CoreError::Database(e.to_string()))?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, path, thumb_path, lat, lon, date_taken, file_size
+            "SELECT id, path, thumb_path, lat, lon, date_taken, file_size,
+                    media_type, duration_ms
              FROM photos",
         )?;
 
@@ -363,6 +428,10 @@ impl PhotoIndex {
                 lon: row.get(4)?,
                 date_taken: row.get(5)?,
                 file_size: row.get::<_, Option<i64>>(6)?.unwrap_or(0) as u64,
+                media_type: row
+                    .get::<_, Option<String>>(7)?
+                    .unwrap_or_else(|| "photo".to_string()),
+                duration_ms: row.get::<_, Option<i64>>(8)?.map(|x| x as u64),
             })
         })?;
 
@@ -403,7 +472,8 @@ impl PhotoIndex {
             "SELECT 
                 id, path, hash, make, model, date_taken, width, height,
                 lat, lon, iso, f_number, exposure_time, orientation,
-                thumb_path, file_size
+                thumb_path, file_size,
+                media_type, duration_ms, video_codec, audio_codec, video_path
              FROM photos",
         )?;
 
@@ -424,10 +494,17 @@ impl PhotoIndex {
                     f_number: row.get::<_, Option<f64>>(11)?.map(|x| x as f32),
                     exposure_time: row.get(12)?,
                     orientation: row.get::<_, Option<i64>>(13)?.unwrap_or(1) as u32,
+                    duration_ms: row.get::<_, Option<i64>>(17)?.map(|x| x as u64),
+                    video_codec: row.get(18)?,
+                    audio_codec: row.get(19)?,
                 },
                 // Read thumb_path and file_size from DB (persisted during import)
                 thumb_path: row.get(14)?,
                 file_size: row.get::<_, Option<i64>>(15)?.unwrap_or(0) as u64,
+                media_type: MediaType::from_str(
+                    &row.get::<_, Option<String>>(16)?.unwrap_or_default(),
+                ),
+                video_path: row.get(20)?,
             })
         })?;
 
@@ -479,9 +556,15 @@ mod tests {
                 exposure_time TEXT,
                 orientation INTEGER,
                 thumb_path TEXT,
-                file_size INTEGER DEFAULT 0
+                file_size INTEGER DEFAULT 0,
+                media_type TEXT DEFAULT 'photo',
+                duration_ms INTEGER,
+                video_codec TEXT,
+                audio_codec TEXT,
+                video_path TEXT
             );
-            CREATE INDEX idx_photos_hash ON photos (hash);",
+            CREATE INDEX idx_photos_hash ON photos (hash);
+            CREATE INDEX idx_photos_media_type ON photos (media_type);",
         )
         .unwrap();
         std::sync::Arc::new(PhotoIndex {

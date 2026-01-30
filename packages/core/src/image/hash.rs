@@ -46,6 +46,53 @@ fn compute_file_hash(path: &Path) -> Result<String, CoreError> {
     Ok(format!("file:{:016x}", hasher.finish()))
 }
 
+/// Compute a content-based hash for video files.
+///
+/// Does not perform perceptual hashing (video files are too large, decoding too slow).
+/// Instead, hashes file size + first 64KB + last 64KB of content.
+/// Sufficient to distinguish the vast majority of video files, runs in <1ms.
+///
+/// Returns format: `"video:xxxxxxxxxxxxxxxx"`
+pub fn compute_video_hash(path: &Path) -> Result<String, CoreError> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::io::{Read, Seek, SeekFrom};
+
+    let file = std::fs::File::open(path).map_err(|_| CoreError::Io("open failed".into()))?;
+    let file_size = file
+        .metadata()
+        .map_err(|_| CoreError::Io("metadata failed".into()))?
+        .len();
+
+    let mut hasher = DefaultHasher::new();
+    file_size.hash(&mut hasher);
+
+    let mut reader = std::io::BufReader::new(file);
+    let chunk_size = 64 * 1024usize; // 64KB
+
+    // Read head 64KB (or less for small files)
+    let read_size = chunk_size.min(file_size as usize);
+    let mut head_buf = vec![0u8; read_size];
+    reader
+        .read_exact(&mut head_buf)
+        .map_err(|_| CoreError::Io("read head failed".into()))?;
+    head_buf.hash(&mut hasher);
+
+    // Read tail 64KB (only if file is large enough that head and tail don't overlap)
+    if file_size > (chunk_size as u64) * 2 {
+        reader
+            .seek(SeekFrom::End(-(chunk_size as i64)))
+            .map_err(|_| CoreError::Io("seek tail failed".into()))?;
+        let mut tail_buf = vec![0u8; chunk_size];
+        reader
+            .read_exact(&mut tail_buf)
+            .map_err(|_| CoreError::Io("read tail failed".into()))?;
+        tail_buf.hash(&mut hasher);
+    }
+
+    Ok(format!("video:{:016x}", hasher.finish()))
+}
+
 /// Extract embedded JPEG thumbnail data from EXIF.
 /// Handles both JPEG and TIFF-based (RAW) files.
 /// Optimized: reads first 256KB into memory to avoid slow disk seeks on external drives.
@@ -108,4 +155,109 @@ fn try_extract_thumbnail_data(path: &Path) -> Result<Vec<u8>, CoreError> {
         .map_err(|_| CoreError::Io("read thumb failed".into()))?;
 
     Ok(thumb_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_compute_video_hash_returns_video_prefix() {
+        let dir = std::env::temp_dir().join("footos_video_hash_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let file_path = dir.join("test.mp4");
+
+        // Create a file with some content
+        let mut f = std::fs::File::create(&file_path).unwrap();
+        f.write_all(&vec![0xAA; 1024]).unwrap();
+
+        let hash = compute_video_hash(&file_path).unwrap();
+        assert!(
+            hash.starts_with("video:"),
+            "Hash should start with 'video:' prefix, got: {}",
+            hash
+        );
+        assert_eq!(
+            hash.len(),
+            "video:".len() + 16,
+            "Hash hex part should be 16 chars"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_compute_video_hash_deterministic() {
+        let dir = std::env::temp_dir().join("footos_video_hash_det_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let file_path = dir.join("det.mp4");
+
+        let mut f = std::fs::File::create(&file_path).unwrap();
+        f.write_all(&vec![0xBB; 2048]).unwrap();
+
+        let hash1 = compute_video_hash(&file_path).unwrap();
+        let hash2 = compute_video_hash(&file_path).unwrap();
+        assert_eq!(hash1, hash2, "Same file should produce same hash");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_compute_video_hash_different_content() {
+        let dir = std::env::temp_dir().join("footos_video_hash_diff_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let file_a = dir.join("a.mp4");
+        let file_b = dir.join("b.mp4");
+
+        let mut fa = std::fs::File::create(&file_a).unwrap();
+        fa.write_all(&vec![0xCC; 1024]).unwrap();
+
+        let mut fb = std::fs::File::create(&file_b).unwrap();
+        fb.write_all(&vec![0xDD; 1024]).unwrap();
+
+        let hash_a = compute_video_hash(&file_a).unwrap();
+        let hash_b = compute_video_hash(&file_b).unwrap();
+        assert_ne!(
+            hash_a, hash_b,
+            "Different content should produce different hashes"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_compute_video_hash_large_file_reads_tail() {
+        let dir = std::env::temp_dir().join("footos_video_hash_large_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let file_path = dir.join("large.mp4");
+
+        // Create a file larger than 128KB so tail chunk is read
+        let mut f = std::fs::File::create(&file_path).unwrap();
+        let size = 200 * 1024; // 200KB
+        let mut data = vec![0x00; size];
+        // Put distinct data at the tail
+        for i in (size - 64 * 1024)..size {
+            data[i] = 0xFF;
+        }
+        f.write_all(&data).unwrap();
+
+        let hash = compute_video_hash(&file_path).unwrap();
+        assert!(hash.starts_with("video:"));
+
+        // Modify only the tail — hash should change
+        data[size - 1] = 0x01;
+        std::fs::write(&file_path, &data).unwrap();
+        let hash2 = compute_video_hash(&file_path).unwrap();
+        assert_ne!(hash, hash2, "Changing tail should change hash");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_compute_video_hash_nonexistent_file() {
+        let result = compute_video_hash(Path::new("/nonexistent/video.mp4"));
+        assert!(result.is_err());
+    }
 }

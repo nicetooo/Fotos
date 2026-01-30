@@ -9,12 +9,17 @@ pub mod metadata;
 
 pub use config::{PhotoCoreConfig, DEFAULT_THUMBNAIL_SIZE};
 pub use error::CoreError;
-pub use types::{ImportResult, PhotoId, PhotoInfo, PhotoMetadata, PhotoPreview};
+pub use types::{ImportResult, MediaType, PhotoId, PhotoInfo, PhotoMetadata, PhotoPreview};
 
+pub use fs::scan::{is_supported_image, is_supported_video};
 pub use fs::scan_photos;
-pub use image::{compute_hash, extract_raw_preview, ThumbnailError, ThumbnailSpec, Thumbnailer};
+pub use fs::{detect_live_photo_pairs, LivePhotoPair};
+pub use image::{
+    compute_hash, compute_video_hash, extract_raw_preview, ThumbnailError, ThumbnailSpec,
+    Thumbnailer,
+};
 pub use index::PhotoIndex;
-pub use metadata::{read_date_taken, read_metadata};
+pub use metadata::{read_date_taken, read_metadata, read_video_metadata};
 
 uniffi::setup_scaffolding!();
 

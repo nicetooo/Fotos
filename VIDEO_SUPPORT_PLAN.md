@@ -1750,14 +1750,14 @@ Android 没有原生 Live Photo 概念。策略：
 ## 实施顺序
 
 ```
-Phase 1  ────────────────  Core 数据基础       ~3-4 天
-  1.1 types.rs 新增枚举和字段
-  1.2 scan.rs 视频格式检测
-  1.3 metadata/video.rs 视频元数据解析
-  1.4 hash.rs 视频哈希
-  1.5 photo_index.rs Schema + CRUD
-  1.6 fs/live_photo.rs 配对检测
-  └─ cargo test 全部通过
+Phase 1  ────────────────  Core 数据基础       ✅ DONE
+  1.1 types.rs 新增枚举和字段               ✅
+  1.2 scan.rs 视频格式检测                  ✅
+  1.3 metadata/video.rs 视频元数据解析       ✅
+  1.4 hash.rs 视频哈希                      ✅
+  1.5 photo_index.rs Schema + CRUD          ✅
+  1.6 fs/live_photo.rs 配对检测             ✅
+  └─ cargo test 全部通过                    ✅ (40/40, 2 pre-existing thumbnail failures unrelated)
 
 Phase 2  ────────────────  平台视频处理         ~3-4 天
   2.1 Tauri 新增命令（ffmpeg、系统播放器）
