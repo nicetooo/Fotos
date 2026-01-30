@@ -189,6 +189,47 @@ SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去�
 | 单指滑动 | 精细时间轴 | 滚动时间 |
 | 双指缩放 | 精细时间轴 | 调节时间范围（智能步进） |
 
+## 移动端性能红线
+
+以下优化经实测验证（671 张照片，Pixel 7a），修改相关代码时必须保持这些约束。
+
+### 地图渲染：GeoJSON + GPU 图层，禁止 DOM Marker
+
+- ❌ 禁止使用 `maplibregl.Marker` 渲染照片点（670+ DOM 节点会导致严重卡顿）
+- ✅ 必须使用 GeoJSON Source + `cluster: true` + Symbol/Circle Layer（GPU 加速）
+- 缩略图通过 `map.addImage()` 注入 GL atlas，由 `styleimagemissing` 事件按需加载
+- 聚类层 ID：`CLUSTER_THUMB_LAYER_ID`（聚类缩略图）、`UNCLUSTERED_THUMB_LAYER_ID`（单点缩略图）
+
+### 缩略图内存管理：LRU + Atlas 淘汰
+
+- **JS 堆**：`thumbDataCache`（LRU Map，最大 120 条，~3.6MB）。`thumbCacheGet()` 访问时移到末尾，`thumbCacheSet()` 超限时淘汰最旧
+- **GPU Atlas**：最大 180 张图。`evictNonVisibleImages()` 在 `idle` 事件后执行，查询当前可见 feature，`removeImage()` 不可见的。被淘汰的图会由 `styleimagemissing` 自动重新加载
+- ❌ 禁止无限制调用 `map.addImage()` 而不淘汰（GPU 内存会持续增长）
+
+### 地图↔时间轴同步：防抖 + 防循环
+
+| 交互路径 | 防抖机制 | 延迟 |
+|----------|----------|------|
+| 地图拖动 → 时间轴 | `handleMapMove` debounce | 300ms |
+| 时间轴操作 → 地图 | `onTimeRangeChange` debounce | 120ms |
+| GeoJSON 数据更新 | `updateSourceData` rAF 节流 | ≤16ms |
+
+- **防循环**：`syncSource` 状态标记（`'map'` / `'timeline'`）。地图拖动触发的时间轴更新（`syncSource === 'map'`）不会反向更新 GeoJSON 数据，避免 cluster ID 重生成 → 缩略图闪白
+- ❌ 禁止在 `handleTimeRangeChange` 中无条件调用 `setData()`（会导致拖动时白色闪烁）
+
+### TimelineSlider 计算优化
+
+- **日期预解析**：`parsedDatesMs`（`$derived.by`）将所有照片日期一次性解析为毫秒数数组，与 `photos` 索引对齐
+- **单次遍历**：`timelineData`（`$derived.by`）合并 `photosInWindow`、`photoPositions`、`detailPhotoData` 为一次 O(n) 循环，纯数字比较
+- ❌ 禁止在每次 moveend 事件中重复调用 `parsePhotoDate()`（字符串→Date 解析开销大）
+- ❌ 禁止多个独立 `$derived` 分别遍历 photos 数组（应合并为单次遍历）
+
+### 两阶段加载
+
+- **第一阶段**：Rust 返回 `PhotoPreview`（path + lat/lon + date_taken），立即渲染地图
+- **第二阶段**：异步加载完整 `PhotoInfo`（含 EXIF、dimensions 等）
+- ❌ 禁止首屏等待所有 EXIF 数据加载完毕才渲染地图
+
 ### 精细时间轴边缘堆叠
 
 当照片在精细时间轴视图范围之外时，在边缘显示堆叠的竖线提示还有更多照片。
