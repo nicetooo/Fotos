@@ -8,7 +8,7 @@
 | 2 | ~~**每次调用重新打开 DB 连接**~~ | `list_photos` / `list_photos_preview` 每次 `PhotoIndex::open()` | ✅ 已修复：引入 `AppState` 作为 Tauri Managed State，持有单一 `Arc<PhotoIndex>`。前端启动时调用 `init_app` 一次，11 个命令改用 `State<AppState>`，不再传递 `db_path`/`thumb_dir` |
 | 3 | ~~**无 SQLite PRAGMA 优化**~~ | `photo_index.rs` | ✅ 已修复：连接打开时设置 `journal_mode=WAL`、`synchronous=NORMAL`、`cache_size=-8000`、`temp_store=MEMORY` |
 | 4 | ~~**桌面端地图使用 DOM Marker**~~ | `desktop/components/Map.svelte` | ✅ 已修复：已迁移至 GeoJSON Source + GPU Clustering 方案，与移动端统一 |
-| 5 | **桌面端照片列表无虚拟滚动** | `desktop/App.svelte` 的 Library Drawer | 全量渲染 CSS Grid，万张照片会卡死浏览器。旧版 `VirtualPhotoGrid` 有虚拟化但未被使用 |
+| 5 | ~~**桌面端照片列表无虚拟滚动**~~ | `desktop/App.svelte` 的 Library Drawer | ✅ 已修复：新建 `VirtualPhotoGrid.svelte`（纯 Svelte 5，零依赖），只渲染可见行 + 3 行 overscan，ResizeObserver 自适应列数 |
 | 6 | ~~**缩略图规格不一致**~~ | Tauri / Platform Service | ✅ 已修复：全部统一使用 `ThumbnailSpec::default()`，读取 `config.rs` 中的 `DEFAULT_THUMBNAIL_SIZE`（256） |
 
 ## 中优先级 — 架构与代码质量
@@ -46,7 +46,7 @@
 | **架构设计** | ★★★★★ | 分层清晰、平台隔离彻底、约束明确 |
 | **错误处理** | ★★★★ | 优雅降级，无 panic，EXIF 解析容错好 |
 | **移动端性能** | ★★★★★ | GPU 渲染、LRU 淘汰、防抖同步、单次遍历计算，非常精细 |
-| **桌面端性能** | ★★★★ | GeoJSON+GPU 渲染已统一（地图），Library Drawer 仍无虚拟滚动 |
+| **桌面端性能** | ★★★★★ | GeoJSON+GPU 渲染统一（地图）+ mousemove rAF 节流/拖拽抑制 + maxTileCacheSize:200 + Library Drawer 虚拟滚动 |
 | **数据库性能** | ★★★★ | ~~无事务、无 WAL、无连接复用~~ ✅ 已优化：事务批量提交 + WAL + PRAGMA 调优 + 连接复用 + rayon 并行导入 |
 | **代码整洁度** | ★★★★ | ~~有死代码、重复逻辑、println 日志~~ ✅ 已清理：死代码删除、JPEG 解析去重、println→tracing |
 | **国际化** | ★★★★ | 17 种语言全覆盖，少数硬编码遗漏 |
@@ -57,6 +57,6 @@
 1. ~~**数据库优化**（#1-3）~~ ✅ 已完成 — 事务批量提交 + WAL/PRAGMA + 连接复用
 1b. ~~**并行导入**（#15）~~ ✅ 已完成 — rayon 3 阶段流水线（过滤 → 并行处理 → 顺序写入）
 2. ~~**清理死代码**（#7-12, #14, #22, #24）~~ ✅ 已完成 — 删除 ~3500 行死代码、去重 JPEG 解析、移除死字段和无用依赖
-3. **桌面端性能对齐**（#5）— ~~#4 地图已迁移至 GeoJSON+GPU~~ ；Library Drawer 虚拟滚动待实现
+3. ~~**桌面端性能对齐**（#5）~~ ✅ 已完成 — Library Drawer 虚拟滚动 + 地图 mousemove 节流/拖拽抑制 + maxTileCacheSize
 4. ~~**统一缩略图规格**（#6）~~ ✅ 已完成 — 全部使用 `ThumbnailSpec::default()`
 5. ~~**日志框架替换**（#9）~~ ✅ 已完成 — 全部 46 处 `println!` 替换为结构化 `tracing`
