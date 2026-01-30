@@ -86,6 +86,16 @@ src/
 | 运行时权限 | ✗ | ✓ | ✓ |
 | 文件管理器显示 | ✓ | ✗ | ✗ |
 
+## 应用标识
+
+| 平台 | 标识符 | 说明 |
+|------|--------|------|
+| Android | `app.footos` | package name（`build.gradle.kts` 中的 `applicationId`） |
+| iOS | `app.footos` | Bundle Identifier |
+| Tauri | `app.footos` | `tauri.conf.json` 中的 `identifier` |
+
+⚠️ 包名是 **`app.footos`**，所有 `adb` 命令必须使用此包名。
+
 ## 环境变量
 
 ```bash
