@@ -1138,20 +1138,34 @@
             thumbDataCache.clear();
             lastGeoJSONFingerprint = '';
 
+            // Remove handlers that survive setStyle() to prevent duplicates
+            map.off('click', handleMapClick);
+            map.off('idle', loadVisibleThumbnails);
+            map.off('styleimagemissing', handleMissingImage);
+            map.off('moveend', handleMapMove);
+
             map.setStyle(newStyle);
-            // After style change, re-add layers and data
-            map.once('style.load', () => {
+
+            // After setStyle(), re-add cluster layers and data once the new style is ready.
+            // NOTE: map.once('style.load') is unreliable in Android WebView — the event
+            // may never fire for inline style specifications. Use isStyleLoaded() polling instead.
+            const mapRef = map;
+            function onStyleReady() {
+                if (!mapRef || !mapRef.isStyleLoaded()) {
+                    requestAnimationFrame(onStyleReady);
+                    return;
+                }
                 setupClusterLayers();
                 updateSourceData(allPhotosData, timeFilterStart, timeFilterEnd);
 
-                // Re-register interaction handlers after style change
-                if (map) {
-                    map.on('click', handleMapClick);
-                    map.on('idle', loadVisibleThumbnails);
-                    map.on('styleimagemissing', handleMissingImage);
-                }
-            });
-        } catch (e) {
+                // Re-register all interaction handlers
+                mapRef.on('click', handleMapClick);
+                mapRef.on('idle', loadVisibleThumbnails);
+                mapRef.on('styleimagemissing', handleMissingImage);
+                mapRef.on('moveend', handleMapMove);
+            }
+            requestAnimationFrame(onStyleReady);
+        } catch (_) {
             // Style change failed — non-critical
         }
     });
