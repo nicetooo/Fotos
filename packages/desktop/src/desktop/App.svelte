@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+    import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
     import { revealItemInDir } from "@tauri-apps/plugin-opener";
     import { appDataDir, join } from "@tauri-apps/api/path";
@@ -32,6 +32,7 @@
     import Settings from "./components/Settings.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
     import MapView from "./components/MapView.svelte";
+    import VirtualPhotoGrid from "./components/VirtualPhotoGrid.svelte";
 
     // Platform service received as prop from main.ts
     let { platformService } = $props<{ platformService: PlatformService }>();
@@ -564,59 +565,35 @@
                     </div>
                 </div>
 
-                <!-- Photo Grid -->
-                <div class="flex-1 overflow-y-auto p-2">
-                    {#if sortedPhotos.length > 0}
-                        <div class="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-1.5">
-                            {#each sortedPhotos as photo (photo.path)}
-                                <button
-                                    class="aspect-square relative overflow-hidden rounded theme-bg-secondary hover:ring-2 hover:ring-[var(--accent)] transition-all group"
-                                    onclick={() => openPreview(photo)}
-                                    title={photo.path.split("/").pop()}
-                                >
-                                    <img
-                                        src={convertFileSrc(photo.thumb_path || photo.path)}
-                                        alt=""
-                                        class="w-full h-full object-cover"
-                                        loading="lazy"
-                                    />
-                                    {#if photo.hasRaw}
-                                        <div class="absolute top-1 right-1 bg-amber-600 text-white text-[8px] font-bold px-1 rounded">R</div>
-                                    {:else if photo.isRawOnly}
-                                        <div class="absolute top-1 right-1 bg-rose-600 text-white text-[8px] font-bold px-1 rounded">RAW</div>
-                                    {/if}
-                                    {#if photo.metadata?.lat && photo.metadata?.lon}
-                                        <div class="absolute bottom-1 left-1 text-white/70 text-[10px]">
-                                            <i class="fa-solid fa-location-dot"></i>
-                                        </div>
-                                    {/if}
-                                </button>
-                            {/each}
-                        </div>
-                    {:else if !isScanning}
-                        <div class="h-full flex flex-col items-center justify-center text-white/50 py-12">
-                            <i class="fa-solid fa-images text-2xl mb-3"></i>
-                            <p class="text-sm">{t.library.noPhotos}</p>
-                            <button
-                                onclick={() => handleScan("folder")}
-                                class="mt-3 px-3 py-1.5 rounded bg-white/10 text-white/80 text-xs hover:bg-white/20"
-                            >
-                                {t.import.importPhotos}
-                            </button>
-                        </div>
-                    {:else}
-                        <div class="h-full flex flex-col items-center justify-center text-white/50 py-12">
-                            <i class="fa-solid fa-spinner fa-spin text-xl mb-2"></i>
-                            <p class="text-sm">
-                                {#if importStatus.total > 0}
-                                    {importStatus.current} / {importStatus.total}
-                                {:else}
-                                    {t.common.scanning}...
-                                {/if}
-                            </p>
-                        </div>
-                    {/if}
-                </div>
+                <!-- Photo Grid (Virtual Scrolling) -->
+                {#if sortedPhotos.length > 0}
+                    <VirtualPhotoGrid
+                        photos={sortedPhotos}
+                        onPhotoClick={openPreview}
+                    />
+                {:else if !isScanning}
+                    <div class="flex-1 flex flex-col items-center justify-center text-white/50 py-12">
+                        <i class="fa-solid fa-images text-2xl mb-3"></i>
+                        <p class="text-sm">{t.library.noPhotos}</p>
+                        <button
+                            onclick={() => handleScan("folder")}
+                            class="mt-3 px-3 py-1.5 rounded bg-white/10 text-white/80 text-xs hover:bg-white/20"
+                        >
+                            {t.import.importPhotos}
+                        </button>
+                    </div>
+                {:else}
+                    <div class="flex-1 flex flex-col items-center justify-center text-white/50 py-12">
+                        <i class="fa-solid fa-spinner fa-spin text-xl mb-2"></i>
+                        <p class="text-sm">
+                            {#if importStatus.total > 0}
+                                {importStatus.current} / {importStatus.total}
+                            {:else}
+                                {t.common.scanning}...
+                            {/if}
+                        </p>
+                    </div>
+                {/if}
             </div>
         {/if}
 

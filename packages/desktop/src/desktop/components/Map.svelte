@@ -41,6 +41,13 @@
     // Resize observer
     let resizeObserver: ResizeObserver | null = null;
 
+    // Drag/zoom state — suppress mousemove during active interaction
+    let isDragging = false;
+    let mouseMoveRafPending = false;
+
+    function handleDragStart() { isDragging = true; hideHoverPopup(); }
+    function handleDragEnd() { isDragging = false; }
+
     // All photos data (for lookups and timeline)
     let allPhotosData: any[] = [];
     // Photo lookup by path
@@ -819,43 +826,52 @@
 
     /**
      * Mouse move handler for hover popup + cursor change (desktop only).
+     * Throttled via rAF and suppressed during drag/zoom to avoid GPU readback stalls.
      */
     function handleMouseMove(e: maplibregl.MapMouseEvent) {
-        if (!map || isBoxSelectMode) return;
+        if (!map || isBoxSelectMode || isDragging) return;
+        if (mouseMoveRafPending) return;
 
-        const tolerance = 5;
-        const bbox: [maplibregl.PointLike, maplibregl.PointLike] = [
-            [e.point.x - tolerance, e.point.y - tolerance],
-            [e.point.x + tolerance, e.point.y + tolerance]
-        ];
+        const point = e.point;
+        mouseMoveRafPending = true;
+        requestAnimationFrame(() => {
+            mouseMoveRafPending = false;
+            if (!map || isDragging) return;
 
-        // Check clusters
-        const clusters = map.queryRenderedFeatures(bbox, {
-            layers: [CLUSTER_THUMB_LAYER_ID, CLUSTER_LAYER_ID, CLUSTER_COUNT_LAYER_ID]
-        });
-        if (clusters.length > 0) {
-            map.getCanvas().style.cursor = 'pointer';
-            hideHoverPopup();
-            return;
-        }
+            const tolerance = 5;
+            const bbox: [maplibregl.PointLike, maplibregl.PointLike] = [
+                [point.x - tolerance, point.y - tolerance],
+                [point.x + tolerance, point.y + tolerance]
+            ];
 
-        // Check unclustered photos
-        const photoFeatures = map.queryRenderedFeatures(bbox, {
-            layers: [UNCLUSTERED_THUMB_LAYER_ID, UNCLUSTERED_LAYER_ID, UNCLUSTERED_BORDER_LAYER_ID]
-        });
-        if (photoFeatures.length > 0) {
-            map.getCanvas().style.cursor = 'pointer';
-            const feature = photoFeatures[0];
-            const path = feature.properties?.path;
-            if (path && path !== hoveredPhotoPath) {
-                showHoverPopup(feature);
+            // Check clusters
+            const clusters = map.queryRenderedFeatures(bbox, {
+                layers: [CLUSTER_THUMB_LAYER_ID, CLUSTER_LAYER_ID, CLUSTER_COUNT_LAYER_ID]
+            });
+            if (clusters.length > 0) {
+                map.getCanvas().style.cursor = 'pointer';
+                hideHoverPopup();
+                return;
             }
-            return;
-        }
 
-        // No features under cursor
-        map.getCanvas().style.cursor = '';
-        hideHoverPopup();
+            // Check unclustered photos
+            const photoFeatures = map.queryRenderedFeatures(bbox, {
+                layers: [UNCLUSTERED_THUMB_LAYER_ID, UNCLUSTERED_LAYER_ID, UNCLUSTERED_BORDER_LAYER_ID]
+            });
+            if (photoFeatures.length > 0) {
+                map.getCanvas().style.cursor = 'pointer';
+                const feature = photoFeatures[0];
+                const path = feature.properties?.path;
+                if (path && path !== hoveredPhotoPath) {
+                    showHoverPopup(feature);
+                }
+                return;
+            }
+
+            // No features under cursor
+            map.getCanvas().style.cursor = '';
+            hideHoverPopup();
+        });
     }
 
     function showHoverPopup(feature: maplibregl.GeoJSONFeature) {
@@ -1039,7 +1055,8 @@
             style: getMapStyle(theme === 'dark'),
             center: [0, 20],
             zoom: 2,
-            attributionControl: false
+            attributionControl: false,
+            maxTileCacheSize: 200,
         });
 
         setupMapControls();
@@ -1161,6 +1178,10 @@
             map.on('idle', loadVisibleThumbnails);
             map.on('styleimagemissing', handleMissingImage);
 
+            // Track drag/zoom to suppress mousemove during active interaction
+            map.on('movestart', handleDragStart);
+            map.on('moveend', handleDragEnd);
+
             requestAnimationFrame(() => {
                 isReady = true;
             });
@@ -1231,6 +1252,8 @@
             map.off('idle', loadVisibleThumbnails);
             map.off('styleimagemissing', handleMissingImage);
             map.off('moveend', handleMapMove);
+            map.off('movestart', handleDragStart);
+            map.off('moveend', handleDragEnd);
 
             map.setStyle(newStyle);
 
@@ -1249,6 +1272,8 @@
                 mapRef.on('idle', loadVisibleThumbnails);
                 mapRef.on('styleimagemissing', handleMissingImage);
                 mapRef.on('moveend', handleMapMove);
+                mapRef.on('movestart', handleDragStart);
+                mapRef.on('moveend', handleDragEnd);
             }
             requestAnimationFrame(onStyleReady);
         } catch (_) {
