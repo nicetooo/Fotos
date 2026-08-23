@@ -43,7 +43,9 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     private originalWaiters = new Map<string, (path: string) => void>();
     private stillWaiters = new Map<string, (path: string) => void>();
     private stillEarlyWaiters = new Map<string, (path: string) => void>();
+    private liveWaiters = new Map<string, (path: string) => void>();
     private cachedStills = new Map<string, string>();
+    private cachedLiveVideos = new Map<string, string>();
     private inflightExports = new Map<string, Promise<{ filePath: string; stillPath: string }>>();
     private knownIdentifiers: string[] = [];
 
@@ -202,6 +204,17 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             }
         };
 
+        (window as any).__handleIOSLiveVideo = (identifier: string, path: string) => {
+            if (path) {
+                this.cachedLiveVideos.set(identifier, path);
+            }
+            const waiter = this.liveWaiters.get(identifier);
+            if (waiter) {
+                this.liveWaiters.delete(identifier);
+                waiter(path);
+            }
+        };
+
         const ready = await this.waitForBridge(5000);
         if (!ready) {
             console.warn("[iOS] PhotoKit bridge not ready; permission will be requested on import");
@@ -226,6 +239,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         delete (window as any).__handleIOSPreviewBatch;
         delete (window as any).__handleIOSOriginal;
         delete (window as any).__handleIOSViewerStill;
+        delete (window as any).__handleIOSLiveVideo;
         this.progressCallbacks.clear();
         this.completeCallbacks.clear();
         this.scanningCallbacks.clear();
@@ -342,6 +356,33 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
                 resolve(still || null);
             });
             this.postNative({ command: "exportViewerStill", identifier });
+        });
+    }
+
+    async ensureLiveVideo(path: string): Promise<string | null> {
+        if (!path.startsWith("ios-photo://")) {
+            return null;
+        }
+        const identifier = path.slice("ios-photo://".length);
+        const cached = this.cachedLiveVideos.get(identifier);
+        if (cached) {
+            return cached;
+        }
+        const ready = await this.waitForBridge(2000);
+        if (!ready) {
+            return null;
+        }
+        return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+                this.liveWaiters.delete(identifier);
+                resolve(this.cachedLiveVideos.get(identifier) || null);
+            }, 20000);
+            this.liveWaiters.set(identifier, (file) => {
+                clearTimeout(timer);
+                this.liveWaiters.delete(identifier);
+                resolve(file || null);
+            });
+            this.postNative({ command: "exportLiveVideo", identifier });
         });
     }
 

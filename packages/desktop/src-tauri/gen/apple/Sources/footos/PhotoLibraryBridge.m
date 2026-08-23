@@ -33,6 +33,9 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
 - (void)checkWebViewLoadAndPrompt;
 - (void)exportOriginalForIdentifier:(NSString *)identifier;
 - (void)exportViewerStillForIdentifier:(NSString *)identifier;
+- (void)exportLiveVideoForIdentifier:(NSString *)identifier;
+- (NSString *)writePairedVideoForAsset:(PHAsset *)asset toDirectory:(NSString *)exportDir;
+- (void)emitLiveVideo:(NSString *)path identifier:(NSString *)identifier;
 - (void)requestLocationThenSync;
 - (void)handleLocationAuthorization:(CLAuthorizationStatus)status;
 - (void)handOffPreviews:(NSArray<NSDictionary *> *)items;
@@ -281,6 +284,11 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
     if ([command isEqualToString:@"exportViewerStill"]) {
         NSString *identifier = [body[@"identifier"] isKindOfClass:[NSString class]] ? body[@"identifier"] : @"";
         [self exportViewerStillForIdentifier:identifier];
+        return;
+    }
+    if ([command isEqualToString:@"exportLiveVideo"]) {
+        NSString *identifier = [body[@"identifier"] isKindOfClass:[NSString class]] ? body[@"identifier"] : @"";
+        [self exportLiveVideoForIdentifier:identifier];
         return;
     }
     if ([command isEqualToString:@"syncIfAuthorized"]) {
@@ -605,6 +613,15 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
     [self eval:js];
 }
 
+- (void)emitLiveVideo:(NSString *)path identifier:(NSString *)identifier {
+    NSString *js = [NSString stringWithFormat:
+        @"(function(){if(window.__handleIOSLiveVideo)window.__handleIOSLiveVideo(%@,%@);})()",
+        [self jsString:identifier ?: @""],
+        [self jsString:path ?: @""]
+    ];
+    [self eval:js];
+}
+
 - (NSDictionary *)previewPayloadForAsset:(PHAsset *)asset
                               thumbPath:(NSString *)thumbPath
                                fileSize:(unsigned long long)fileSize {
@@ -698,6 +715,82 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
     });
 }
 
+- (void)exportLiveVideoForIdentifier:(NSString *)identifier {
+    if (identifier.length == 0) {
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        PHFetchResult<PHAsset *> *result = [PHAsset fetchAssetsWithLocalIdentifiers:@[identifier] options:nil];
+        PHAsset *asset = result.firstObject;
+        if (!asset || !(asset.mediaSubtypes & PHAssetMediaSubtypePhotoLive)) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self emitLiveVideo:@"" identifier:identifier];
+            });
+            return;
+        }
+        NSString *photosDir = self.thumbDir.length > 0
+            ? [[self.thumbDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Photos"]
+            : [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-originals"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:photosDir
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:nil];
+        NSString *livePath = [self writePairedVideoForAsset:asset toDirectory:photosDir];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self emitLiveVideo:livePath ?: @"" identifier:identifier];
+        });
+    });
+}
+
+- (NSString *)writePairedVideoForAsset:(PHAsset *)asset toDirectory:(NSString *)exportDir {
+    NSArray<PHAssetResource *> *resources = [PHAssetResource assetResourcesForAsset:asset];
+    PHAssetResource *resource = nil;
+    for (PHAssetResource *candidate in resources) {
+        if (candidate.type == PHAssetResourceTypePairedVideo) {
+            resource = candidate;
+            break;
+        }
+        if (candidate.type == PHAssetResourceTypeFullSizePairedVideo && !resource) {
+            resource = candidate;
+        }
+    }
+    if (!resource) {
+        return nil;
+    }
+    NSString *ext = resource.originalFilename.pathExtension.length > 0
+        ? resource.originalFilename.pathExtension
+        : @"mov";
+    NSString *filename = [NSString stringWithFormat:@"%@-live.%@", [self safeIdForAsset:asset], ext];
+    NSString *outPath = [exportDir stringByAppendingPathComponent:filename];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:outPath]) {
+        NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:outPath error:nil];
+        if ([attrs[NSFileSize] unsignedLongLongValue] > 0) {
+            return outPath;
+        }
+        [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
+    }
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    __block BOOL ok = NO;
+    PHAssetResourceRequestOptions *options = [[PHAssetResourceRequestOptions alloc] init];
+    options.networkAccessAllowed = YES;
+    [[PHAssetResourceManager defaultManager] writeDataForAssetResource:resource
+                                                                toFile:[NSURL fileURLWithPath:outPath]
+                                                               options:options
+                                                     completionHandler:^(NSError * _Nullable error) {
+        ok = (error == nil);
+        if (error) {
+            NSLog(@"[footos] Live video export failed for %@: %@", asset.localIdentifier, error);
+        }
+        dispatch_semaphore_signal(sema);
+    }];
+    long timedOut = dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC));
+    if (timedOut != 0 || !ok) {
+        [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
+        return nil;
+    }
+    return outPath;
+}
+
 - (void)exportOriginalForIdentifier:(NSString *)identifier {
     if (identifier.length == 0) {
         return;
@@ -724,6 +817,14 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
             if (stillPath.length > 0) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [self emitViewerStill:stillPath identifier:identifier];
+                });
+            }
+        }
+        if (asset.mediaSubtypes & PHAssetMediaSubtypePhotoLive) {
+            NSString *livePath = [self writePairedVideoForAsset:asset toDirectory:photosDir];
+            if (livePath.length > 0) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self emitLiveVideo:livePath identifier:identifier];
                 });
             }
         }

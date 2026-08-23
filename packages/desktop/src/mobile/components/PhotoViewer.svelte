@@ -13,6 +13,7 @@
         onNavigate,
         resolveOriginal,
         resolveStill,
+        resolveLiveVideo,
     } = $props<{
         photos: any[];
         currentPath: string;
@@ -22,6 +23,7 @@
         onNavigate: (photo: any) => void;
         resolveOriginal?: (photo: any) => Promise<string | null>;
         resolveStill?: (photo: any) => Promise<string | null>;
+        resolveLiveVideo?: (photo: any) => Promise<string | null>;
     }>();
 
     let chromeVisible = $state(true);
@@ -33,9 +35,12 @@
     let panY = $state(0);
     let originals = $state<Record<string, string>>({});
     let stills = $state<Record<string, string>>({});
+    let liveVideos = $state<Record<string, string>>({});
     let videoPlaying = $state(false);
     let videoFrameReady = $state(false);
+    let livePlaying = $state(false);
     let videoEl: HTMLVideoElement | undefined = $state();
+    let liveVideoEl: HTMLVideoElement | undefined = $state();
     let viewerEl: HTMLDivElement | undefined = $state();
     let viewportW = $state(typeof window !== "undefined" ? window.innerWidth : 390);
     let viewportH = $state(typeof window !== "undefined" ? window.innerHeight : 844);
@@ -44,10 +49,12 @@
     const MAX_SCALE = 4;
     const PAGE_GAP = 16;
     const SETTLE_MS = 340;
+    const LIVE_HOLD_MS = 240;
     const openedAt = Date.now();
 
     let settling = $state(false);
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let liveHoldTimer: ReturnType<typeof setTimeout> | null = null;
     let velX = 0;
     let lastMoveX = 0;
     let lastMoveT = 0;
@@ -165,6 +172,26 @@
         };
     });
 
+    $effect(() => {
+        const photo = current;
+        const key = photoKey(photo);
+        if (!photo || !key || mediaTypeOf(photo) !== "live_photo") return;
+        if (untrack(() => liveVideos[key])) return;
+        if (photo.video_path) {
+            liveVideos = { ...liveVideos, [key]: photo.video_path };
+            return;
+        }
+        if (!resolveLiveVideo) return;
+        let cancelled = false;
+        resolveLiveVideo(photo).then((filePath) => {
+            if (cancelled || !filePath) return;
+            liveVideos = { ...liveVideos, [key]: filePath };
+        });
+        return () => {
+            cancelled = true;
+        };
+    });
+
     function parseDate(raw?: string): Date | null {
         if (!raw) return null;
         const normalized = raw.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
@@ -222,6 +249,14 @@
         return "";
     }
 
+    function liveVideoSrc(photo: any): string {
+        if (!photo || mediaTypeOf(photo) !== "live_photo") return "";
+        const key = photoKey(photo);
+        if (liveVideos[key]) return convertFileSrc(liveVideos[key]);
+        if (photo.video_path) return convertFileSrc(photo.video_path);
+        return "";
+    }
+
     function mediaTypeOf(photo: any): string {
         return photo?.media_type || photo?.metadata?.media_type || "photo";
     }
@@ -230,6 +265,7 @@
         const index = currentIndex;
         videoPlaying = false;
         videoFrameReady = false;
+        untrack(() => stopLive());
         queueMicrotask(() => {
             if (currentIndex !== index) return;
             videoEl?.pause();
@@ -292,8 +328,67 @@
         }
     }
 
+    function clearLiveHold() {
+        if (liveHoldTimer) {
+            clearTimeout(liveHoldTimer);
+            liveHoldTimer = null;
+        }
+    }
+
+    function primeLive() {
+        const el = liveVideoEl;
+        const src = liveVideoSrc(current);
+        if (!el || !src) return false;
+        el.muted = true;
+        el.playsInline = true;
+        el.setAttribute("webkit-playsinline", "");
+        const play = el.play();
+        if (play) {
+            play.catch((err) => console.warn("[PhotoViewer] live play failed", err));
+        }
+        return true;
+    }
+
+    function startLiveHold() {
+        if (mediaTypeOf(current) !== "live_photo" || scale > 1.05) return;
+        clearLiveHold();
+        const primed = primeLive();
+        liveHoldTimer = setTimeout(() => {
+            liveHoldTimer = null;
+            if (!gesture || gesture.mode !== "pending") return;
+            if (!liveVideoSrc(current)) return;
+            gesture.mode = "live";
+            livePlaying = true;
+            chromeVisible = false;
+            if (!primed) primeLive();
+        }, LIVE_HOLD_MS);
+    }
+
+    function stopLive() {
+        clearLiveHold();
+        livePlaying = false;
+        if (liveVideoEl) {
+            liveVideoEl.pause();
+            liveVideoEl.muted = true;
+            try {
+                liveVideoEl.currentTime = 0;
+            } catch {
+                /* ignore */
+            }
+        }
+    }
+
+    $effect(() => {
+        if (!livePlaying) return;
+        if (!liveVideoSrc(current)) {
+            livePlaying = false;
+            return;
+        }
+        untrack(() => primeLive());
+    });
+
     let gesture: {
-        mode: "pending" | "h" | "v" | "pinch" | "pan";
+        mode: "pending" | "h" | "v" | "pinch" | "pan" | "live";
         x0: number;
         y0: number;
         t0: number;
@@ -404,6 +499,7 @@
         velX = 0;
         lastMoveX = p.x;
         lastMoveT = now;
+        if (!isDouble) startLiveHold();
     }
 
     function onTouchMove(e: TouchEvent) {
@@ -430,8 +526,13 @@
         lastMoveT = now;
         const dx = p.x - gesture.x0;
         const dy = p.y - gesture.y0;
+        if (gesture.mode === "live") {
+            return;
+        }
         if (gesture.mode === "pending") {
             if (Math.hypot(dx, dy) < 8) return;
+            clearLiveHold();
+            stopLive();
             if (scale > 1.05) {
                 gesture.mode = "pan";
             } else if (Math.abs(dx) > Math.abs(dy)) {
@@ -480,6 +581,14 @@
         } else {
             gesture.lastTap = 0;
         }
+        if (mode === "live") {
+            stopLive();
+            dragX = 0;
+            dragY = 0;
+            dragging = false;
+            gesture = { ...gesture, mode: "pending" };
+            return;
+        }
         if (mode === "h") {
             const width = pageWidth();
             const tooSoon = Date.now() - openedAt < 320;
@@ -502,6 +611,7 @@
             onClose();
             return;
         }
+        stopLive();
         if (scale < 1.05) resetZoom();
         dragX = 0;
         dragY = 0;
@@ -511,6 +621,7 @@
 
     function onFilmstrip(photo: any) {
         clearSettle();
+        stopLive();
         resetZoom();
         dragX = 0;
         dragY = 0;
@@ -603,9 +714,24 @@
                     {/if}
                 {:else}
                     <img src={displaySrc(current, true)} alt="" draggable="false" decoding="async" />
+                    {#if mediaTypeOf(current) === "live_photo" && liveVideoSrc(current)}
+                        <video
+                            bind:this={liveVideoEl}
+                            use:inlineVideo
+                            src={liveVideoSrc(current)}
+                            playsinline
+                            muted
+                            loop
+                            preload="auto"
+                            class="live-video"
+                            class:ready={livePlaying}
+                        ></video>
+                    {/if}
                 {/if}
                 {#if mediaTypeOf(current) === "live_photo"}
-                    <div class="live-badge">LIVE</div>
+                    <div class="live-badge" class:playing={livePlaying} class:waiting={!liveVideoSrc(current)}>
+                        LIVE
+                    </div>
                 {/if}
             </div>
         {/if}
@@ -726,6 +852,9 @@
         font-size: 22px;
         margin-left: 3px;
     }
+    .live-video {
+        z-index: 1;
+    }
     .live-badge {
         position: absolute;
         top: calc(env(safe-area-inset-top) + 72px);
@@ -737,6 +866,19 @@
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.16);
         pointer-events: none;
+        z-index: 2;
+    }
+    .live-badge.playing {
+        background: rgba(255, 255, 255, 0.28);
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.45);
+        animation: live-pulse 1.1s ease-out infinite;
+    }
+    .live-badge.waiting {
+        opacity: 0.55;
+    }
+    @keyframes live-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+        100% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
     }
     .chrome {
         position: absolute;

@@ -107,6 +107,9 @@ export interface IOSPlatformService extends PlatformService {
 
     /** 视频/实况封面：屏幕尺寸静帧，比 256 缩略图清晰，也比整段视频快 */
     ensureViewerStill(path: string): Promise<string | null>;
+
+    /** 实况配对视频，长按时播放 */
+    ensureLiveVideo(path: string): Promise<string | null>;
 }
 
 /** Android 扩展接口 */

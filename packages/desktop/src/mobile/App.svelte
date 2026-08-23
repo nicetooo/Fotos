@@ -389,6 +389,21 @@
         }
     }
 
+    async function resolveLiveVideoForViewer(photo: any): Promise<string | null> {
+        if (photo?.video_path) {
+            return photo.video_path;
+        }
+        if (!iosPlatformService || !photo?.path?.startsWith("ios-photo://")) {
+            return null;
+        }
+        try {
+            return await iosPlatformService.ensureLiveVideo(photo.path);
+        } catch (e) {
+            console.warn("[App] Live video export failed", e);
+            return null;
+        }
+    }
+
     function closePreview() {
         if (!previewPhoto) return;
         previewPhoto = null;
@@ -517,6 +532,7 @@
         onNavigate={(photo) => { previewPhoto = photo; }}
         resolveOriginal={resolveOriginalForViewer}
         resolveStill={resolveStillForViewer}
+        resolveLiveVideo={resolveLiveVideoForViewer}
     />
 {/if}
 
