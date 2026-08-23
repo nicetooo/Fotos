@@ -36,6 +36,7 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
 - (void)exportLiveVideoForIdentifier:(NSString *)identifier;
 - (NSString *)writePairedVideoForAsset:(PHAsset *)asset toDirectory:(NSString *)exportDir;
 - (void)emitLiveVideo:(NSString *)path identifier:(NSString *)identifier;
+- (NSSet<NSString *> *)existingPreviewIds;
 - (void)requestLocationThenSync;
 - (void)handleLocationAuthorization:(CLAuthorizationStatus)status;
 - (void)handOffPreviews:(NSArray<NSDictionary *> *)items;
@@ -413,10 +414,20 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
                                                         error:nil];
 
         NSSet<NSString *> *known = self.knownLocalIds ?: [NSSet set];
+        NSSet<NSString *> *existingThumbs = known.count == 0 ? [self existingPreviewIds] : nil;
         NSMutableArray<PHAsset *> *pending = [NSMutableArray array];
-        if (known.count == 0) {
+        if (known.count == 0 && existingThumbs.count == 0) {
             [pending addObjectsFromArray:assets];
-            NSLog(@"[footos] DB has no ios-photo rows; re-upserting %lu assets (thumbs reused if present)",
+            NSLog(@"[footos] First preview sync: %lu assets", (unsigned long)assets.count);
+        } else if (known.count == 0) {
+            for (PHAsset *asset in assets) {
+                if (![existingThumbs containsObject:[self safeIdForAsset:asset]]) {
+                    [pending addObject:asset];
+                }
+            }
+            NSLog(@"[footos] JS knownIds empty; skip %lu existing thumbs, sync %lu new / %lu total",
+                  (unsigned long)existingThumbs.count,
+                  (unsigned long)pending.count,
                   (unsigned long)assets.count);
         } else {
             for (PHAsset *asset in assets) {
@@ -1037,6 +1048,20 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
 - (NSString *)safeIdForAsset:(PHAsset *)asset {
     return [[asset.localIdentifier stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
             stringByReplacingOccurrencesOfString:@":" withString:@"_"];
+}
+
+- (NSSet<NSString *> *)existingPreviewIds {
+    NSMutableSet<NSString *> *ids = [NSMutableSet set];
+    if (self.thumbDir.length > 0) {
+        NSArray<NSString *> *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:self.thumbDir error:nil];
+        for (NSString *file in files) {
+            if ([[file pathExtension] caseInsensitiveCompare:@"jpg"] == NSOrderedSame) {
+                [ids addObject:file.stringByDeletingPathExtension];
+            }
+        }
+    }
+    [ids unionSet:[self importedSafeIds]];
+    return ids;
 }
 
 - (NSSet<NSString *> *)importedSafeIds {

@@ -65,14 +65,14 @@
     // Two-phase photo loading:
     // Phase 1 (instant): lightweight previews for map markers + timeline
     // Phase 2 (lazy): full PhotoInfo loaded on demand for preview modal
-    let previews = $state<PhotoPreview[]>([]);
-    let photos = $state<PhotoInfo[]>([]);
+    let previews = $state.raw<any[]>([]);
+    let photos = $state.raw<PhotoInfo[]>([]);
     let fullDataLoaded = $state(false);
 
     let dbPath = $state("");
     let thumbDir = $state("");
     let previewPhoto = $state<PhotoInfo | null>(null);
-    let previewPhotoList = $state<PhotoInfo[] | null>(null);
+    let previewPhotoList = $state.raw<PhotoInfo[] | null>(null);
 
     // iOS specific state
     let hasFullAccess = $state(false);
@@ -145,28 +145,11 @@
     // Map-compatible photos: uses lightweight previews for instant render,
     // upgrades to full grouped data when available.
     let mapPhotos = $derived.by(() => {
-        // Prefer full grouped data (has RAW badges, complete metadata)
         if (fullDataLoaded && groupedPhotos.length > 0) {
             return groupedPhotos;
         }
-        // Fast path: normalize previews to Map-compatible shape
         if (previews.length > 0) {
-            return previews.map(p => ({
-                id: { id: p.id },
-                path: p.path,
-                thumb_path: p.thumb_path,
-                media_type: p.media_type || "photo",
-                metadata: {
-                    lat: p.lat,
-                    lon: p.lon,
-                    date_taken: p.date_taken,
-                    width: 0,
-                    height: 0,
-                    duration_ms: p.duration_ms,
-                },
-                hash: "",
-                file_size: p.file_size,
-            }));
+            return previews;
         }
         return groupedPhotos;
     });
@@ -191,11 +174,23 @@
             dbPath = await join(appData, "footos.db");
             thumbDir = await join(appData, "thumbnails");
 
+            const boot: { t0: number; marks: Record<string, number> } = {
+                t0: performance.now(),
+                marks: {},
+            };
+            const mark = (key: string) => {
+                boot.marks[key] = Math.round(performance.now() - boot.t0);
+                console.log(`[boot] ${key} +${boot.marks[key]}ms`);
+            };
+            (window as any).__footosBoot = boot;
+
             // Initialize shared DB connection (single connection for all commands)
             await invoke("init_app", { dbPath, thumbDir });
+            mark("init_app");
 
             // Initialize platform service
             await platformService.initialize(dbPath, thumbDir);
+            mark("platform");
 
             // Subscribe to platform events
             platformService.onScanningChange((scanning) => {
@@ -231,22 +226,28 @@
                 loadFullPhotos();
             });
 
-            // Phase 1: Fast preview loading (zero file I/O, <50ms)
+            // Phase 1: geotagged previews only — enough for map + timeline.
             await loadPreviews();
+            mark("previews");
 
-            // Phase 2: Full data in background (for preview modal metadata)
-            loadFullPhotos();
-
-            // iOS: incremental sync after we know what's already in the DB
+            // iOS: incremental PhotoKit sync after first paint. Known IDs come
+            // from a cheap path-only query so we do not miss non-geotagged rows.
             if (iosPlatformService) {
                 iosPlatformService.onPermissionChange((fullAccess) => {
                     hasFullAccess = fullAccess;
                 });
-
-                iosPlatformService.setKnownPhotoIdentifiers(iosIdentifiersFrom(previews));
-                void iosPlatformService.syncPhotosIfFullAccess();
-                const status = await platformService.checkPermissionStatus();
-                hasFullAccess = status === 'granted';
+                setTimeout(async () => {
+                    try {
+                        const ids = (await invoke("list_ios_known_ids")) as string[];
+                        iosPlatformService?.setKnownPhotoIdentifiers(ids);
+                        const status = await platformService.checkPermissionStatus();
+                        hasFullAccess = status === "granted";
+                        await iosPlatformService?.syncPhotosIfFullAccess();
+                        mark("photosync");
+                    } catch (e) {
+                        console.warn("[App] Deferred PhotoKit sync failed", e);
+                    }
+                }, 1500);
             }
 
             // Android: Auto-sync photos from MediaStore if has access
@@ -293,16 +294,47 @@
         }
         try {
             const startTime = performance.now();
-            const result = await invoke("list_photos_preview");
+            const file = await invoke("list_map_previews") as {
+                path: string;
+                rows: number;
+                bytes: number;
+                rust_ms: number;
+            };
+            const boot = (window as any).__footosBoot;
+            if (boot?.marks) boot.marks.preview_rust = file.rust_ms;
+            const res = await fetch(convertFileSrc(file.path));
+            const pack = await res.json() as {
+                id: number[];
+                path: string[];
+                thumb: string[];
+                lat: number[];
+                lon: number[];
+                date: string[];
+                media: string[];
+                dur: number[];
+            };
+            const previewList: any[] = new Array(pack.path.length);
+            for (let i = 0; i < pack.path.length; i++) {
+                previewList[i] = {
+                    id: { id: pack.id[i] },
+                    path: pack.path[i],
+                    thumb_path: resolveThumbPath(pack.thumb[i]) || pack.thumb[i],
+                    media_type: pack.media[i] || "photo",
+                    metadata: {
+                        lat: pack.lat[i],
+                        lon: pack.lon[i],
+                        date_taken: pack.date[i] || null,
+                        width: 0,
+                        height: 0,
+                        duration_ms: pack.dur[i] || null,
+                    },
+                    hash: "",
+                    file_size: 0,
+                };
+            }
             const elapsed = (performance.now() - startTime).toFixed(1);
-            const previewList = result as PhotoPreview[];
-            const iosCount = previewList.filter((p) => p.path.startsWith("ios-photo://")).length;
-            console.log(`[App] loadPreviews: got ${previewList.length} previews (${iosCount} ios-photo) in ${elapsed}ms`);
-            previews = previewList.map((p) => ({
-                ...p,
-                thumb_path: resolveThumbPath(p.thumb_path) || p.thumb_path,
-            }));
-            iosPlatformService?.setKnownPhotoIdentifiers(iosIdentifiersFrom(previewList));
+            console.log(`[App] loadPreviews: ${previewList.length} rows rust=${file.rust_ms}ms ipc=${elapsed}ms bytes=${file.bytes}`);
+            previews = previewList;
         } catch (e) {
             console.error("[App] Failed to list previews", e);
             // Fallback: try full load

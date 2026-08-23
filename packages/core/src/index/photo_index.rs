@@ -12,11 +12,27 @@ pub struct PhotoIndex {
     conn: Mutex<Connection>,
 }
 
-#[uniffi::export]
 impl PhotoIndex {
-    #[uniffi::constructor]
-    pub fn open(db_path: String) -> Result<std::sync::Arc<Self>, CoreError> {
+    /// Open the index with an explicit SQLite journal mode (`WAL` or `DELETE`).
+    /// iOS should open with `DELETE` directly instead of converting from WAL on every launch.
+    pub fn open_with_journal(
+        db_path: String,
+        journal_mode: &str,
+    ) -> Result<std::sync::Arc<Self>, CoreError> {
+        let journal = match journal_mode.to_ascii_uppercase().as_str() {
+            "DELETE" => "DELETE",
+            _ => "WAL",
+        };
+        let opened = std::time::Instant::now();
         let conn = Connection::open(Path::new(&db_path))?;
+        let pragmas = format!(
+            "PRAGMA journal_mode = {journal};
+             PRAGMA synchronous = FULL;
+             PRAGMA cache_size = -8000;
+             PRAGMA temp_store = MEMORY;"
+        );
+        let _ = conn.execute_batch(&pragmas);
+
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS photos (
                 id INTEGER PRIMARY KEY,
@@ -37,45 +53,45 @@ impl PhotoIndex {
             CREATE INDEX IF NOT EXISTS idx_photos_hash ON photos (hash);",
         )?;
 
-        // Schema migration: add thumb_path and file_size columns for preview aggregation.
-        // These columns persist thumbnail paths and file sizes computed during import,
-        // eliminating per-photo file I/O on every list_photos call.
-        // ALTER TABLE ADD COLUMN is safe on existing DBs — errors if column already exists.
-        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN thumb_path TEXT;");
-        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN file_size INTEGER DEFAULT 0;");
+        // Skip ALTER/INDEX work after the schema has been applied once.
+        const SCHEMA_VERSION: i64 = 3;
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap_or(0);
+        if version < SCHEMA_VERSION {
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN thumb_path TEXT;");
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN file_size INTEGER DEFAULT 0;");
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN media_type TEXT DEFAULT 'photo';");
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN duration_ms INTEGER;");
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN video_codec TEXT;");
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN audio_codec TEXT;");
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN video_path TEXT;");
+            let _ = conn.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_photos_date_taken ON photos (date_taken);
+                 CREATE INDEX IF NOT EXISTS idx_photos_media_type ON photos (media_type);",
+            );
+            let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
+        }
 
-        // Schema migration: add video/media type support columns.
-        let _ =
-            conn.execute_batch("ALTER TABLE photos ADD COLUMN media_type TEXT DEFAULT 'photo';");
-        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN duration_ms INTEGER;");
-        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN video_codec TEXT;");
-        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN audio_codec TEXT;");
-        let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN video_path TEXT;");
-
-        // Index on date_taken for timeline range queries
-        let _ = conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_photos_date_taken ON photos (date_taken);",
-        );
-        let _ = conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_photos_media_type ON photos (media_type);",
-        );
-
-        // Performance pragmas:
-        // - WAL: concurrent reads + batched writes
-        // - synchronous=FULL: flush WAL on commit (NORMAL can lose a whole import
-        //   if iOS force-kills before the OS writes the journal)
-        // - cache_size=-8000: 8MB page cache (default ~2MB)
-        // - temp_store=MEMORY: temp tables in RAM
-        let _ = conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = FULL;
-             PRAGMA cache_size = -8000;
-             PRAGMA temp_store = MEMORY;",
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap_or_else(|_| journal.to_string());
+        eprintln!(
+            "[footos] PhotoIndex opened journal={mode} schema={version} in {:?}",
+            opened.elapsed()
         );
 
         Ok(std::sync::Arc::new(Self {
             conn: Mutex::new(conn),
         }))
+    }
+}
+
+#[uniffi::export]
+impl PhotoIndex {
+    #[uniffi::constructor]
+    pub fn open(db_path: String) -> Result<std::sync::Arc<Self>, CoreError> {
+        Self::open_with_journal(db_path, "WAL")
     }
 
     pub fn insert(
@@ -479,16 +495,51 @@ impl PhotoIndex {
     /// 2. No nested struct construction
     /// 3. No per-photo filesystem operations
     pub fn list_previews(&self) -> Result<Vec<PhotoPreview>, CoreError> {
+        self.list_previews_filtered(false)
+    }
+
+    /// Paths already imported from PhotoKit, without the `ios-photo://` prefix.
+    pub fn list_ios_identifiers(&self) -> Result<Vec<String>, CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT path FROM photos WHERE path LIKE 'ios-photo://%'")?;
+        let rows = stmt.query_map([], |row| {
+            let path: String = row.get(0)?;
+            Ok(path
+                .strip_prefix("ios-photo://")
+                .unwrap_or(path.as_str())
+                .to_string())
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            match row {
+                Ok(id) => results.push(id),
+                Err(e) => tracing::warn!(error = %e, "PhotoIndex::list_ios_identifiers row error"),
+            }
+        }
+        Ok(results)
+    }
+
+    pub fn list_previews_filtered(&self, geotagged_only: bool) -> Result<Vec<PhotoPreview>, CoreError> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| CoreError::Database(e.to_string()))?;
 
-        let mut stmt = conn.prepare(
+        let sql = if geotagged_only {
             "SELECT id, path, thumb_path, lat, lon, date_taken, file_size,
                     media_type, duration_ms
-             FROM photos",
-        )?;
+             FROM photos
+             WHERE lat IS NOT NULL AND lon IS NOT NULL"
+        } else {
+            "SELECT id, path, thumb_path, lat, lon, date_taken, file_size,
+                    media_type, duration_ms
+             FROM photos"
+        };
+
+        let mut stmt = conn.prepare(sql)?;
 
         let rows = stmt.query_map([], |row| {
             Ok(PhotoPreview {

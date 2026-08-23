@@ -93,7 +93,8 @@
     let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd, true));
 
     // Photos with markers for TimelineSlider
-    let photosWithMarkers = $state<any[]>([]);
+    let photosWithMarkers = $state.raw<any[]>([]);
+    let timelineReady = $state(false);
 
     // Get visible photos sorted by time for navigation
     let visiblePhotosSorted = $derived.by(() => {
@@ -755,6 +756,11 @@
 
         prevPhotoCount = photos.length;
         photosWithMarkers = photos;
+        if (!timelineReady && photos.length > 0) {
+            requestAnimationFrame(() => {
+                timelineReady = true;
+            });
+        }
     }
 
     /**
@@ -936,7 +942,7 @@
     }
 
     let mapVisibleTimeRange = $state<{ start: Date; end: Date } | null>(null);
-    let mapVisiblePhotos = $state<any[] | null>(null);
+    let mapVisiblePhotos = $state.raw<any[] | null>(null);
     let timelinePhotos = $derived(mapVisiblePhotos ?? photosWithMarkers);
 
     function handleShowAllPhotos() {
@@ -1258,7 +1264,7 @@
     </div>
 
     <!-- Timeline slider -->
-    {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0}
+    {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0 && timelineReady}
         <div class="flex-shrink-0">
             <TimelineSlider
                 photos={timelinePhotos}

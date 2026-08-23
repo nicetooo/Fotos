@@ -462,12 +462,17 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             console.warn("[iOS] footosPhotos message handler not available");
             return;
         }
-        handler.postMessage({
+        const payload: Record<string, unknown> = {
             dbPath: this.dbPath,
             thumbDir: this.thumbDir,
-            knownIds: this.knownIdentifiers,
             ...data,
-        });
+        };
+        // 10k+ UUIDs on every bridge call freeze WKWebView. Only send them
+        // when PhotoKit actually needs the incremental skip list.
+        if (data.command === "requestAccessAndSync" || data.command === "requestImport") {
+            payload.knownIds = this.knownIdentifiers;
+        }
+        handler.postMessage(payload);
     }
 
     private async waitForBridge(maxWait: number): Promise<boolean> {

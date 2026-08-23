@@ -1,4 +1,5 @@
 use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE, MediaType};
+use tauri::Manager;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::sync::{
@@ -44,7 +45,6 @@ impl AppState {
             let index_guard = self.index.lock().map_err(|e| e.to_string())?;
             if *current_path == db_path {
                 if let Some(index) = index_guard.as_ref() {
-                    let _ = index.flush();
                     let rows = index.count().unwrap_or(-1);
                     drop(index_guard);
                     drop(current_path);
@@ -58,16 +58,22 @@ impl AppState {
             }
         }
 
-        let index = PhotoIndex::open(db_path.clone()).map_err(|e| {
+        let open_started = std::time::Instant::now();
+        let index = {
+            #[cfg(target_os = "ios")]
+            {
+                PhotoIndex::open_with_journal(db_path.clone(), "DELETE")
+            }
+            #[cfg(not(target_os = "ios"))]
+            {
+                PhotoIndex::open(db_path.clone())
+            }
+        }
+        .map_err(|e| {
             tracing::error!(error = %e, "AppState::init: failed to open DB");
             e.to_string()
         })?;
-        #[cfg(target_os = "ios")]
-        {
-            if let Err(e) = index.use_delete_journal() {
-                eprintln!("[footos] use_delete_journal failed: {e}");
-            }
-        }
+        eprintln!("[footos] PhotoIndex::open returned in {:?}", open_started.elapsed());
 
         *self.db_path.lock().map_err(|e| e.to_string())? = db_path.clone();
         *self.thumb_dir.lock().map_err(|e| e.to_string())? = thumb_dir;
@@ -123,9 +129,18 @@ fn get_core_version() -> String {
 /// Initialize the app state with database and thumbnail paths.
 /// Must be called once from the frontend at startup, before any DB commands.
 #[tauri::command]
-fn init_app(state: tauri::State<'_, AppState>, db_path: String, thumb_dir: String) -> Result<(), String> {
+async fn init_app(app: tauri::AppHandle, db_path: String, thumb_dir: String) -> Result<(), String> {
     tracing::info!(db = %db_path, thumbs = %thumb_dir, "init_app");
-    state.init(db_path, thumb_dir)
+    // iOS WebKit handles invoke on the UI thread. Do the SQLite open off-thread
+    // or the WebView freezes for the entire journal/schema setup.
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let result = app.state::<AppState>().init(db_path, thumb_dir);
+        eprintln!("[footos] init_app finished in {:?}", started.elapsed());
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -142,96 +157,191 @@ fn flush_photos_db(state: tauri::State<'_, AppState>) -> Result<i64, String> {
 /// Zero file I/O -- all data comes from the database.
 /// Typically completes in <50ms even for 10K+ photos.
 #[tauri::command]
-async fn list_photos_preview(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoPreview>, String> {
+async fn list_photos_preview(
+    app: tauri::AppHandle,
+    geotagged_only: Option<bool>,
+) -> Result<Vec<PhotoPreview>, String> {
     tracing::trace!("list_photos_preview: called");
+    let geotagged_only = geotagged_only.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let index = state.get_index()?;
+        let started = std::time::Instant::now();
+        let previews = index
+            .list_previews_filtered(geotagged_only)
+            .map_err(|e| {
+                tracing::error!(error = %e, "list_photos_preview: query failed");
+                e.to_string()
+            })?;
+        eprintln!(
+            "[footos] list_photos_preview geotagged_only={geotagged_only} {} rows in {:?}",
+            previews.len(),
+            started.elapsed()
+        );
+        Ok(previews)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-    let index = state.get_index()?;
+/// Columnar geotagged previews written to a file. Returning 5k+ objects through
+/// Tauri invoke on iOS WKWebView took ~8s; JS fetch of the same JSON is faster.
+#[derive(serde::Serialize)]
+struct MapPreviewPack {
+    id: Vec<i64>,
+    path: Vec<String>,
+    thumb: Vec<String>,
+    lat: Vec<f64>,
+    lon: Vec<f64>,
+    date: Vec<String>,
+    media: Vec<String>,
+    dur: Vec<u64>,
+}
 
-    let mut previews = index.list_previews().map_err(|e| {
-        tracing::error!(error = %e, "list_photos_preview: query failed");
-        e.to_string()
-    })?;
-    if let Ok(thumb_dir) = state.get_thumb_dir() {
-        let dir = std::path::Path::new(&thumb_dir);
-        for preview in &mut previews {
-            if let Some(stored) = preview.thumb_path.as_deref() {
-                if let Some(name) = std::path::Path::new(stored).file_name() {
-                    let current = dir.join(name);
-                    if current.exists() {
-                        preview.thumb_path = Some(current.to_string_lossy().into_owned());
-                    }
-                }
-            }
-        }
-    }
-    tracing::debug!(count = previews.len(), "list_photos_preview: done");
-
-    Ok(previews)
+#[derive(serde::Serialize)]
+struct MapPreviewFile {
+    path: String,
+    rows: usize,
+    bytes: usize,
+    rust_ms: u64,
 }
 
 #[tauri::command]
-async fn list_photos(state: tauri::State<'_, AppState>) -> Result<Vec<PhotoInfo>, String> {
-    tracing::trace!("list_photos: called");
-
-    let index = state.get_index()?;
-    let thumb_dir = state.get_thumb_dir()?;
-
-    let mut photos = index.list().map_err(|e| {
-        tracing::error!(error = %e, "list_photos: query failed");
-        e.to_string()
-    })?;
-    tracing::debug!(count = photos.len(), "list_photos: done");
-
-    // Only resolve thumb_path/file_size for photos that don't have them in the DB.
-    // Photos imported after the preview aggregation update will already have these values.
-    let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-    let spec = footos_core::ThumbnailSpec::default();
-    let mut backfill_count = 0u32;
-    let use_txn = index.begin_transaction().is_ok();
-    for photo in &mut photos {
-        // Skip if already populated from DB
-        if photo.thumb_path.is_some() && photo.file_size > 0 {
-            continue;
+async fn list_map_previews(app: tauri::AppHandle) -> Result<MapPreviewFile, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let state = app.state::<AppState>();
+        let rows = state
+            .get_index()?
+            .list_previews_filtered(true)
+            .map_err(|e| e.to_string())?;
+        let n = rows.len();
+        let mut pack = MapPreviewPack {
+            id: Vec::with_capacity(n),
+            path: Vec::with_capacity(n),
+            thumb: Vec::with_capacity(n),
+            lat: Vec::with_capacity(n),
+            lon: Vec::with_capacity(n),
+            date: Vec::with_capacity(n),
+            media: Vec::with_capacity(n),
+            dur: Vec::with_capacity(n),
+        };
+        for row in rows {
+            let Some(lat) = row.lat else { continue };
+            let Some(lon) = row.lon else { continue };
+            pack.id.push(row.id);
+            pack.path.push(row.path);
+            pack.thumb.push(
+                row.thumb_path
+                    .as_deref()
+                    .and_then(|p| std::path::Path::new(p).file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            );
+            pack.lat.push(lat);
+            pack.lon.push(lon);
+            pack.date.push(row.date_taken.unwrap_or_default());
+            pack.media.push(row.media_type);
+            pack.dur.push(row.duration_ms.unwrap_or(0));
         }
+        let bytes = serde_json::to_vec(&pack).map_err(|e| e.to_string())?;
+        let thumb_dir = state.get_thumb_dir()?;
+        let out = std::path::Path::new(&thumb_dir).join("map_previews.json");
+        std::fs::write(&out, &bytes).map_err(|e| e.to_string())?;
+        let rust_ms = started.elapsed().as_millis() as u64;
+        eprintln!(
+            "[footos] list_map_previews {} rows {} bytes in {rust_ms}ms",
+            pack.path.len(),
+            bytes.len()
+        );
+        Ok(MapPreviewFile {
+            path: out.to_string_lossy().into_owned(),
+            rows: pack.path.len(),
+            bytes: bytes.len(),
+            rust_ms,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-        let source_path = std::path::Path::new(&photo.path);
+#[tauri::command]
+async fn list_ios_known_ids(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let ids = app
+            .state::<AppState>()
+            .get_index()?
+            .list_ios_identifiers()
+            .map_err(|e| e.to_string())?;
+        eprintln!(
+            "[footos] list_ios_known_ids {} ids in {:?}",
+            ids.len(),
+            started.elapsed()
+        );
+        Ok(ids)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-        // Backfill thumb_path
-        if photo.thumb_path.is_none() {
-            match thumbnailer.get_cached_path(source_path, &spec) {
-                Ok(Some(path)) => {
+#[tauri::command]
+async fn list_photos(app: tauri::AppHandle) -> Result<Vec<PhotoInfo>, String> {
+    tracing::trace!("list_photos: called");
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let index = state.get_index()?;
+        let thumb_dir = state.get_thumb_dir()?;
+
+        let mut photos = index.list().map_err(|e| {
+            tracing::error!(error = %e, "list_photos: query failed");
+            e.to_string()
+        })?;
+
+        let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
+        let spec = footos_core::ThumbnailSpec::default();
+        let mut backfill_count = 0u32;
+        let use_txn = index.begin_transaction().is_ok();
+        for photo in &mut photos {
+            if photo.thumb_path.is_some() && photo.file_size > 0 {
+                continue;
+            }
+            // Virtual library URIs have no local file to stat.
+            if photo.path.starts_with("ios-photo://") || photo.path.starts_with("content://") {
+                continue;
+            }
+
+            let source_path = std::path::Path::new(&photo.path);
+            if photo.thumb_path.is_none() {
+                if let Ok(Some(path)) = thumbnailer.get_cached_path(source_path, &spec) {
                     photo.thumb_path = Some(path.to_string_lossy().to_string());
                 }
-                _ => {}
+            }
+            if photo.file_size == 0 {
+                if let Ok(metadata) = std::fs::metadata(source_path) {
+                    photo.file_size = metadata.len();
+                }
+            }
+            if photo.thumb_path.is_some() || photo.file_size > 0 {
+                let _ = index.update_thumb_info(
+                    photo.path.clone(),
+                    photo.thumb_path.clone(),
+                    photo.file_size,
+                );
+                backfill_count += 1;
             }
         }
-
-        // Backfill file_size
-        if photo.file_size == 0 {
-            if let Ok(metadata) = std::fs::metadata(source_path) {
-                photo.file_size = metadata.len();
-            }
+        if use_txn && backfill_count > 0 {
+            let _ = index.commit_transaction();
         }
-
-        // Persist the backfilled data so next call is instant
-        if photo.thumb_path.is_some() || photo.file_size > 0 {
-            let _ = index.update_thumb_info(
-                photo.path.clone(),
-                photo.thumb_path.clone(),
-                photo.file_size,
-            );
-            backfill_count += 1;
-        }
-    }
-    if use_txn && backfill_count > 0 {
-        let _ = index.commit_transaction();
-    }
-
-    if backfill_count > 0 {
-        tracing::debug!(count = backfill_count, "list_photos: backfilled thumb info");
-    }
-
-    Ok(photos)
+        eprintln!(
+            "[footos] list_photos {} rows backfill={backfill_count}",
+            photos.len()
+        );
+        Ok(photos)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Result of parallel Phase 2 processing for a single photo.
@@ -1622,6 +1732,8 @@ pub fn run() {
             cancel_import,
             list_photos,
             list_photos_preview,
+            list_map_previews,
+            list_ios_known_ids,
             clear_app_data,
             regenerate_thumbnails,
             read_file_bytes,
