@@ -20,6 +20,25 @@
 	<string>0.1.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>足迹相册需要访问你的照片，以便在地图和时间轴上展示拍摄足迹。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>足迹相册需要读取照片里的拍摄位置，才能在地图上展示足迹。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>足迹相册需要访问本地网络，以便连接电脑上的开发服务器。开发版请同时在设置里把「无线数据」改为无线局域网。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

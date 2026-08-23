@@ -40,6 +40,15 @@ targets:
       path: footos_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsArbitraryLoadsInWebContent: true
+          NSAllowsLocalNetworking: true
+        NSPhotoLibraryUsageDescription: 足迹相册需要访问你的照片，以便在地图和时间轴上展示拍摄足迹。
+        NSLocationWhenInUseUsageDescription: 足迹相册需要读取照片里的拍摄位置，才能在地图上展示足迹。
+        NSLocalNetworkUsageDescription: 足迹相册需要访问本地网络，以便连接电脑上的开发服务器。开发版请同时在设置里把「无线数据」改为无线局域网。
+        NSBonjourServices:
+          - _http._tcp
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:
@@ -79,6 +88,10 @@ targets:
       - sdk: Security.framework
       - sdk: UIKit.framework
       - sdk: WebKit.framework
+      - sdk: Photos.framework
+      - sdk: PhotosUI.framework
+      - sdk: Network.framework
+      - sdk: CoreLocation.framework
     preBuildScripts:
       - script: pnpm tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code

@@ -19,6 +19,11 @@
 		CD8FEF0B6AB4CEF9C3B5C6A5 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FD248EC89969CF73ED2F975A /* Metal.framework */; };
 		F8DB54D93BF2E1863E897E1D /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 754807A182CCEB708272091A /* WebKit.framework */; };
 		FCE945A259B8DE9F2DB2C21A /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3C5F59F097E9A423B9468EA2 /* LaunchScreen.storyboard */; };
+		A1B2C3D4E5F60718293A4B01 /* PhotoLibraryBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */; };
+		A1B2C3D4E5F60718293A4B03 /* Photos.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B04 /* Photos.framework */; };
+		A1B2C3D4E5F60718293A4B06 /* PhotosUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B07 /* PhotosUI.framework */; };
+		A1B2C3D4E5F60718293A4B09 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B08 /* Network.framework */; };
+		A1B2C3D4E5F60718293A4B0B /* CoreLocation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B0A /* CoreLocation.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +33,12 @@
 		50472D89822AE58BCF60CD70 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		5DDAC4B2817DB3087D4FB3E6 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		754807A182CCEB708272091A /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PhotoLibraryBridge.m; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B05 /* PhotoLibraryBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PhotoLibraryBridge.h; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B04 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
+		A1B2C3D4E5F60718293A4B07 /* PhotosUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PhotosUI.framework; path = System/Library/Frameworks/PhotosUI.framework; sourceTree = SDKROOT; };
+		A1B2C3D4E5F60718293A4B08 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
+		A1B2C3D4E5F60718293A4B0A /* CoreLocation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreLocation.framework; path = System/Library/Frameworks/CoreLocation.framework; sourceTree = SDKROOT; };
 		813D781A90AA13FEA681DA0F /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		8259B01F90FFC933E775A2B6 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		889E46CEBE16D358100ABB07 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
@@ -55,6 +66,10 @@
 				AE7C9314CDF3E34625FF6FC9 /* Security.framework in Frameworks */,
 				446E0202FE4239F2D9A00389 /* UIKit.framework in Frameworks */,
 				F8DB54D93BF2E1863E897E1D /* WebKit.framework in Frameworks */,
+				A1B2C3D4E5F60718293A4B03 /* Photos.framework in Frameworks */,
+				A1B2C3D4E5F60718293A4B06 /* PhotosUI.framework in Frameworks */,
+				A1B2C3D4E5F60718293A4B09 /* Network.framework in Frameworks */,
+				A1B2C3D4E5F60718293A4B0B /* CoreLocation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -105,6 +120,10 @@
 				258D2F0ED8D7218D0D7AF715 /* Security.framework */,
 				A95223E7C8AD5BD7108F9F49 /* UIKit.framework */,
 				754807A182CCEB708272091A /* WebKit.framework */,
+				A1B2C3D4E5F60718293A4B04 /* Photos.framework */,
+				A1B2C3D4E5F60718293A4B07 /* PhotosUI.framework */,
+				A1B2C3D4E5F60718293A4B08 /* Network.framework */,
+				A1B2C3D4E5F60718293A4B0A /* CoreLocation.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -145,6 +164,8 @@
 			isa = PBXGroup;
 			children = (
 				813D781A90AA13FEA681DA0F /* main.mm */,
+				A1B2C3D4E5F60718293A4B05 /* PhotoLibraryBridge.h */,
+				A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */,
 				C759D25BA82D99E92B87B39A /* bindings */,
 			);
 			path = footos;
@@ -244,6 +265,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B2420FCD73C6EBF096244639 /* main.mm in Sources */,
+				A1B2C3D4E5F60718293A4B01 /* PhotoLibraryBridge.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -334,6 +356,7 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
+				DEVELOPMENT_TEAM = "ZVZ4AP4H2T";
 			};
 			name = release;
 		};
@@ -428,6 +451,7 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
+				DEVELOPMENT_TEAM = "ZVZ4AP4H2T";
 			};
 			name = debug;
 		};

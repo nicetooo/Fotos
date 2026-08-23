@@ -21,7 +21,6 @@
         type PhotoPreview,
         type Theme,
         type ImportStatus,
-        formatFileSize,
         groupPhotos,
     } from "../shared";
 
@@ -30,7 +29,7 @@
 
     // Components
     import Settings from "./components/Settings.svelte";
-    import ImagePreview from "./components/ImagePreview.svelte";
+    import PhotoViewer from "./components/PhotoViewer.svelte";
     import MapView from "./components/MapView.svelte";
 
     // Platform service received as prop from main.ts
@@ -135,6 +134,13 @@
 
     // Group RAW+JPEG pairs (only when full data is loaded)
     let groupedPhotos = $derived(groupPhotos(photos));
+    let photosByPath = $derived.by(() => {
+        const map = new Map<string, PhotoInfo>();
+        for (const photo of photos) {
+            map.set(photo.path, photo);
+        }
+        return map;
+    });
 
     // Map-compatible photos: uses lightweight previews for instant render,
     // upgrades to full grouped data when available.
@@ -149,12 +155,14 @@
                 id: { id: p.id },
                 path: p.path,
                 thumb_path: p.thumb_path,
+                media_type: p.media_type || "photo",
                 metadata: {
                     lat: p.lat,
                     lon: p.lon,
                     date_taken: p.date_taken,
                     width: 0,
                     height: 0,
+                    duration_ms: p.duration_ms,
                 },
                 hash: "",
                 file_size: p.file_size,
@@ -203,15 +211,16 @@
                     total: progress.total,
                     lastPath: progress.lastPath,
                 };
-                if (progress.current <= 5 || progress.current % 50 === 0) {
+                if (progress.current <= 5 || progress.current % 400 === 0) {
                     loadPreviews();
                 }
             });
 
             platformService.onImportComplete((result) => {
                 console.log("[App] Import complete callback triggered:", result);
-                loadPreviews();
-                // Load full data in background after import completes
+                loadPreviews().then(() => {
+                    iosPlatformService?.setKnownPhotoIdentifiers(iosIdentifiersFrom(previews));
+                });
                 loadFullPhotos();
             });
 
@@ -228,15 +237,14 @@
             // Phase 2: Full data in background (for preview modal metadata)
             loadFullPhotos();
 
-            // iOS: Auto-sync photos if user has full access
+            // iOS: incremental sync after we know what's already in the DB
             if (iosPlatformService) {
-                // Subscribe to permission changes
                 iosPlatformService.onPermissionChange((fullAccess) => {
                     hasFullAccess = fullAccess;
                 });
 
-                iosPlatformService.syncPhotosIfFullAccess();
-                // Check initial permission status
+                iosPlatformService.setKnownPhotoIdentifiers(iosIdentifiersFrom(previews));
+                void iosPlatformService.syncPhotosIfFullAccess();
                 const status = await platformService.checkPermissionStatus();
                 hasFullAccess = status === 'granted';
             }
@@ -249,11 +257,23 @@
 
                 androidPlatformService.syncPhotosIfHasAccess();
             }
+            (window as any).__footosOpenPreview = (mediaType?: string) => {
+                const list = mapPhotos.filter((p: any) => p.metadata?.lat && p.metadata?.lon);
+                if (list.length === 0) return false;
+                const pick = mediaType
+                    ? list.find((p: any) => (p.media_type || p.metadata?.media_type) === mediaType) || list[0]
+                    : list[0];
+                openPreview(pick, list);
+                return { ok: true, media_type: pick.media_type || pick.metadata?.media_type || "photo", path: pick.path };
+            };
+            (window as any).__footosClosePreview = () => closePreview();
         } catch (e) {
             error = t.errors.initFailed + ": " + e;
         }
 
         return () => {
+            delete (window as any).__footosOpenPreview;
+            delete (window as any).__footosClosePreview;
             window.removeEventListener('popstate', handlePopState);
             platformService.cleanup();
         };
@@ -276,8 +296,13 @@
             const result = await invoke("list_photos_preview");
             const elapsed = (performance.now() - startTime).toFixed(1);
             const previewList = result as PhotoPreview[];
-            console.log(`[App] loadPreviews: got ${previewList.length} previews in ${elapsed}ms`);
-            previews = previewList;
+            const iosCount = previewList.filter((p) => p.path.startsWith("ios-photo://")).length;
+            console.log(`[App] loadPreviews: got ${previewList.length} previews (${iosCount} ios-photo) in ${elapsed}ms`);
+            previews = previewList.map((p) => ({
+                ...p,
+                thumb_path: resolveThumbPath(p.thumb_path) || p.thumb_path,
+            }));
+            iosPlatformService?.setKnownPhotoIdentifiers(iosIdentifiersFrom(previewList));
         } catch (e) {
             console.error("[App] Failed to list previews", e);
             // Fallback: try full load
@@ -299,17 +324,35 @@
             const elapsed = (performance.now() - startTime).toFixed(1);
             const photoList = result as PhotoInfo[];
             console.log(`[App] loadFullPhotos: got ${photoList.length} photos in ${elapsed}ms`);
-            photos = photoList;
+            photos = photoList.map((p) => ({
+                ...p,
+                thumb_path: resolveThumbPath(p.thumb_path) || p.thumb_path,
+            }));
             fullDataLoaded = true;
         } catch (e) {
             console.error("[App] Failed to load full photos", e);
         }
     }
 
+    function iosIdentifiersFrom(list: PhotoPreview[]): string[] {
+        return list
+            .filter((p) => p.path.startsWith("ios-photo://"))
+            .map((p) => p.path.slice("ios-photo://".length));
+    }
+
+    /** Reinstalls change the iOS container UUID; DB may still hold the old absolute path. */
+    function resolveThumbPath(stored: string | null | undefined): string {
+        if (!stored) return "";
+        const name = stored.split("/").pop();
+        if (!name || !thumbDir) return stored;
+        return `${thumbDir.replace(/\/$/, "")}/${name}`;
+    }
+
     async function handleImport() {
         try {
             error = "";
             importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
+            iosPlatformService?.setKnownPhotoIdentifiers(iosIdentifiersFrom(previews));
             await platformService.requestImport();
         } catch (e) {
             error = String(e);
@@ -317,29 +360,33 @@
     }
 
     function openPreview(photo: any, customList?: any[]) {
-        // When opening from map preview, we may receive a lightweight preview object.
-        // Find the full PhotoInfo if available, otherwise use the preview data.
-        if (fullDataLoaded && photos.length > 0) {
-            const fullPhoto = photos.find(p => p.path === photo.path);
-            if (fullPhoto) {
-                previewPhoto = fullPhoto;
-                if (customList) {
-                    // Map customList paths to full PhotoInfo
-                    const fullList = customList
-                        .map(cp => photos.find(p => p.path === cp.path))
-                        .filter((p): p is PhotoInfo => p !== undefined);
-                    previewPhotoList = fullList.length > 0 ? fullList : null;
-                } else {
-                    previewPhotoList = null;
-                }
-                history.pushState({ modal: 'preview' }, '');
-                return;
-            }
-        }
-        // Fallback: use whatever data we have (lightweight preview)
-        previewPhoto = photo;
+        previewPhoto = photosByPath.get(photo.path) || photo;
         previewPhotoList = customList || null;
-        history.pushState({ modal: 'preview' }, '');
+        history.pushState({ modal: "preview" }, "");
+    }
+
+    async function resolveOriginalForViewer(photo: any): Promise<string | null> {
+        if (!iosPlatformService || !photo?.path?.startsWith("ios-photo://")) {
+            return null;
+        }
+        try {
+            return await iosPlatformService.ensureOriginal(photo.path);
+        } catch (e) {
+            console.warn("[App] On-demand original export failed, showing thumbnail", e);
+            return null;
+        }
+    }
+
+    async function resolveStillForViewer(photo: any): Promise<string | null> {
+        if (!iosPlatformService || !photo?.path?.startsWith("ios-photo://")) {
+            return null;
+        }
+        try {
+            return await iosPlatformService.ensureViewerStill(photo.path);
+        } catch (e) {
+            console.warn("[App] Viewer still export failed", e);
+            return null;
+        }
     }
 
     function closePreview() {
@@ -350,23 +397,7 @@
         history.back();
     }
 
-    // Get the photo list to use for navigation
     let navigationPhotos = $derived(previewPhotoList || groupedPhotos);
-
-    function navigatePreview(direction: "prev" | "next") {
-        if (!previewPhoto) return;
-        const photoList = navigationPhotos;
-        const currentIndex = photoList.findIndex(p => p.path === previewPhoto!.path);
-        if (currentIndex === -1) return;
-
-        let newIndex: number;
-        if (direction === "prev") {
-            newIndex = currentIndex > 0 ? currentIndex - 1 : photoList.length - 1;
-        } else {
-            newIndex = currentIndex < photoList.length - 1 ? currentIndex + 1 : 0;
-        }
-        previewPhoto = photoList[newIndex];
-    }
 
     // Back button support: manage browser history for modal states
     // When a modal opens, we pushState. When user presses hardware back button,
@@ -404,21 +435,18 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={mapPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} {locale} />
+        <MapView photos={mapPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
 
         <!-- Floating action buttons (top-left, vertical) -->
-        <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
-            <!-- Import button (hidden when iOS has full access since auto-sync handles it) -->
-            {#if !hasFullAccess}
-                <button
-                    onclick={() => handleImport()}
-                    disabled={isScanning}
-                    class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
-                    title={t.import.importPhotos}
-                >
-                    <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-lg"></i>
-                </button>
-            {/if}
+        <div class="absolute left-4 z-[1001] flex flex-col gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
+            <button
+                onclick={() => handleImport()}
+                disabled={isScanning}
+                class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                title={t.import.importPhotos}
+            >
+                <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-lg"></i>
+            </button>
 
             <!-- Settings button -->
             <button
@@ -432,7 +460,7 @@
 
         <!-- Import progress indicator -->
         {#if isScanning}
-            <div class="absolute top-4 left-20 z-[1001] px-3 py-2 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-sm text-white/80 flex items-center gap-2">
+            <div class="absolute left-20 z-[1001] px-3 py-2 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-sm text-white/80 flex items-center gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
                 <i class="fa-solid fa-spinner fa-spin text-xs"></i>
                 {#if importStatus.total > 0}
                     <span>{importStatus.current} / {importStatus.total}</span>
@@ -444,7 +472,7 @@
 
         <!-- Error message -->
         {#if error}
-            <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1001] px-4 py-2 rounded-lg bg-red-900/80 backdrop-blur-sm border border-red-700/50 text-red-200 text-sm max-w-[90%]">
+            <div class="absolute left-1/2 -translate-x-1/2 z-[1001] px-4 py-2 rounded-lg bg-red-900/80 backdrop-blur-sm border border-red-700/50 text-red-200 text-sm max-w-[90%]" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
                 {error}
             </div>
         {/if}
@@ -480,65 +508,16 @@
 {/if}
 
 {#if previewPhoto}
-    {@const currentIndex = navigationPhotos.findIndex(p => p.path === previewPhoto.path)}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div
-        class="fixed inset-0 z-50 bg-black"
-        onclick={closePreview}
-    >
-        <!-- Top bar -->
-        <div class="absolute top-0 left-0 right-0 h-14 flex items-center justify-between px-4 z-20 bg-black/80">
-            <button
-                onclick={closePreview}
-                class="p-2 rounded hover:bg-white/10 text-white"
-            >
-                <i class="fa-solid fa-xmark text-lg"></i>
-            </button>
-            <span class="text-sm text-white/70">{currentIndex + 1} / {navigationPhotos.length}</span>
-            <div class="w-10"></div>
-        </div>
-
-        <!-- Navigation buttons -->
-        <button
-            onclick={(e) => { e.stopPropagation(); navigatePreview("prev"); }}
-            class="absolute left-2 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 text-white z-20"
-        >
-            <i class="fa-solid fa-chevron-left text-xl"></i>
-        </button>
-        <button
-            onclick={(e) => { e.stopPropagation(); navigatePreview("next"); }}
-            class="absolute right-2 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 text-white z-20"
-        >
-            <i class="fa-solid fa-chevron-right text-xl"></i>
-        </button>
-
-        <!-- Image area -->
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div
-            class="absolute top-14 left-0 right-0 bottom-0"
-            onclick={(e) => e.stopPropagation()}
-        >
-            {#key previewPhoto.path}
-                <ImagePreview
-                    src={previewPhoto.path}
-                    alt={previewPhoto.path.split("/").pop() || "Preview"}
-                    thumbPath={previewPhoto.thumb_path || ""}
-                    {t}
-                    mediaType={previewPhoto.media_type || 'photo'}
-                    videoPath={previewPhoto.video_path || ''}
-                />
-            {/key}
-        </div>
-
-        <!-- Photo info (bottom sheet style) -->
-        <div class="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur px-4 py-3 z-20">
-            <p class="text-white text-sm truncate">{previewPhoto.path.split("/").pop()}</p>
-            <p class="text-white/60 text-xs mt-1">
-                {previewPhoto.metadata.width} × {previewPhoto.metadata.height}
-                · {formatFileSize(previewPhoto.file_size)}
-            </p>
-        </div>
-    </div>
+    <PhotoViewer
+        photos={navigationPhotos}
+        currentPath={previewPhoto.path}
+        {t}
+        {locale}
+        onClose={closePreview}
+        onNavigate={(photo) => { previewPhoto = photo; }}
+        resolveOriginal={resolveOriginalForViewer}
+        resolveStill={resolveStillForViewer}
+    />
 {/if}
 
 <style>

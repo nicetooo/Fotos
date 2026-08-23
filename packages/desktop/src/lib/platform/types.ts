@@ -90,7 +90,10 @@ export interface IOSPlatformService extends PlatformService {
     /** 是否有完整相册访问权限 */
     readonly hasFullPhotoAccess: boolean;
 
-    /** 如果有完整权限则同步照片 */
+    /** 记录已入库的 PhotoKit localIdentifier，供增量同步跳过 */
+    setKnownPhotoIdentifiers(ids: string[]): void;
+
+    /** 如果有完整权限则增量同步新照片 */
     syncPhotosIfFullAccess(): Promise<void>;
 
     /** 显示有限权限选择器 */
@@ -98,6 +101,12 @@ export interface IOSPlatformService extends PlatformService {
 
     /** 订阅权限状态变化 */
     onPermissionChange(callback: (hasFullAccess: boolean) => void): () => void;
+
+    /** 点开大图时按需导出原片，返回本地文件路径 */
+    ensureOriginal(path: string): Promise<string>;
+
+    /** 视频/实况封面：屏幕尺寸静帧，比 256 缩略图清晰，也比整段视频快 */
+    ensureViewerStill(path: string): Promise<string | null>;
 }
 
 /** Android 扩展接口 */

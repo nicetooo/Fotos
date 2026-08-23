@@ -57,6 +57,9 @@
             }
             return "";
         }
+        if (src.startsWith("ios-photo://")) {
+            return thumbPath ? convertFileSrc(thumbPath) : "";
+        }
         return convertFileSrc(src);
     });
 

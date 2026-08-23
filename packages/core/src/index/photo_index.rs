@@ -61,13 +61,14 @@ impl PhotoIndex {
         );
 
         // Performance pragmas:
-        // - WAL: concurrent reads + batched writes, dramatically faster for imports
-        // - synchronous=NORMAL: safe with WAL, skips fsync on every commit
+        // - WAL: concurrent reads + batched writes
+        // - synchronous=FULL: flush WAL on commit (NORMAL can lose a whole import
+        //   if iOS force-kills before the OS writes the journal)
         // - cache_size=-8000: 8MB page cache (default ~2MB)
         // - temp_store=MEMORY: temp tables in RAM
         let _ = conn.execute_batch(
             "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
+             PRAGMA synchronous = FULL;
              PRAGMA cache_size = -8000;
              PRAGMA temp_store = MEMORY;",
         );
@@ -164,22 +165,92 @@ impl PhotoIndex {
         })
     }
 
+    /// One-statement preview insert. `path` is UNIQUE; duplicates are ignored.
+    pub fn insert_preview(
+        &self,
+        path: String,
+        hash: String,
+        metadata: PhotoMetadata,
+        media_type: MediaType,
+        thumb_path: Option<String>,
+        file_size: u64,
+    ) -> Result<bool, CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO photos (
+                path, hash, date_taken, width, height, lat, lon, orientation,
+                media_type, duration_ms, thumb_path, file_size
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11)",
+            params![
+                path,
+                hash,
+                metadata.date_taken,
+                metadata.width,
+                metadata.height,
+                metadata.lat,
+                metadata.lon,
+                media_type.as_str(),
+                metadata.duration_ms.map(|v| v as i64),
+                thumb_path,
+                file_size as i64,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Begin an explicit transaction for batch operations.
     ///
     /// All subsequent insert/update/delete calls will execute within this transaction
     /// until `commit_transaction()` or `rollback_transaction()` is called.
     /// This provides 10-50x speed improvement for bulk imports by batching disk syncs
     /// into a single operation at commit time.
-    ///
-    /// Safe to call even if a transaction is already active (SQLite will return an error
-    /// which is silently ignored — the existing transaction continues).
     pub fn begin_transaction(&self) -> Result<(), CoreError> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| CoreError::Database(e.to_string()))?;
-        conn.execute_batch("BEGIN TRANSACTION")?;
+        conn.execute_batch("BEGIN IMMEDIATE")?;
         Ok(())
+    }
+
+    pub fn count(&self) -> Result<i64, CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        conn.query_row("SELECT COUNT(*) FROM photos", [], |row| row.get(0))
+            .map_err(|e| CoreError::Database(e.to_string()))
+    }
+
+    /// Commit any leftover transaction and flush the journal to the main file.
+    pub fn flush(&self) -> Result<(), CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        let _ = conn.execute_batch("COMMIT");
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(FULL)");
+        let _ = conn.execute_batch("PRAGMA synchronous = FULL");
+        Ok(())
+    }
+
+    /// Prefer rollback-journal so a force-quit cannot drop an un-checkpointed WAL.
+    pub fn use_delete_journal(&self) -> Result<(), CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        let _ = conn.execute_batch("COMMIT");
+        conn.execute_batch("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL;")?;
+        Ok(())
+    }
+
+    /// Flush the WAL into the main database file so a force-quit cannot drop it.
+    pub fn checkpoint(&self) -> Result<(), CoreError> {
+        self.flush()
     }
 
     /// Commit the current transaction, persisting all batched writes to disk.

@@ -1,5 +1,6 @@
 use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE, MediaType};
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, Mutex,
@@ -31,20 +32,51 @@ impl AppState {
 
     /// Initialize (or re-initialize) the database connection and store paths.
     /// Called once at app startup from `init_app`, and again after `clear_app_data`.
+    /// Reuses the live connection on WebView remount so an in-flight import is not rolled back.
     fn init(&self, db_path: String, thumb_dir: String) -> Result<(), String> {
         if let Some(parent) = std::path::Path::new(&db_path).parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
 
+        {
+            let current_path = self.db_path.lock().map_err(|e| e.to_string())?;
+            let index_guard = self.index.lock().map_err(|e| e.to_string())?;
+            if *current_path == db_path {
+                if let Some(index) = index_guard.as_ref() {
+                    let _ = index.flush();
+                    let rows = index.count().unwrap_or(-1);
+                    drop(index_guard);
+                    drop(current_path);
+                    *self.thumb_dir.lock().map_err(|e| e.to_string())? = thumb_dir;
+                    eprintln!("[footos] init_app reused live DB ({rows} rows) {db_path}");
+                    return Ok(());
+                }
+            }
+            if let Some(old) = index_guard.as_ref() {
+                let _ = old.flush();
+            }
+        }
+
         let index = PhotoIndex::open(db_path.clone()).map_err(|e| {
             tracing::error!(error = %e, "AppState::init: failed to open DB");
             e.to_string()
         })?;
+        #[cfg(target_os = "ios")]
+        {
+            if let Err(e) = index.use_delete_journal() {
+                eprintln!("[footos] use_delete_journal failed: {e}");
+            }
+        }
 
-        *self.db_path.lock().map_err(|e| e.to_string())? = db_path;
+        *self.db_path.lock().map_err(|e| e.to_string())? = db_path.clone();
         *self.thumb_dir.lock().map_err(|e| e.to_string())? = thumb_dir;
-        *self.index.lock().map_err(|e| e.to_string())? = Some(index);
+        *self.index.lock().map_err(|e| e.to_string())? = Some(index.clone());
+        eprintln!(
+            "[footos] init_app opened {} ({} rows)",
+            db_path,
+            index.count().unwrap_or(-1)
+        );
 
         Ok(())
     }
@@ -96,6 +128,15 @@ fn init_app(state: tauri::State<'_, AppState>, db_path: String, thumb_dir: Strin
     state.init(db_path, thumb_dir)
 }
 
+#[tauri::command]
+fn flush_photos_db(state: tauri::State<'_, AppState>) -> Result<i64, String> {
+    let index = state.get_index()?;
+    index.flush().map_err(|e| e.to_string())?;
+    let rows = index.count().unwrap_or(-1);
+    eprintln!("[footos] flush_photos_db rows={rows}");
+    Ok(rows)
+}
+
 /// Lightweight preview list for map markers and timeline.
 /// Returns only the fields needed for initial UI rendering.
 /// Zero file I/O -- all data comes from the database.
@@ -106,10 +147,23 @@ async fn list_photos_preview(state: tauri::State<'_, AppState>) -> Result<Vec<Ph
 
     let index = state.get_index()?;
 
-    let previews = index.list_previews().map_err(|e| {
+    let mut previews = index.list_previews().map_err(|e| {
         tracing::error!(error = %e, "list_photos_preview: query failed");
         e.to_string()
     })?;
+    if let Ok(thumb_dir) = state.get_thumb_dir() {
+        let dir = std::path::Path::new(&thumb_dir);
+        for preview in &mut previews {
+            if let Some(stored) = preview.thumb_path.as_deref() {
+                if let Some(name) = std::path::Path::new(stored).file_name() {
+                    let current = dir.join(name);
+                    if current.exists() {
+                        preview.thumb_path = Some(current.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
     tracing::debug!(count = previews.len(), "list_photos_preview: done");
 
     Ok(previews)
@@ -218,6 +272,56 @@ struct ProcessedPhoto {
     video_path: Option<String>,
 }
 
+fn strip_file_uri(path: &str) -> String {
+    let mut root_path = path.to_string();
+    loop {
+        if root_path.starts_with("file://") {
+            match urlencoding::decode(&root_path[7..]) {
+                Ok(decoded) => root_path = decoded.into_owned(),
+                Err(_) => break,
+            }
+        } else {
+            break;
+        }
+    }
+    root_path
+}
+
+fn photos_storage_dir(thumb_dir: &str) -> std::path::PathBuf {
+    std::path::Path::new(thumb_dir)
+        .parent()
+        .map(|p| p.join("Photos"))
+        .unwrap_or_else(|| std::path::PathBuf::from(thumb_dir).join("Photos"))
+}
+
+/// Move a temp export into permanent Photos/ storage (copy if rename crosses volumes).
+fn persist_import_file(
+    src: &std::path::Path,
+    photos_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    if !src.exists() {
+        return Err(format!("File does not exist: {}", src.display()));
+    }
+    let filename = src.file_name().map(|n| n.to_os_string()).ok_or_else(|| {
+        format!("Missing filename: {}", src.display())
+    })?;
+    let dest = photos_dir.join(filename);
+    if src == dest {
+        return Ok(dest);
+    }
+    if dest.exists() {
+        return Ok(dest);
+    }
+    match std::fs::rename(src, &dest) {
+        Ok(()) => Ok(dest),
+        Err(_) => {
+            std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
+            let _ = std::fs::remove_file(src);
+            Ok(dest)
+        }
+    }
+}
+
 #[tauri::command]
 async fn import_photos(
     window: tauri::Window,
@@ -316,8 +420,29 @@ async fn import_photos(
             e.to_string()
         })?
     };
+    run_import_pipeline(&window, index, thumb_dir, photos, import_start)
+}
+
+fn run_import_pipeline(
+    window: &tauri::Window,
+    index: std::sync::Arc<PhotoIndex>,
+    thumb_dir: String,
+    photos: Vec<std::path::PathBuf>,
+    import_start: std::time::Instant,
+) -> Result<ImportResultWithTiming, String> {
+    let config = PhotoCoreConfig {
+        thumbnail_dir: thumb_dir.clone(),
+        thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
+    };
     let total = photos.len();
     tracing::info!(count = total, "Import: found photos to process");
+
+    let existing_paths: HashSet<String> = index
+        .list_previews()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| p.path)
+        .collect();
 
     let mut result = ImportResult::default();
 
@@ -341,7 +466,7 @@ async fn import_photos(
             break;
         }
         let path_str = path.to_string_lossy().to_string();
-        if let Ok(Some(_)) = index.get_by_path(path_str) {
+        if existing_paths.contains(&path_str) {
             skipped += 1;
         } else {
             new_photos.push(path.clone());
@@ -612,20 +737,22 @@ async fn import_photos(
             batch_writes = 0;
         }
 
-        // Emit progress during Phase 3 (every photo, DB inserts are fast)
-        use tauri::Emitter;
-        let _ = window.emit(
-            "import-progress",
-            serde_json::json!({
-                "current": skipped + i + 1,
-                "total": total,
-                "success": result.success,
-                "failure": result.failure,
-                "duplicates": result.duplicates,
-                "skipped": skipped,
-                "phase": "importing"
-            }),
-        );
+        // Phase 3 inserts are fast; emit every 20 to cut IPC overhead
+        if i == 0 || (i + 1) % 20 == 0 {
+            use tauri::Emitter;
+            let _ = window.emit(
+                "import-progress",
+                serde_json::json!({
+                    "current": skipped + i + 1,
+                    "total": total,
+                    "success": result.success,
+                    "failure": result.failure,
+                    "duplicates": result.duplicates,
+                    "skipped": skipped,
+                    "phase": "importing"
+                }),
+            );
+        }
     }
 
     // Commit any remaining writes
@@ -665,6 +792,21 @@ async fn import_photos(
         skipped = skipped,
         "Import: results"
     );
+    {
+        use tauri::Emitter;
+        let _ = window.emit(
+            "import-progress",
+            serde_json::json!({
+                "current": total,
+                "total": total,
+                "success": result.success,
+                "failure": result.failure,
+                "duplicates": result.duplicates,
+                "skipped": skipped,
+                "phase": "importing"
+            }),
+        );
+    }
     Ok(ImportResultWithTiming {
         success: result.success,
         failure: result.failure,
@@ -675,6 +817,123 @@ async fn import_photos(
         phase1_ms,
         phase2_ms,
         phase3_ms,
+    })
+}
+
+/// Import an explicit list of files (iOS PhotoKit exports).
+/// Persists each file into Photos/ then runs the same 3-phase pipeline as folder import.
+#[tauri::command]
+async fn import_photo_paths(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<ImportResultWithTiming, String> {
+    if paths.is_empty() {
+        return Ok(ImportResultWithTiming::default());
+    }
+
+    let thumb_dir = state.get_thumb_dir()?;
+    let photos_dir = photos_storage_dir(&thumb_dir);
+    std::fs::create_dir_all(&photos_dir).map_err(|e| e.to_string())?;
+
+    let mut photos = Vec::with_capacity(paths.len());
+    for path in &paths {
+        let src = std::path::PathBuf::from(strip_file_uri(path));
+        match persist_import_file(&src, &photos_dir) {
+            Ok(dest) => photos.push(dest),
+            Err(e) => tracing::warn!(path = %src.display(), error = %e, "Import: skip unreadable path"),
+        }
+    }
+    if photos.is_empty() {
+        return Ok(ImportResultWithTiming {
+            failure: paths.len() as u32,
+            total: paths.len() as u32,
+            ..Default::default()
+        });
+    }
+
+    let index = state.get_index()?;
+    IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+    tracing::info!(
+        received = paths.len(),
+        persisted = photos.len(),
+        "Import: batch paths persisted"
+    );
+    run_import_pipeline(&window, index, thumb_dir, photos, std::time::Instant::now())
+}
+
+#[derive(serde::Deserialize)]
+struct IosPreviewItem {
+    path: String,
+    thumb_path: Option<String>,
+    date_taken: Option<String>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    width: u32,
+    height: u32,
+    file_size: u64,
+    media_type: Option<String>,
+    duration_ms: Option<u64>,
+}
+
+/// Insert PhotoKit preview rows (no original file, no perceptual hash).
+#[tauri::command]
+fn upsert_ios_previews(
+    state: tauri::State<'_, AppState>,
+    items: Vec<IosPreviewItem>,
+) -> Result<ImportResultWithTiming, String> {
+    if items.is_empty() {
+        return Ok(ImportResultWithTiming::default());
+    }
+    let index = state.get_index()?;
+    if index.begin_transaction().is_err() {
+        let _ = index.flush();
+        index.begin_transaction().map_err(|e| e.to_string())?;
+    }
+    let mut result = ImportResult::default();
+    for item in items {
+        let media_type = MediaType::from_str(item.media_type.as_deref().unwrap_or("photo"));
+        let metadata = footos_core::PhotoMetadata {
+            date_taken: item.date_taken,
+            width: item.width,
+            height: item.height,
+            lat: item.lat,
+            lon: item.lon,
+            duration_ms: item.duration_ms,
+            orientation: 1,
+            ..Default::default()
+        };
+        let hash = format!("ios-preview:{}", item.path);
+        match index.insert_preview(
+            item.path,
+            hash,
+            metadata,
+            media_type,
+            item.thumb_path,
+            item.file_size,
+        ) {
+            Ok(true) => result.success += 1,
+            Ok(false) => result.duplicates += 1,
+            Err(e) => {
+                eprintln!("[footos] upsert insert failed: {e}");
+                result.failure += 1;
+            }
+        }
+    }
+    if let Err(e) = index.commit_transaction() {
+        eprintln!("[footos] upsert commit failed: {e}");
+        return Err(e.to_string());
+    }
+    eprintln!(
+        "[footos] upsert batch ok={} fail={} dup={}",
+        result.success, result.failure, result.duplicates
+    );
+    Ok(ImportResultWithTiming {
+        success: result.success,
+        failure: result.failure,
+        duplicates: result.duplicates,
+        total: result.success + result.failure + result.duplicates,
+        ..Default::default()
     })
 }
 
@@ -1357,6 +1616,9 @@ pub fn run() {
             get_core_version,
             init_app,
             import_photos,
+            import_photo_paths,
+            upsert_ios_previews,
+            flush_photos_db,
             cancel_import,
             list_photos,
             list_photos_preview,

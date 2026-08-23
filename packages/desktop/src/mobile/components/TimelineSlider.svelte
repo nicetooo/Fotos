@@ -766,7 +766,7 @@
 
 <svelte:window on:touchmove={handleGlobalTouchMove} on:touchend={handleGlobalTouchEnd} />
 
-<div class="timeline-container theme-bg-overlay backdrop-blur-sm px-4 py-3">
+<div class="timeline-container theme-bg-primary px-4 py-3">
     <!-- Header -->
     <div class="flex items-center justify-between mb-2">
         <div class="text-[10px] theme-text-secondary">

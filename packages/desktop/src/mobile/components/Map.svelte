@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from "svelte";
+    import { onMount, onDestroy, untrack } from "svelte";
     import maplibregl from "maplibre-gl";
     import "maplibre-gl/dist/maplibre-gl.css";
     import { convertFileSrc } from "@tauri-apps/api/core";
@@ -7,13 +7,14 @@
     import type { Translations } from "../../shared/i18n/types";
     import type { Locale } from "../../shared/i18n/types";
 
-    let { photos, onOpenPreview, theme = "dark", tileConfig, t, locale } = $props<{
+    let { photos, onOpenPreview, theme = "dark", tileConfig, t, locale, isSyncing = false } = $props<{
         photos: any[];
         onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
         theme?: "dark" | "light";
         tileConfig?: { tiles: string[]; tileSize: number };
         t: Translations;
         locale: Locale;
+        isSyncing?: boolean;
     }>();
 
     let mapContainer: HTMLDivElement;
@@ -1129,15 +1130,24 @@
     // Reactive Effects
     // ============================================================
 
-    // Update map style when theme changes
-    let prevTheme: string = theme; // Initialize to current theme to avoid false change on first render
+    // Update map style when theme or tile source changes
+    let prevTheme: string = theme;
+    let prevTiles = tileConfig;
     $effect(() => {
         const currentTheme = theme;
+        const tiles = tileConfig;
         if (!map || !mapLoaded) return;
-        if (currentTheme === prevTheme) return;
+        if (currentTheme === prevTheme && tiles === prevTiles) return;
         prevTheme = currentTheme;
+        prevTiles = tiles;
 
         const newStyle = getMapStyle(currentTheme === 'dark');
+        const camera = {
+            center: map.getCenter(),
+            zoom: map.getZoom(),
+            bearing: map.getBearing(),
+            pitch: map.getPitch(),
+        };
 
         try {
             // Theme changed — thumbnail border color depends on theme, so clear all caches
@@ -1164,7 +1174,9 @@
                     return;
                 }
                 setupClusterLayers();
-                updateSourceData(allPhotosData, timeFilterStart, timeFilterEnd);
+                prevPhotoCount = 0;
+                initializePhotos(untrack(() => geotaggedPhotos));
+                mapRef.jumpTo(camera);
 
                 // Re-register all interaction handlers
                 mapRef.on('click', handleMapClick);
@@ -1224,7 +1236,7 @@
 
         <!-- Time range indicator -->
         {#if timeRangeDisplay && hasGeotaggedPhotos}
-            <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none max-w-[95%]">
+            <div class="absolute left-1/2 -translate-x-1/2 z-[1000] pointer-events-none max-w-[95%]" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
                 <div class="px-3 py-1.5 text-[11px] theme-bg-card backdrop-blur-sm rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-1.5">
                     <i class="fa-regular fa-calendar text-[var(--accent)] text-[10px] flex-shrink-0"></i>
                     <span class="tabular-nums whitespace-nowrap">{timeRangeDisplay}</span>
@@ -1233,7 +1245,7 @@
         {/if}
 
         <!-- No geotagged photos message -->
-        {#if photos.length > 0 && !hasGeotaggedPhotos}
+        {#if !isSyncing && photos.length > 0 && !hasGeotaggedPhotos}
             <div class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-[1000] pointer-events-none">
                 <div class="text-center p-6 theme-bg-secondary rounded-2xl border theme-border shadow-xl">
                     <i class="fa-solid fa-location-slash text-4xl theme-text-muted mb-4"></i>
@@ -1246,19 +1258,17 @@
     </div>
 
     <!-- Timeline slider -->
-    {#if hasGeotaggedPhotos}
-        <div class="flex-shrink-0 min-h-[120px]">
-            {#if map && isReady && photosWithMarkers.length > 0}
-                <TimelineSlider
-                    photos={timelinePhotos}
-                    mapViewTimeRange={mapVisibleTimeRange}
-                    onTimeRangeChange={handleTimeRangeChange}
-                    onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
-                    onShowAll={handleShowAllPhotos}
-                    {t}
-                    {locale}
-                />
-            {/if}
+    {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0}
+        <div class="flex-shrink-0">
+            <TimelineSlider
+                photos={timelinePhotos}
+                mapViewTimeRange={mapVisibleTimeRange}
+                onTimeRangeChange={handleTimeRangeChange}
+                onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
+                onShowAll={handleShowAllPhotos}
+                {t}
+                {locale}
+            />
         </div>
     {/if}
 </div>

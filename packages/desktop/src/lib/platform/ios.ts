@@ -4,7 +4,6 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import type {
     PlatformCapabilities,
     ImportProgress,
@@ -38,6 +37,15 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     private _hasFullAccess = false;
     private bridgeReady = false;
     private importRunning = false;
+    private pendingBatches: Array<Record<string, unknown>[]> = [];
+    private exportFinished = true;
+    private importTotals = { success: 0, failure: 0, duplicates: 0 };
+    private originalWaiters = new Map<string, (path: string) => void>();
+    private stillWaiters = new Map<string, (path: string) => void>();
+    private stillEarlyWaiters = new Map<string, (path: string) => void>();
+    private cachedStills = new Map<string, string>();
+    private inflightExports = new Map<string, Promise<{ filePath: string; stillPath: string }>>();
+    private knownIdentifiers: string[] = [];
 
     get hasFullPhotoAccess(): boolean {
         return this._hasFullAccess;
@@ -65,14 +73,20 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         this.addListener('ios-export-progress', (e: CustomEvent) => {
             const detail = e.detail;
             const progress: ImportProgress = {
-                success: 0,
-                failure: 0,
-                duplicates: 0,
+                success: this.importTotals.success,
+                failure: this.importTotals.failure,
+                duplicates: this.importTotals.duplicates,
                 current: detail.current,
                 total: detail.total,
-                lastPath: "Exporting...",
+                lastPath: detail.phase || "Exporting...",
             };
             this.progressCallbacks.forEach(cb => cb(progress));
+        });
+
+        this.addListener('ios-export-complete', () => {
+            console.log("[iOS] Native export finished");
+            this.exportFinished = true;
+            this.finishImportIfIdle();
         });
 
         // iOS 导入完成事件
@@ -90,6 +104,12 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         // iOS 导入开始事件
         this.addListener('ios-import-started', () => {
             console.log("[iOS] Import started");
+            this.exportFinished = false;
+            // Do not clear pendingBatches: reused thumbs can be handed off
+            // before this event is processed, and wiping would drop them.
+            if (!this.importRunning && this.pendingBatches.length === 0) {
+                this.importTotals = { success: 0, failure: 0, duplicates: 0 };
+            }
             this.scanningCallbacks.forEach(cb => cb(true));
         });
 
@@ -120,8 +140,14 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
 
         // iOS 同步跳过事件
         this.addListener('ios-sync-skipped', (e: CustomEvent) => {
+            const reason = e.detail.reason;
             const status = e.detail.status;
-            console.log("[iOS] Sync skipped, status:", status);
+            console.log("[iOS] Sync skipped:", reason || status);
+            if (reason === "up_to_date") {
+                this.exportFinished = true;
+                this.scanningCallbacks.forEach(cb => cb(false));
+                return;
+            }
             this._hasFullAccess = status === 3;
             this.permissionCallbacks.forEach(cb => cb(this._hasFullAccess));
         });
@@ -138,15 +164,52 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             this.bridgeReady = true;
         }
 
-        // 暴露全局函数给 Swift 调用
-        (window as any).__handleIOSImportPaths = (paths: string[], db: string, thumb: string) => {
-            console.log("[iOS] Received paths via global function:", paths?.length);
-            if (!paths || paths.length === 0) {
-                this.scanningCallbacks.forEach(cb => cb(false));
+        (window as any).__handleIOSPreviewBatch = (items: Record<string, unknown>[], db: string, thumb: string) => {
+            console.log("[iOS] Preview batch:", items?.length);
+            if (db) this.dbPath = db;
+            if (thumb) this.thumbDir = thumb;
+            if (!items || items.length === 0) {
+                this.finishImportIfIdle();
                 return;
             }
-            this.processIOSImport(paths, db || this.dbPath, thumb || this.thumbDir);
+            this.exportFinished = false;
+            this.pendingBatches.push(items);
+            this.scanningCallbacks.forEach(cb => cb(true));
+            void this.drainImportQueue();
         };
+
+        (window as any).__handleIOSOriginal = (identifier: string, path: string) => {
+            const waiter = this.originalWaiters.get(identifier);
+            if (waiter) {
+                this.originalWaiters.delete(identifier);
+                waiter(path);
+            }
+        };
+
+        (window as any).__handleIOSViewerStill = (identifier: string, path: string) => {
+            if (path) {
+                this.cachedStills.set(identifier, path);
+            }
+            const waiter = this.stillWaiters.get(identifier);
+            if (waiter) {
+                this.stillWaiters.delete(identifier);
+                waiter(path);
+            }
+            const early = this.stillEarlyWaiters.get(identifier);
+            if (early) {
+                this.stillEarlyWaiters.delete(identifier);
+                early(path);
+            }
+        };
+
+        const ready = await this.waitForBridge(5000);
+        if (!ready) {
+            console.warn("[iOS] PhotoKit bridge not ready; permission will be requested on import");
+        }
+    }
+
+    setKnownPhotoIdentifiers(ids: string[]): void {
+        this.knownIdentifiers = ids;
     }
 
     private addListener(event: string, handler: (e: CustomEvent) => void): void {
@@ -160,49 +223,32 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             window.removeEventListener(event, handler);
         });
         this.eventListeners = [];
-        delete (window as any).__handleIOSImportPaths;
+        delete (window as any).__handleIOSPreviewBatch;
+        delete (window as any).__handleIOSOriginal;
+        delete (window as any).__handleIOSViewerStill;
         this.progressCallbacks.clear();
         this.completeCallbacks.clear();
         this.scanningCallbacks.clear();
     }
 
     async requestImport(): Promise<void> {
-        console.log("[iOS] Requesting import via tauri-plugin-dialog, bridge:", this.bridgeReady);
-        
-        try {
-            // Use tauri-plugin-dialog to open photo picker
-            // pickerMode: 'image' opens the native iOS photo library picker
-            const selected = await open({
-                multiple: true,
-                filters: [{
-                    name: 'Images',
-                    extensions: ['image/*']  // MIME type for iOS
-                }],
-                // @ts-ignore - pickerMode is supported on iOS
-                pickerMode: 'image'
-            });
-
-            if (!selected) {
-                console.log("[iOS] User cancelled photo selection");
-                return;
-            }
-
-            const paths = Array.isArray(selected) ? selected : [selected];
-            console.log("[iOS] Selected", paths.length, "photos");
-            
-            if (paths.length > 0) {
-                await this.processIOSImport(paths, this.dbPath, this.thumbDir);
-            }
-        } catch (err) {
-            console.error("[iOS] Photo picker error:", err);
-            this.scanningCallbacks.forEach(cb => cb(false));
+        const ready = await this.waitForBridge(5000);
+        if (!ready) {
+            console.error("[iOS] PhotoKit bridge not available");
+            return;
         }
+        this.exportFinished = false;
+        this.importTotals = { success: 0, failure: 0, duplicates: 0 };
+        this.postNative({ command: "requestImport" });
     }
 
     async syncPhotosIfFullAccess(): Promise<void> {
-        // Auto-sync is not available when using tauri-plugin-dialog
-        // Users need to manually import photos using the + button
-        console.log("[iOS] Auto-sync not available, use manual import");
+        const ready = await this.waitForBridge(5000);
+        if (!ready) {
+            console.log("[iOS] PhotoKit bridge not ready for auto-sync");
+            return;
+        }
+        this.postNative({ command: "requestAccessAndSync" });
     }
 
     showLimitedLibraryPicker(): void {
@@ -216,70 +262,194 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         return () => this.permissionCallbacks.delete(callback);
     }
 
-    private async processIOSImport(paths: string[], db: string, thumb: string): Promise<void> {
+    private async drainImportQueue(): Promise<void> {
         if (this.importRunning) {
-            console.log("[iOS] Import already running, queuing...");
-            setTimeout(() => this.processIOSImport(paths, db, thumb), 1000);
             return;
         }
-
         this.importRunning = true;
-        console.log("[iOS] Processing", paths.length, "paths");
-
         this.scanningCallbacks.forEach(cb => cb(true));
 
-        let totalSuccess = 0;
-        let totalDuplicates = 0;
-        let totalFailure = 0;
-
-        for (let i = 0; i < paths.length; i++) {
+        while (this.pendingBatches.length > 0) {
+            const batch = this.pendingBatches.shift()!;
+            console.log("[iOS] Upserting preview batch of", batch.length);
             try {
-                // tauri-plugin-dialog on iOS returns file:// URIs, pass as-is
-                // Don't add file:// prefix since it's already included
-                const pathToImport = paths[i];
-                console.log("[iOS] Importing path:", pathToImport);
-                
-                const result: any = await invoke("import_photos", {
-                    rootPath: pathToImport,
-                });
-                totalSuccess += result.success || 0;
-                totalDuplicates += result.duplicates || 0;
-                totalFailure += result.failure || 0;
+                const result: any = await invoke("upsert_ios_previews", { items: batch });
+                this.importTotals.success += result.success || 0;
+                this.importTotals.duplicates += result.duplicates || 0;
+                this.importTotals.failure += result.failure || 0;
+                console.log("[iOS] Upsert result", result);
             } catch (err) {
-                console.error("[iOS] Failed to import:", paths[i], err);
-                totalFailure++;
+                console.error("[iOS] Batch import failed:", err);
+                this.importTotals.failure += batch.length;
             }
 
             const progress: ImportProgress = {
-                success: totalSuccess,
-                failure: totalFailure,
-                duplicates: totalDuplicates,
-                current: i + 1,
-                total: paths.length,
-                lastPath: paths[i].split('/').pop() || paths[i],
+                success: this.importTotals.success,
+                failure: this.importTotals.failure,
+                duplicates: this.importTotals.duplicates,
+                current: this.importTotals.success + this.importTotals.failure + this.importTotals.duplicates,
+                total: this.importTotals.success + this.importTotals.failure + this.importTotals.duplicates
+                    + this.pendingBatches.reduce((n, b) => n + b.length, 0),
+                lastPath: "Preview",
             };
             this.progressCallbacks.forEach(cb => cb(progress));
         }
 
-        console.log("[iOS] Import complete:", { totalSuccess, totalDuplicates, totalFailure });
-        console.log("[iOS] Calling", this.completeCallbacks.size, "complete callbacks");
-
-        const result: ImportResult = {
-            success: totalSuccess,
-            failure: totalFailure,
-            duplicates: totalDuplicates,
-        };
-        this.completeCallbacks.forEach(cb => {
-            console.log("[iOS] Triggering complete callback");
-            cb(result);
-        });
-        this.scanningCallbacks.forEach(cb => cb(false));
         this.importRunning = false;
+        this.finishImportIfIdle();
+    }
+
+    private finishImportIfIdle(): void {
+        if (this.importRunning || this.pendingBatches.length > 0 || !this.exportFinished) {
+            return;
+        }
+        const result: ImportResult = { ...this.importTotals };
+        console.log("[iOS] Import complete:", result);
+        void invoke("flush_photos_db").catch((e) => console.warn("[iOS] flush_photos_db", e));
+        this.completeCallbacks.forEach(cb => cb(result));
+        this.scanningCallbacks.forEach(cb => cb(false));
+    }
+
+    async ensureOriginal(path: string): Promise<string> {
+        const media = await this.exportViewerMedia(path);
+        if (!media.filePath) {
+            throw new Error("Export original failed");
+        }
+        return media.filePath;
+    }
+
+    async ensureViewerStill(path: string): Promise<string | null> {
+        if (!path.startsWith("ios-photo://")) {
+            return null;
+        }
+        const identifier = path.slice("ios-photo://".length);
+        const cached = this.cachedStills.get(identifier);
+        if (cached) {
+            return cached;
+        }
+        const ready = await this.waitForBridge(2000);
+        if (!ready) {
+            return null;
+        }
+        return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+                this.stillEarlyWaiters.delete(identifier);
+                resolve(this.cachedStills.get(identifier) || null);
+            }, 8000);
+            this.stillEarlyWaiters.set(identifier, (still) => {
+                clearTimeout(timer);
+                this.stillEarlyWaiters.delete(identifier);
+                resolve(still || null);
+            });
+            this.postNative({ command: "exportViewerStill", identifier });
+        });
+    }
+
+    private async exportViewerMedia(path: string): Promise<{ filePath: string; stillPath: string }> {
+        if (!path.startsWith("ios-photo://")) {
+            return { filePath: path, stillPath: "" };
+        }
+        const identifier = path.slice("ios-photo://".length);
+        const existing = this.inflightExports.get(identifier);
+        if (existing) {
+            return existing;
+        }
+        const ready = await this.waitForBridge(3000);
+        if (!ready) {
+            throw new Error("PhotoKit bridge not ready");
+        }
+        const pending = new Promise<{ filePath: string; stillPath: string }>((resolve, reject) => {
+            let filePath = "";
+            let stillPath = "";
+            let settled = false;
+            const finish = () => {
+                if (settled || !filePath) return;
+                settled = true;
+                this.originalWaiters.delete(identifier);
+                this.stillWaiters.delete(identifier);
+                this.inflightExports.delete(identifier);
+                resolve({ filePath, stillPath });
+            };
+            const timer = setTimeout(() => {
+                this.originalWaiters.delete(identifier);
+                this.stillWaiters.delete(identifier);
+                this.inflightExports.delete(identifier);
+                if (!settled) {
+                    settled = true;
+                    reject(new Error("Export original timed out"));
+                }
+            }, 90000);
+            this.stillWaiters.set(identifier, (still) => {
+                stillPath = still;
+                if (still) {
+                    this.cachedStills.set(identifier, still);
+                }
+                const early = this.stillEarlyWaiters.get(identifier);
+                if (early) {
+                    this.stillEarlyWaiters.delete(identifier);
+                    early(still);
+                }
+            });
+            this.originalWaiters.set(identifier, (file) => {
+                clearTimeout(timer);
+                if (file) {
+                    filePath = file;
+                    finish();
+                } else {
+                    this.inflightExports.delete(identifier);
+                    reject(new Error("Export original failed"));
+                }
+            });
+            this.postNative({ command: "exportOriginal", identifier });
+        });
+        this.inflightExports.set(identifier, pending);
+        return pending;
     }
 
     async checkPermissionStatus(): Promise<PermissionStatus> {
+        const ready = await this.waitForBridge(2000);
+        if (ready) {
+            this.postNative({ command: "checkStatus" });
+        }
         if (this._hasFullAccess) return 'granted';
-        return 'limited';
+        return 'unknown';
+    }
+
+    private postNative(data: Record<string, unknown>): void {
+        const handler = (window as any).webkit?.messageHandlers?.footosPhotos;
+        if (!handler) {
+            console.warn("[iOS] footosPhotos message handler not available");
+            return;
+        }
+        handler.postMessage({
+            dbPath: this.dbPath,
+            thumbDir: this.thumbDir,
+            knownIds: this.knownIdentifiers,
+            ...data,
+        });
+    }
+
+    private async waitForBridge(maxWait: number): Promise<boolean> {
+        if (this.bridgeReady || (window as any).__FOOTOS_BRIDGE_READY__ || (window as any).webkit?.messageHandlers?.footosPhotos) {
+            this.bridgeReady = true;
+            return true;
+        }
+        const start = Date.now();
+        return new Promise((resolve) => {
+            const check = () => {
+                if (this.bridgeReady || (window as any).__FOOTOS_BRIDGE_READY__ || (window as any).webkit?.messageHandlers?.footosPhotos) {
+                    this.bridgeReady = true;
+                    resolve(true);
+                    return;
+                }
+                if (Date.now() - start > maxWait) {
+                    resolve(false);
+                    return;
+                }
+                setTimeout(check, 200);
+            };
+            check();
+        });
     }
 
     onImportProgress(callback: (progress: ImportProgress) => void): () => void {
@@ -303,11 +473,8 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         }
     }
 
-    getMapTileConfig(): MapTileConfig {
-        return {
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-            tileSize: 256
-        };
+    getMapTileConfig(): MapTileConfig | null {
+        return null;
     }
 }
 
