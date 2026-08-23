@@ -96,26 +96,16 @@
     let photosWithMarkers = $state.raw<any[]>([]);
     let timelineReady = $state(false);
 
-    // Get visible photos sorted by time for navigation
-    let visiblePhotosSorted = $derived.by(() => {
-        const start = timeFilterStart;
-        const end = timeFilterEnd;
-
-        const visible: { photo: any; date: Date }[] = [];
+    // Filmstrip uses the full geotagged library, like the iOS Photos album strip.
+    let albumPhotosSorted = $derived.by(() => {
+        const items: { photo: any; date: Date }[] = [];
         for (const photo of geotaggedPhotos) {
             const date = dateByPath.get(photo.path) || parsePhotoDate(photo.metadata?.date_taken);
             if (!date) continue;
-            if (start && end) {
-                if (date >= start && date <= end) {
-                    visible.push({ photo, date });
-                }
-            } else {
-                visible.push({ photo, date });
-            }
+            items.push({ photo, date });
         }
-
-        visible.sort((a, b) => a.date.getTime() - b.date.getTime());
-        return visible.map(v => v.photo);
+        items.sort((a, b) => a.date.getTime() - b.date.getTime());
+        return items.map((v) => v.photo);
     });
 
     function getThumbnailUrl(path: string): string {
@@ -872,7 +862,7 @@
             if (!photo) return;
 
             if (onOpenPreview) {
-                onOpenPreview(photo, visiblePhotosSorted);
+                onOpenPreview(photo, albumPhotosSorted);
             }
             return;
         }

@@ -561,7 +561,10 @@
         {t}
         {locale}
         onClose={closePreview}
-        onNavigate={(photo) => { previewPhoto = photo; }}
+        onNavigate={(photo) => {
+            if (!photo) return;
+            previewPhoto = photo;
+        }}
         resolveOriginal={resolveOriginalForViewer}
         resolveStill={resolveStillForViewer}
         resolveLiveVideo={resolveLiveVideoForViewer}

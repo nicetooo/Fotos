@@ -752,6 +752,7 @@
 
     // Global touch handlers for drag continuation
     function handleGlobalTouchMove(e: TouchEvent) {
+        if (typeof document !== "undefined" && document.querySelector("[data-photo-viewer]")) return;
         if (dragMode === 'overview-box') {
             handleOverviewTouchMove(e);
         }

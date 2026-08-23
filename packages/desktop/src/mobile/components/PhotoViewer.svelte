@@ -50,6 +50,10 @@
     const PAGE_GAP = 16;
     const SETTLE_MS = 340;
     const LIVE_HOLD_MS = 240;
+    const THUMB_W = 36;
+    const THUMB_H = 48;
+    const THUMB_GAP = 2;
+    const THUMB_CELL = THUMB_W + THUMB_GAP;
     const openedAt = Date.now();
 
     let settling = $state(false);
@@ -114,14 +118,8 @@
         });
     });
 
-    let stripReady = $state(false);
-
-    $effect(() => {
-        const timer = setTimeout(() => {
-            stripReady = true;
-        }, 0);
-        return () => clearTimeout(timer);
-    });
+    let stripScrubbing = $state(false);
+    let stripEl: HTMLDivElement | undefined = $state();
 
     function rememberImage(key: string, filePath: string, kind: "still" | "original") {
         const url = convertFileSrc(filePath);
@@ -146,6 +144,7 @@
     $effect(() => {
         const key = currentPath;
         if (!key.startsWith("ios-photo://")) return;
+        if (stripScrubbing) return;
         const photo = untrack(
             () => photos.find((p) => photoKey(p) === key || p.path === key) ?? current,
         );
@@ -284,6 +283,161 @@
                 node.removeEventListener("touchmove", onTouchMove);
                 node.removeEventListener("touchend", onTouchEnd);
                 node.removeEventListener("touchcancel", onTouchEnd);
+            },
+        };
+    }
+
+    function bindStripGestures(node: HTMLElement) {
+        let x0 = 0;
+        let scroll0 = 0;
+        let moved = false;
+        let hitIndex = 0;
+        let lastX = 0;
+        let lastT = 0;
+        let vel = 0;
+        let lastCenter = -1;
+        let coast = 0;
+
+        const measure = () => {
+            stripViewW = node.clientWidth;
+        };
+        measure();
+
+        const writeScroll = (value: number) => {
+            const max = stripMaxScroll;
+            const clamped = Math.max(0, Math.min(max, value));
+            stripScroll = value < 0 || value > max
+                ? (value < 0 ? value * 0.32 : max + (value - max) * 0.32)
+                : value;
+            node.scrollLeft = clamped;
+        };
+
+        const pickCenter = (scroll = Math.max(0, Math.min(stripMaxScroll, stripScroll))) => {
+            const next = indexFromScroll(scroll);
+            if (next === lastCenter || !photos[next]) return next;
+            lastCenter = next;
+            onFilmstrip(photos[next]);
+            return next;
+        };
+
+        const stopCoast = () => {
+            if (coast) {
+                cancelAnimationFrame(coast);
+                coast = 0;
+            }
+        };
+
+        const settleCenter = (index: number) => {
+            const target = scrollForIndex(index);
+            const start = Math.max(0, Math.min(stripMaxScroll, stripScroll));
+            const dist = target - start;
+            if (Math.abs(dist) < 1) {
+                stripScroll = target;
+                node.scrollLeft = target;
+                stripScrubbing = false;
+                return;
+            }
+            const t0 = performance.now();
+            const step = (now: number) => {
+                const t = Math.min(1, (now - t0) / 200);
+                const ease = 1 - (1 - t) * (1 - t);
+                const s = start + dist * ease;
+                stripScroll = s;
+                node.scrollLeft = s;
+                if (t < 1) {
+                    coast = requestAnimationFrame(step);
+                    return;
+                }
+                coast = 0;
+                stripScroll = target;
+                node.scrollLeft = target;
+                stripScrubbing = false;
+            };
+            coast = requestAnimationFrame(step);
+        };
+
+        const onStart = (e: TouchEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const t = e.touches[0];
+            if (!t) return;
+            stopCoast();
+            measure();
+            stripScrubbing = true;
+            x0 = t.clientX;
+            lastX = t.clientX;
+            lastT = Date.now();
+            vel = 0;
+            scroll0 = Math.max(0, Math.min(stripMaxScroll, stripScroll));
+            moved = false;
+            lastCenter = currentIndex;
+            const hit = (e.target as HTMLElement | null)?.closest("[data-strip-index]") as HTMLElement | null;
+            hitIndex = hit ? Number(hit.dataset.stripIndex) : currentIndex;
+            if (!Number.isFinite(hitIndex)) hitIndex = currentIndex;
+        };
+
+        const onMove = (e: TouchEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const t = e.touches[0];
+            if (!t) return;
+            const now = Date.now();
+            const dt = now - lastT;
+            if (dt > 0) vel = (lastX - t.clientX) / dt;
+            lastX = t.clientX;
+            lastT = now;
+            const dx = t.clientX - x0;
+            if (Math.abs(dx) > 4) moved = true;
+            writeScroll(scroll0 - dx);
+            pickCenter();
+        };
+
+        const onEnd = (e: TouchEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!moved) {
+                if (photos[hitIndex]) onFilmstrip(photos[hitIndex]);
+                settleCenter(hitIndex);
+                return;
+            }
+            const max = stripMaxScroll;
+            if (Math.abs(vel) > 0.15) {
+                let v = vel;
+                let s = Math.max(0, Math.min(max, stripScroll));
+                const step = () => {
+                    s += v * 16;
+                    v *= 0.92;
+                    if (s < 0 || s > max) {
+                        s = Math.max(0, Math.min(max, s));
+                        v = 0;
+                    }
+                    writeScroll(s);
+                    pickCenter(s);
+                    if (Math.abs(v) < 0.04) {
+                        coast = 0;
+                        settleCenter(indexFromScroll(s));
+                        return;
+                    }
+                    coast = requestAnimationFrame(step);
+                };
+                coast = requestAnimationFrame(step);
+                return;
+            }
+            settleCenter(indexFromScroll(stripScroll));
+        };
+
+        node.addEventListener("touchstart", onStart, { passive: false });
+        node.addEventListener("touchmove", onMove, { passive: false });
+        node.addEventListener("touchend", onEnd);
+        node.addEventListener("touchcancel", onEnd);
+        return {
+            destroy() {
+                stopCoast();
+                stripScrubbing = false;
+                node.removeEventListener("touchstart", onStart);
+                node.removeEventListener("touchmove", onMove);
+                node.removeEventListener("touchend", onEnd);
+                node.removeEventListener("touchcancel", onEnd);
             },
         };
     }
@@ -637,24 +791,78 @@
         const transform = s === 1 ? "none" : `scale(${s})`;
         return `left:${dragX}px;top:${dragY}px;transform:${transform};opacity:${dim};`;
     });
-    let stageKey = $derived(`${currentPath}:${currentIndex}`);
+    const STRIP_WINDOW = 32;
 
-    let stripEl: HTMLDivElement | undefined = $state();
+    let stripScroll = $state(0);
+    let stripViewW = $state(typeof window !== "undefined" ? window.innerWidth : 390);
+    let stripAnchor = $state(0);
 
-    let strip = $derived.by(() => {
-        const start = Math.max(0, currentIndex - 12);
-        const end = Math.min(photos.length, currentIndex + 13);
-        return photos.slice(start, end).map((photo, i) => ({ photo, index: start + i }));
+    let stripItems = $derived.by(() => {
+        const n = photos.length;
+        const start = Math.max(0, stripAnchor - STRIP_WINDOW);
+        const end = Math.min(n, stripAnchor + STRIP_WINDOW + 1);
+        const items: { photo: any; index: number }[] = [];
+        for (let i = start; i < end; i++) {
+            items.push({ photo: photos[i], index: i });
+        }
+        return items;
     });
+
+    let stripMaxScroll = $derived(Math.max(0, (stripItems.length - 1) * THUMB_CELL));
+
+    function windowStart() {
+        return Math.max(0, stripAnchor - STRIP_WINDOW);
+    }
+
+    function localIndex(index: number) {
+        return Math.max(0, index - windowStart());
+    }
+
+    function scrollForIndex(index: number) {
+        return localIndex(index) * THUMB_CELL;
+    }
+
+    function indexFromScroll(scroll: number) {
+        const local = Math.round(scroll / THUMB_CELL);
+        return Math.max(0, Math.min(photos.length - 1, windowStart() + local));
+    }
+
+    function centerStripIndex(index: number) {
+        stripScroll = scrollForIndex(index);
+        if (stripEl) stripEl.scrollLeft = stripScroll;
+    }
 
     $effect(() => {
         const i = currentIndex;
-        const strip = stripEl;
-        const el = strip?.querySelector(`[data-strip-index="${i}"]`) as HTMLElement | null;
-        if (!strip || !el) return;
-        const left = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
-        strip.scrollLeft = Math.max(0, left);
-        if (viewerEl) viewerEl.scrollLeft = 0;
+        const n = photos.length;
+        if (!n || stripScrubbing) return;
+        untrack(() => {
+            stripAnchor = i;
+            requestAnimationFrame(() => centerStripIndex(i));
+        });
+    });
+
+    $effect(() => {
+        if (stripEl) stripEl.scrollLeft = stripScroll;
+    });
+
+    $effect(() => {
+        const el = viewerEl;
+        if (!el) return;
+        const clear = () => window.getSelection()?.removeAllRanges();
+        const block = (event: Event) => {
+            event.preventDefault();
+            clear();
+        };
+        clear();
+        el.addEventListener("selectstart", block, true);
+        el.addEventListener("selectionchange", clear, true);
+        document.addEventListener("selectionchange", clear);
+        return () => {
+            el.removeEventListener("selectstart", block, true);
+            el.removeEventListener("selectionchange", clear, true);
+            document.removeEventListener("selectionchange", clear);
+        };
     });
 </script>
 
@@ -664,11 +872,9 @@
     class="viewer"
     class:dragging
     data-photo-viewer="1"
-    use:bindViewerGestures
 >
     <div class="backdrop" style="opacity: {1 - dismissProgress * 0.55}"></div>
 
-    {#key stageKey}
     <div class="stage" class:settling style={stageStyle}>
         {#if prevPhoto}
             <div class="slide prev" style="left:{-pageW}px">
@@ -741,7 +947,12 @@
             </div>
         {/if}
     </div>
-    {/key}
+
+    <div
+        class="photo-hit"
+        class:above-strip={chromeVisible && dragY <= 24 && photos.length > 1}
+        use:bindViewerGestures
+    ></div>
 
     <div class="chrome" class:hidden={!chromeVisible || dragY > 24}>
         <div class="top">
@@ -752,17 +963,17 @@
                 {/if}
             </div>
         </div>
-        {#if stripReady && strip.length > 1}
-            <div class="strip" bind:this={stripEl}>
-                {#each strip as item (photoKey(item.photo) || item.index)}
+        {#if photos.length > 1}
+            <div class="strip" bind:this={stripEl} use:bindStripGestures>
+                {#each stripItems as item (item.index)}
                     <button
+                        type="button"
                         class="thumb"
                         class:active={item.index === currentIndex}
                         data-strip-index={item.index}
-                        onclick={() => onFilmstrip(item.photo)}
                     >
-                        {#if item.photo.thumb_path}
-                            <img src={convertFileSrc(item.photo.thumb_path)} alt="" />
+                        {#if item.photo?.thumb_path}
+                            <img src={convertFileSrc(item.photo.thumb_path)} alt="" draggable="false" />
                         {/if}
                     </button>
                 {/each}
@@ -775,8 +986,9 @@
     .viewer {
         position: fixed;
         inset: 0;
-        width: 100%;
-        height: 100%;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
         z-index: 4000;
         touch-action: none;
         overflow: hidden;
@@ -784,6 +996,24 @@
         color: white;
         background: #000;
         isolation: isolate;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .viewer :global(*) {
+        -webkit-user-select: none !important;
+        user-select: none !important;
+        -webkit-touch-callout: none;
+    }
+    .photo-hit {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
+        touch-action: none;
+    }
+    .photo-hit.above-strip {
+        bottom: calc(74px + env(safe-area-inset-bottom, 0px));
     }
     .backdrop {
         position: absolute;
@@ -888,6 +1118,8 @@
     }
     .chrome.hidden {
         opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
     }
     .top {
         display: flex;
@@ -917,35 +1149,41 @@
         left: 0;
         right: 0;
         bottom: 0;
+        width: 100%;
+        z-index: 5;
         display: flex;
-        gap: 3px;
-        overflow-x: auto;
-        padding: 10px 10px calc(env(safe-area-inset-bottom) + 10px);
-        background: linear-gradient(to top, #000 0%, #000 55%, rgba(0, 0, 0, 0));
-        scrollbar-width: none;
-    }
-    .strip::-webkit-scrollbar {
-        display: none;
+        flex-wrap: nowrap;
+        align-items: flex-end;
+        gap: 2px;
+        overflow-x: hidden;
+        overflow-y: hidden;
+        touch-action: none;
+        padding: 10px calc((100% - 36px) / 2) calc(env(safe-area-inset-bottom, 0px) + 8px);
+        background: #000;
     }
     .thumb {
-        flex: 0 0 auto;
-        width: 28px;
-        height: 38px;
+        flex: 0 0 36px;
+        width: 36px;
+        height: 48px;
         padding: 0;
         border: 0;
         border-radius: 3px;
         overflow: hidden;
         opacity: 0.55;
-        background: #222;
+        background: #1c1c1e;
+        -webkit-tap-highlight-color: transparent;
     }
     .thumb.active {
         opacity: 1;
-        outline: 2px solid #fff;
-        outline-offset: 1px;
+        box-shadow: 0 0 0 1.5px #fff;
+        transform: scale(1.22);
+        transform-origin: bottom center;
+        z-index: 1;
     }
     .thumb img {
         width: 100%;
         height: 100%;
         object-fit: cover;
+        pointer-events: none;
     }
 </style>
