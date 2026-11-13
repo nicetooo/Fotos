@@ -4,7 +4,7 @@
     import type { Locale } from "../../shared/i18n/types";
     import {
         windowCounts,
-        occupiedColumns,
+        columnCounts,
         distinctLines,
     } from "../../shared/utils/timeline-index";
 
@@ -385,23 +385,42 @@
         return ctx;
     }
 
-    function strokeColumns(ctx: CanvasRenderingContext2D, columns: number[], h: number, color: string) {
+    // One line per occupied pixel column; its opacity shows how many photos
+    // share that column, so a dense library still reads as a distribution
+    // instead of a solid block.
+    const DENSITY_LEVELS = 5;
+    function strokeDensity(ctx: CanvasRenderingContext2D, counts: Uint32Array, h: number, color: string) {
+        let max = 0;
+        for (let x = 0; x < counts.length; x++) if (counts[x] > max) max = counts[x];
+        if (max === 0) return;
+        const logMax = Math.log1p(max);
         ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.7;
         ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (const x of columns) {
-            ctx.moveTo(x + 0.5, 0);
-            ctx.lineTo(x + 0.5, h);
+        // Group columns by opacity level: a handful of strokes, not one per column.
+        for (let level = 1; level <= DENSITY_LEVELS; level++) {
+            ctx.beginPath();
+            let any = false;
+            for (let x = 0; x < counts.length; x++) {
+                const c = counts[x];
+                if (c === 0) continue;
+                const l = max === 1 ? DENSITY_LEVELS : Math.max(1, Math.ceil((Math.log1p(c) / logMax) * DENSITY_LEVELS));
+                if (l !== level) continue;
+                ctx.moveTo(x + 0.5, 0);
+                ctx.lineTo(x + 0.5, h);
+                any = true;
+            }
+            if (!any) continue;
+            ctx.globalAlpha = 0.15 + 0.75 * (level / DENSITY_LEVELS);
+            ctx.stroke();
         }
-        ctx.stroke();
+        ctx.globalAlpha = 1;
     }
 
     function drawOverview() {
         const { w, h } = overviewSize;
         const ctx = prepare(overviewCanvas, w, h);
         if (!ctx) return;
-        strokeColumns(ctx, occupiedColumns(stamps, rangeMin, rangeMax, w), h, getAccentColor());
+        strokeDensity(ctx, columnCounts(stamps, rangeMin, rangeMax, w), h, getAccentColor());
     }
 
     function drawEdgeStack(
@@ -449,7 +468,7 @@
         const ctx = prepare(detailCanvas, w, h);
         if (!ctx) return;
         const color = getAccentColor();
-        strokeColumns(ctx, occupiedColumns(stamps, viewWindow.startMs, viewWindow.endMs, w), h, color);
+        strokeDensity(ctx, columnCounts(stamps, viewWindow.startMs, viewWindow.endMs, w), h, color);
         drawEdgeStack(ctx, 'left', edgeLines.left, counts.left, w, h, color);
         drawEdgeStack(ctx, 'right', edgeLines.right, counts.right, w, h, color);
     }

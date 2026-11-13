@@ -91,3 +91,32 @@ export function distinctLines(
     }
     return count;
 }
+
+/**
+ * How many timestamps land in each pixel column when `[startMs, endMs]` is
+ * stretched over `width` pixels. Two binary searches per column.
+ */
+export function columnCounts(
+    sorted: Float64Array,
+    startMs: number,
+    endMs: number,
+    width: number,
+): Uint32Array {
+    const w = Math.max(0, Math.floor(width));
+    const counts = new Uint32Array(w);
+    const span = endMs - startMs;
+    if (w === 0 || sorted.length === 0) return counts;
+    if (span <= 0) {
+        counts[Math.floor(w / 2)] = upperBound(sorted, endMs) - lowerBound(sorted, startMs);
+        return counts;
+    }
+    const msPerPx = span / w;
+    let lo = lowerBound(sorted, startMs);
+    const end = upperBound(sorted, endMs, lo);
+    for (let x = 0; x < w && lo < end; x++) {
+        const hi = x === w - 1 ? end : lowerBound(sorted, startMs + (x + 1) * msPerPx, lo);
+        counts[x] = hi - lo;
+        lo = hi;
+    }
+    return counts;
+}

@@ -392,7 +392,7 @@ class AndroidPlatformService implements PlatformService {
     }
 
     getMapTileConfig(): MapTileConfig | null {
-        // Return null to use default CARTO tiles with dark/light theme support
+        // Return null to use the default base map (shared/map-style.ts)
         return null;
     }
 }

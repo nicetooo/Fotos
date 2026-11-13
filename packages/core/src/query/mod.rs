@@ -20,6 +20,9 @@ const WORLD_PX: f64 = 512.0;
 /// Cluster grid cell size in screen pixels (at integer zoom).
 const CELL_PX: f64 = 64.0;
 const MAX_ZOOM: i32 = 22;
+/// Neighbouring clusters closer than this fraction of a cell are merged.
+/// The largest marker is ~76px across and a cell is 64px, so this must exceed 1.
+const MERGE_FACTOR: f64 = 1.2;
 
 /// Parse a `date_taken` string into wall-clock milliseconds.
 ///
@@ -328,6 +331,67 @@ impl GeoIndex {
         let mut keyed: Vec<((i64, i64), Acc)> = cells.into_iter().collect();
         keyed.sort_by(|a, b| a.0.cmp(&b.0));
 
+        // A grid splits groups that straddle a cell border, which shows up as
+        // two markers on top of each other. Fold each small cluster into a
+        // bigger neighbour whose centre is closer than a marker's width.
+        // Largest first, so the result (and the surviving key) is deterministic.
+        let centre = |a: &Acc| {
+            let n = a.count as f64;
+            (mercator_x(a.sum_x / n), mercator_y(a.sum_y / n))
+        };
+        let mut order: Vec<usize> = (0..keyed.len()).collect();
+        order.sort_by(|&a, &b| keyed[b].1.count.cmp(&keyed[a].1.count).then(a.cmp(&b)));
+        let slot: HashMap<(i64, i64), usize> =
+            keyed.iter().enumerate().map(|(i, (k, _))| (*k, i)).collect();
+        let mut absorbed = vec![false; keyed.len()];
+        let merge_dist = cell * MERGE_FACTOR;
+        for &i in &order {
+            if absorbed[i] {
+                continue;
+            }
+            let (cx, cy) = keyed[i].0;
+            for dx in -1..=1i64 {
+                for dy in -1..=1i64 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let Some(&j) = slot.get(&(cx + dx, cy + dy)) else { continue };
+                    if absorbed[j] || keyed[j].1.count > keyed[i].1.count {
+                        continue;
+                    }
+                    let (ax, ay) = centre(&keyed[i].1);
+                    let (bx, by) = centre(&keyed[j].1);
+                    if (ax - bx).hypot(ay - by) >= merge_dist {
+                        continue;
+                    }
+                    absorbed[j] = true;
+                    let (b_count, b_sx, b_sy, b_rep, b_bounds) = {
+                        let b = &keyed[j].1;
+                        (b.count, b.sum_x, b.sum_y, b.rep, b.bounds)
+                    };
+                    let a = &mut keyed[i].1;
+                    a.count += b_count;
+                    a.sum_x += b_sx;
+                    a.sum_y += b_sy;
+                    if self.ts[b_rep] > self.ts[a.rep]
+                        || (self.ts[b_rep] == self.ts[a.rep] && b_rep > a.rep)
+                    {
+                        a.rep = b_rep;
+                    }
+                    a.bounds[0] = a.bounds[0].min(b_bounds[0]);
+                    a.bounds[1] = a.bounds[1].min(b_bounds[1]);
+                    a.bounds[2] = a.bounds[2].max(b_bounds[2]);
+                    a.bounds[3] = a.bounds[3].max(b_bounds[3]);
+                }
+            }
+        }
+        let keyed: Vec<((i64, i64), Acc)> = keyed
+            .into_iter()
+            .zip(absorbed)
+            .filter(|(_, gone)| !gone)
+            .map(|(entry, _)| entry)
+            .collect();
+
         let features = keyed
             .into_iter()
             .map(|((cx, cy), acc)| {
@@ -466,6 +530,25 @@ mod tests {
         let high = idx.query_map(WORLD, 20.0, None, None);
         assert_eq!(high.features.len(), 3);
         assert!(high.features.iter().all(|f| f.count == 1 && f.key.starts_with('p')));
+    }
+
+    #[test]
+    fn merges_neighbours_split_by_a_cell_border() {
+        // Find a longitude pair that is close together yet lands in two cells.
+        let z = 6.0;
+        let cell = CELL_PX / (WORLD_PX * 2f64.powi(6));
+        let border_lon = (mercator_x(10.0) / cell).ceil() * cell * 360.0 - 180.0;
+        let eps = cell * 360.0 * 0.05;
+        let idx = GeoIndex::build(vec![
+            row(1, 20.0, border_lon - eps, Some("2024-01-01 00:00:00")),
+            row(2, 20.0, border_lon - eps, Some("2024-01-02 00:00:00")),
+            row(3, 20.0, border_lon + eps, Some("2024-01-03 00:00:00")),
+        ]);
+        let r = idx.query_map(WORLD, z, None, None);
+        assert_eq!(r.features.len(), 1, "close neighbours across a border become one marker");
+        assert_eq!(r.features[0].count, 3);
+        assert_eq!(r.features[0].id, 3, "representative is still the most recent");
+        assert_eq!(r.matched, 3);
     }
 
     #[test]

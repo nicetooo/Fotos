@@ -78,7 +78,7 @@ export interface PlatformService {
     /** 订阅扫描状态变化 */
     onScanningChange(callback: (isScanning: boolean) => void): () => void;
 
-    /** 获取地图瓦片配置，返回 null 则使用默认 CARTO 瓦片 */
+    /** 获取地图瓦片配置，返回 null 则使用默认底图（shared/map-style.ts） */
     getMapTileConfig(): MapTileConfig | null;
 
     /** 用系统播放器打开文件 */

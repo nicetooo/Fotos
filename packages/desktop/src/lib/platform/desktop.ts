@@ -188,15 +188,9 @@ class DesktopPlatformService implements PlatformService {
         await invoke("open_in_system_player", { path });
     }
 
-    getMapTileConfig(): MapTileConfig {
-        return {
-            tiles: [
-                'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-                'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-                'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-            ],
-            tileSize: 256
-        };
+    getMapTileConfig(): MapTileConfig | null {
+        // null = the shared default base map (shared/map-style.ts)
+        return null;
     }
 }
 

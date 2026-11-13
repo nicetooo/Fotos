@@ -4,6 +4,7 @@
     import "maplibre-gl/dist/maplibre-gl.css";
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
+    import { baseMapStyle } from "../../shared/map-style";
     import { queryMap, paddedBbox, abbreviateCount, type MapFeature } from "../../shared/query";
     import type { Translations } from "../../shared/i18n/types";
     import type { Locale } from "../../shared/i18n/types";
@@ -153,7 +154,6 @@
     const UNCLUSTERED_LAYER_ID = 'photo-unclustered';
     const UNCLUSTERED_BORDER_LAYER_ID = 'photo-unclustered-border';
     const UNCLUSTERED_THUMB_LAYER_ID = 'photo-unclustered-thumb';
-    const GLYPHS_URL = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
 
     // Thumbnail rendering constants
     const THUMB_CANVAS_SIZE = 88;    // 88px canvas -> 44px display at pixelRatio 2
@@ -382,6 +382,10 @@
     function handleMove() {
         const now = performance.now();
         if (now - lastMoveQuery >= MOVE_QUERY_INTERVAL) {
+            if (moveTimer) {
+                clearTimeout(moveTimer);
+                moveTimer = null;
+            }
             lastMoveQuery = now;
             refresh();
         } else if (!moveTimer) {
@@ -797,59 +801,7 @@
     // ============================================================
 
     function getMapStyle(isDark: boolean): maplibregl.StyleSpecification {
-        if (tileConfig) {
-            return {
-                version: 8,
-                glyphs: GLYPHS_URL,
-                sources: {
-                    'tiles': {
-                        type: 'raster',
-                        tiles: tileConfig.tiles,
-                        tileSize: tileConfig.tileSize,
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }
-                },
-                layers: [
-                    {
-                        id: 'tiles-layer',
-                        type: 'raster',
-                        source: 'tiles',
-                        minzoom: 0,
-                        maxzoom: 19
-                    }
-                ]
-            };
-        }
-
-        // Default: CARTO tiles with theme support (@2x for desktop Retina)
-        const tileType = isDark ? 'dark_all' : 'light_all';
-        const sourceId = isDark ? 'carto-dark' : 'carto-light';
-        return {
-            version: 8,
-            glyphs: GLYPHS_URL,
-            sources: {
-                [sourceId]: {
-                    type: 'raster',
-                    tiles: [
-                        `https://a.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
-                        `https://b.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
-                        `https://c.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`,
-                        `https://d.basemaps.cartocdn.com/${tileType}/{z}/{x}/{y}@2x.png`
-                    ],
-                    tileSize: 256,
-                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                }
-            },
-            layers: [
-                {
-                    id: `${sourceId}-layer`,
-                    type: 'raster',
-                    source: sourceId,
-                    minzoom: 0,
-                    maxzoom: 20
-                }
-            ]
-        };
+        return baseMapStyle(isDark, tileConfig);
     }
 
     // ============================================================
