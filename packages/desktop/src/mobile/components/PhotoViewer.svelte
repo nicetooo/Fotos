@@ -788,8 +788,8 @@
     let stageStyle = $derived.by(() => {
         const dim = 1 - dismissProgress * 0.45;
         const s = 1 - dismissProgress * 0.12;
-        const transform = s === 1 ? "none" : `scale(${s})`;
-        return `left:${dragX}px;top:${dragY}px;transform:${transform};opacity:${dim};`;
+        // transform only: the drag stays on the compositor, no layout per touch event.
+        return `transform:translate3d(${dragX}px, ${dragY}px, 0) scale(${s});opacity:${dim};`;
     });
     const STRIP_WINDOW = 32;
 
@@ -1028,7 +1028,7 @@
         height: 100%;
     }
     .stage.settling {
-        transition: left 0.34s cubic-bezier(0.22, 1, 0.36, 1), top 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+        transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
     }
     .viewer:not(.dragging):not(.settling) .slide.current {
         transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);

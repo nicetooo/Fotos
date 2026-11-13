@@ -222,18 +222,22 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 
 以下优化经实测验证（671 张照片，Pixel 7a），修改相关代码时必须保持这些约束。
 
-### 地图渲染：GeoJSON + GPU 图层，禁止 DOM Marker
+### 地图渲染：视口查询 + GPU 图层，禁止 DOM Marker
 
 - ❌ 禁止使用 `maplibregl.Marker` 渲染照片点（670+ DOM 节点会导致严重卡顿）
-- ✅ 必须使用 GeoJSON Source + `cluster: true` + Symbol/Circle Layer（GPU 加速）
-- 缩略图通过 `map.addImage()` 注入 GL atlas，由 `styleimagemissing` 事件按需加载
-- 聚类层 ID：`CLUSTER_THUMB_LAYER_ID`（聚类缩略图）、`UNCLUSTERED_THUMB_LAYER_ID`（单点缩略图）
+- ❌ 禁止把整个照片库传给地图组件或在前端聚类（成本随库规模线性增长）
+- ✅ 地图只画 Rust 返回的结果：`query_map(bbox, zoom, start_ms, end_ms)` 在 `footos-core` 的 `GeoIndex` 里按世界对齐网格聚类，只返回（外扩 50% 的）视口内的聚类和单点
+- ✅ 结果 `setData` 到**非聚类**的 GeoJSON Source，由 Symbol/Circle Layer 绘制；`count > 1` 为聚类
+- 触发查询：`move`（节流 120ms）、`moveend`、时间过滤变化、`refreshKey` 变化（库有变更）
+- 缩略图通过 `map.addImage()` 注入 GL atlas，由 `styleimagemissing` 事件按需加载。图片 ID 由缩略图路径决定（`thumb:<path>` / `cthumb:<path>`），重新查询后不会失效
+- 图层 ID：`CLUSTER_THUMB_LAYER_ID`（聚类缩略图）、`UNCLUSTERED_THUMB_LAYER_ID`（单点缩略图）
 
-### 聚类点击定位：fitBounds + getClusterChildren
+### 聚类点击定位：fitBounds 到成员包围盒
 
-- ✅ 点击聚类时，必须用 `getClusterChildren(clusterId)` 获取子要素，计算边界框，再 `fitBounds` 定位
-- ❌ 禁止使用 `getClusterExpansionZoom` + `easeTo`（该 API 返回聚类首次分裂的 zoom，可能**低于**当前 zoom，导致地图缩小而非放大）
-- 点击处理使用 `queryRenderedFeatures(bbox)` + `closestFeature()` 选取离触摸点最近的要素（bbox 内可能有多个聚类）
+- ✅ 每个聚类要素带有成员的包围盒（属性 `w/s/e/n`，Rust 计算），点击时直接 `fitBounds`
+- ✅ zoom ≥ 17 或包围盒退化为一个点时（同一地点的多张照片），点击直接打开查看器
+- ❌ 禁止用"放大固定级数"之类的方式定位（可能放大后聚类仍不分裂）
+- 点击处理使用 `queryRenderedFeatures(bbox)` + 取离触摸点最近的要素（bbox 内可能有多个聚类）
 
 ### GL 内存控制：瓦片 + 帧缓冲 + 缩略图
 
@@ -249,40 +253,23 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 ### 缩略图内存管理：LRU + Atlas 淘汰
 
 - **JS 堆**：`thumbDataCache`（LRU Map，最大 120 条，~2MB）。`thumbCacheGet()` 访问时移到末尾，`thumbCacheSet()` 超限时淘汰最旧
-- **GPU Atlas**：最大 180 张图。`evictNonVisibleImages()` 在 `idle` 事件后执行，查询当前可见 feature，`removeImage()` 不可见的。被淘汰的图会由 `styleimagemissing` 自动重新加载
+- **GPU Atlas**：最大 180 张图。`evictUnusedImages()` 在 `idle` 事件后执行，`removeImage()` 当前查询结果里没有用到的图。被淘汰的图会由 `styleimagemissing` 自动重新加载
 - ❌ 禁止无限制调用 `map.addImage()` 而不淘汰（GPU 内存会持续增长）
 
-### 地图↔时间轴同步：防抖 + 防循环
+### 地图↔时间轴同步：单向数据流，没有循环
 
-| 交互路径 | 防抖机制 | 延迟 |
-|----------|----------|------|
-| 地图拖动 → 时间轴 | `handleMapMove` debounce | 300ms |
-| 时间轴操作 → 地图 | `onTimeRangeChange` debounce | 120ms |
-| GeoJSON 数据更新 | `updateSourceData` rAF 节流 | ≤16ms |
+数据只沿两条互不相交的路径流动，所以不需要 `syncSource` 之类的防循环标记：
 
-- **防循环**：`syncSource` 状态标记（`'map'` / `'timeline'`）。地图拖动触发的时间轴更新（`syncSource === 'map'`）不会反向更新 GeoJSON 数据，避免 cluster ID 重生成 → 缩略图闪白
-- ❌ 禁止在 `handleTimeRangeChange` 中无条件调用 `setData()`（会导致拖动时白色闪烁）
+| 路径 | 触发 | 做什么 | 延迟 |
+|------|------|--------|------|
+| 地图 → 时间轴 | `moveend` | `query_timeline(视口 bbox)` 取可见照片的时间戳，交给时间轴显示 | 300ms 防抖 |
+| 时间轴 → 地图 | **用户**操作时间轴 | `onTimeRangeChange(startMs, endMs)` → 设置时间过滤 → `query_map` | 120ms 防抖 |
 
-**地图驱动时间轴的数据流**：
-
-地图视口变化时，时间轴必须同时收到两样东西：
-1. `mapVisibleTimeRange`：可见照片的时间范围（控制概览时间轴的坐标轴）
-2. `mapVisiblePhotos`：可见照片列表（控制黄线分布，通过 `timelinePhotos` 传入 `photos` prop）
-
-```
-handleMapMove → getVisiblePhotosTimeRange()
-  ├─ mapVisibleTimeRange = { start, end }   → TimelineSlider.mapViewTimeRange → displayTimeRange
-  └─ mapVisiblePhotos = visiblePhotos[]     → timelinePhotos → TimelineSlider.photos → parsedDatesMs → 黄线
-```
-
-- `timelinePhotos = mapVisiblePhotos ?? photosWithMarkers`：地图驱动时用子集，否则用全部
-- `mapVisiblePhotos` 由每次 `moveend` 事件自然更新，无需手动清除
-
-**`onMapRangeConsumed` 只清除时间范围，不清除照片列表**：
-
-`onMapRangeConsumed` 在用户操作时间轴时触发（预设按钮、拖动、缩放等）：
-- ✅ 清除 `mapVisibleTimeRange = null`（释放时间轴坐标轴约束）
-- ❌ 禁止清除 `mapVisiblePhotos`（否则 `photos` prop 突变 → TimelineSlider 的 `prevPhotosLength` 检测到变化 → 强制重置 `viewDurationMs` 为全量，覆盖用户刚选择的预设）
+- ❌ 地图移动**永远不**写时间过滤；时间轴的数据变化（`stamps` 换了）**永远不**触发 `onTimeRangeChange`
+- 时间轴内部用 `userActive` 区分：只有用户手势会把它置为 true；选区重新覆盖全部范围时置回 false 并上报 `(null, null)` 清除过滤
+- 用户设置了时间范围后，地图移动不再替换时间轴的数据（否则会重置用户刚选的范围）；清除过滤后恢复跟随地图
+- 视口内没有照片时保留上一份时间轴数据，不清空
+- 时间统一为"墙上时钟毫秒"（`parse_date_ms`，不做时区换算），显示时用 `timeZone: 'UTC'` 格式化
 
 **主题切换后的样式恢复**：
 
@@ -290,16 +277,22 @@ handleMapMove → getVisiblePhotosTimeRange()
 
 ### TimelineSlider 计算优化
 
-- **日期预解析**：`parsedDatesMs`（`$derived.by`）将所有照片日期一次性解析为毫秒数数组，与 `photos` 索引对齐
-- **单次遍历**：`timelineData`（`$derived.by`）合并 `photosInWindow`、`photoPositions`、`detailPhotoData` 为一次 O(n) 循环，纯数字比较
-- ❌ 禁止在每次 moveend 事件中重复调用 `parsePhotoDate()`（字符串→Date 解析开销大）
-- ❌ 禁止多个独立 `$derived` 分别遍历 photos 数组（应合并为单次遍历）
+- 输入是排好序的 `Float64Array` 时间戳（`stamps`），不是照片数组
+- 窗口内数量、左右两侧数量、边缘堆叠线数、每个像素列是否有照片，全部用 `shared/utils/timeline-index.ts` 里的二分查找计算，成本 O(像素宽度 · log n)
+- 概览轴只在 `stamps` 或尺寸变化时重画，拖动黄框/精细轴时不重画
+- canvas 位图尺寸只在实际变化时设置；尺寸由 `ResizeObserver` 维护，绘制路径里不调用 `getBoundingClientRect()`
+- 精细轴的点阵背景是 CSS background，不在 canvas 里画
+- ❌ 禁止在 touchmove 路径上遍历或排序全部时间戳
+- ❌ 禁止在前端解析日期字符串来做时间轴计算（Rust 侧已解析）
 
-### 两阶段加载
+### 按需加载（前端不持有照片库）
 
-- **第一阶段**：`list_map_previews` 把带 GPS 的预览（path + lat/lon + date_taken 等）以列式 JSON 写入 `thumbnails/map_previews.json`，前端经 asset 协议 `fetch` 后立即渲染地图（不走 invoke 返回值：iOS WKWebView 上返回 5k+ 对象约需 8s）
-- **第二阶段**：`list_photos` 加载完整 `PhotoInfo`（含 EXIF、dimensions 等），在导入完成或收到 `reload-photos` 事件时触发
-- ❌ 禁止首屏等待所有 EXIF 数据加载完毕才渲染地图
+- 移动端 `App.svelte` 不保存照片列表。地图、时间轴、查看器各自向 Rust 查询当前需要的那一部分
+- 查看器：`query_album(center_id, radius)` 取时间顺序相册里当前照片前后各 300 张的窗口；浏览到距边缘 60 张以内时，停顿 500ms 后以当前照片为中心重新取
+- 库发生变化（导入进度、删除、清空）时只递增 `refreshKey`，由地图重新查询；Rust 侧 `AppState::geo()` 按 DB 变更计数惰性重建内存索引
+- 只在照片**第一次出现**时自动 `fitBounds`；后续导入不得抢镜头
+- ❌ 禁止通过 invoke 返回全量照片对象（iOS WKWebView 上 5k+ 对象约 8s）。需要批量数值时用 `tauri::ipc::Response` 返回原始字节
+- 桌面端的图库抽屉仍然用 `list_photos` 全量加载，桌面端时间轴仍是旧实现（尚未迁移）
 
 ### 精细时间轴边缘堆叠
 

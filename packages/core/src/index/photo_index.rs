@@ -87,6 +87,18 @@ impl PhotoIndex {
     }
 }
 
+impl PhotoIndex {
+    /// Monotonic counter of rows changed on this connection. Cheap way for
+    /// callers to tell whether a derived in-memory view is stale.
+    pub fn change_counter(&self) -> Result<i64, CoreError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))?;
+        Ok(conn.query_row("SELECT total_changes()", [], |row| row.get(0))?)
+    }
+}
+
 #[uniffi::export]
 impl PhotoIndex {
     #[uniffi::constructor]

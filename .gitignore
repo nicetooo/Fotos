@@ -27,3 +27,6 @@ ANDROID_RELEASE.md
 
 # Process docs (local only, never committed)
 /docs/
+
+# Agent test output
+scripts/agent-test/out/

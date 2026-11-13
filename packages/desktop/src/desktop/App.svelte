@@ -60,7 +60,8 @@
     });
     let isScanning = $state(false);
     let error = $state("");
-    let photos = $state<PhotoInfo[]>([]);
+    // Raw: a deep reactive proxy over every photo makes each property read expensive.
+    let photos = $state.raw<PhotoInfo[]>([]);
     let dbPath = $state("");
     let thumbDir = $state("");
     let uniqueTs = $state(Date.now());

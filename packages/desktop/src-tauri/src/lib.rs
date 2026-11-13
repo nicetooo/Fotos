@@ -1,4 +1,4 @@
-use footos_core::{PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE, MediaType};
+use footos_core::{AlbumWindow, Bbox, GeoIndex, MapFeature, PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE, MediaType};
 use tauri::Manager;
 use rayon::prelude::*;
 use std::collections::HashSet;
@@ -20,6 +20,9 @@ struct AppState {
     index: Mutex<Option<Arc<PhotoIndex>>>,
     db_path: Mutex<String>,
     thumb_dir: Mutex<String>,
+    /// Cached query index, keyed by (connection generation, DB change counter).
+    geo: Mutex<Option<((u64, i64), Arc<GeoIndex>)>>,
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
@@ -28,7 +31,36 @@ impl AppState {
             index: Mutex::new(None),
             db_path: Mutex::new(String::new()),
             thumb_dir: Mutex::new(String::new()),
+            geo: Mutex::new(None),
+            generation: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// The in-memory query index, rebuilt lazily whenever the DB has changed.
+    /// Returns the index and a version token the frontend can compare.
+    fn geo(&self) -> Result<(Arc<GeoIndex>, String), String> {
+        let index = self.get_index()?;
+        let key = (
+            self.generation.load(Ordering::SeqCst),
+            index.change_counter().map_err(|e| e.to_string())?,
+        );
+        let version = format!("{}-{}", key.0, key.1);
+        let mut cached = self.geo.lock().map_err(|e| e.to_string())?;
+        if let Some((k, geo)) = cached.as_ref() {
+            if *k == key {
+                return Ok((geo.clone(), version));
+            }
+        }
+        let started = std::time::Instant::now();
+        let thumb_dir = self.get_thumb_dir()?;
+        let mut rows = index.list_previews_filtered(true).map_err(|e| e.to_string())?;
+        for row in &mut rows {
+            row.thumb_path = Some(resolve_thumb(&thumb_dir, &row.path, row.thumb_path.take()));
+        }
+        let geo = Arc::new(GeoIndex::build(rows));
+        tracing::info!(rows = geo.len(), ms = started.elapsed().as_millis() as u64, "geo index rebuilt");
+        *cached = Some((key, geo.clone()));
+        Ok((geo, version))
     }
 
     /// Initialize (or re-initialize) the database connection and store paths.
@@ -78,6 +110,7 @@ impl AppState {
         *self.db_path.lock().map_err(|e| e.to_string())? = db_path.clone();
         *self.thumb_dir.lock().map_err(|e| e.to_string())? = thumb_dir;
         *self.index.lock().map_err(|e| e.to_string())? = Some(index.clone());
+        self.generation.fetch_add(1, Ordering::SeqCst);
         eprintln!(
             "[footos] init_app opened {} ({} rows)",
             db_path,
@@ -106,6 +139,8 @@ impl AppState {
 
     /// Drop the cached connection (before deleting DB files).
     fn reset_index(&self) -> Result<(), String> {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        *self.geo.lock().map_err(|e| e.to_string())? = None;
         *self.index.lock().map_err(|e| e.to_string())? = None;
         Ok(())
     }
@@ -263,6 +298,128 @@ async fn list_map_previews(app: tauri::AppHandle) -> Result<MapPreviewFile, Stri
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Image to draw for an item. iOS library rows store an absolute thumbnail path
+/// inside a container whose UUID changes on reinstall, so re-anchor those to
+/// the current thumbnail directory. Rows without a thumbnail fall back to the
+/// original file (the frontend scales it down).
+fn resolve_thumb(thumb_dir: &str, path: &str, stored: Option<String>) -> String {
+    let virtual_path = path.starts_with("ios-photo://") || path.starts_with("content://");
+    match stored.filter(|s| !s.is_empty()) {
+        Some(t) if !virtual_path || t.starts_with(thumb_dir) => t,
+        Some(t) => std::path::Path::new(&t)
+            .file_name()
+            .map(|n| {
+                std::path::Path::new(thumb_dir)
+                    .join(n)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .unwrap_or(t),
+        None if virtual_path => String::new(),
+        None => path.to_string(),
+    }
+}
+
+#[derive(serde::Serialize)]
+struct MapQueryResponse {
+    features: Vec<MapFeature>,
+    /// Items inside the box and time range, before clustering.
+    matched: u32,
+    /// Geotagged items in the whole library.
+    total: u32,
+    version: String,
+}
+
+/// Clusters and single items inside the viewport. Cost depends on what is on
+/// screen plus one linear scan in Rust; nothing library-sized crosses IPC.
+#[tauri::command]
+async fn query_map(
+    app: tauri::AppHandle,
+    bbox: Bbox,
+    zoom: f64,
+    start_ms: Option<f64>,
+    end_ms: Option<f64>,
+) -> Result<MapQueryResponse, String> {
+    let (geo, version) = app.state::<AppState>().geo()?;
+    let result = geo.query_map(bbox, zoom, start_ms.map(|v| v as i64), end_ms.map(|v| v as i64));
+    Ok(MapQueryResponse {
+        features: result.features,
+        matched: result.matched,
+        total: geo.len() as u32,
+        version,
+    })
+}
+
+#[derive(serde::Serialize)]
+struct GeoSummary {
+    total: u32,
+    /// `[west, south, east, north]` of all geotagged items.
+    extent: Option<[f64; 4]>,
+    version: String,
+}
+
+#[tauri::command]
+async fn geo_summary(app: tauri::AppHandle) -> Result<GeoSummary, String> {
+    let (geo, version) = app.state::<AppState>().geo()?;
+    Ok(GeoSummary { total: geo.len() as u32, extent: geo.extent(), version })
+}
+
+/// Sorted wall-clock timestamps (little-endian f64 ms) for the timeline,
+/// returned as raw bytes so no JSON is involved.
+#[tauri::command]
+async fn query_timeline(
+    app: tauri::AppHandle,
+    bbox: Option<Bbox>,
+) -> Result<tauri::ipc::Response, String> {
+    let (geo, _) = app.state::<AppState>().geo()?;
+    let stamps = geo.timestamps(bbox);
+    let mut bytes = Vec::with_capacity(stamps.len() * 8);
+    for t in stamps {
+        bytes.extend_from_slice(&t.to_le_bytes());
+    }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// A window of the time-ordered album around `center_id`, for the viewer.
+#[tauri::command]
+async fn query_album(
+    app: tauri::AppHandle,
+    center_id: Option<i64>,
+    radius: u32,
+) -> Result<AlbumWindow, String> {
+    let (geo, _) = app.state::<AppState>().geo()?;
+    Ok(geo.album_window(center_id, radius.min(5_000)))
+}
+
+/// Agent test mode: set by launching with the `FOOTOS_AGENT_TEST` environment
+/// variable (see `scripts/agent-test`). Returns its value, or `None` in normal runs.
+#[tauri::command]
+fn agent_test_enabled() -> Option<String> {
+    std::env::var("FOOTOS_AGENT_TEST").ok().filter(|v| !v.is_empty())
+}
+
+/// Write the in-app self-test report next to the database so the test runner
+/// can read it from the app container. Only works in agent test mode.
+#[tauri::command]
+fn agent_test_report(state: tauri::State<'_, AppState>, json: String) -> Result<String, String> {
+    if agent_test_enabled().is_none() {
+        return Err("not in agent test mode".to_string());
+    }
+    let db_path = state.get_db_path()?;
+    let out = std::path::Path::new(&db_path)
+        .parent()
+        .map(|p| p.join("agent-report.json"))
+        .ok_or_else(|| "no data dir".to_string())?;
+    std::fs::write(&out, json).map_err(|e| e.to_string())?;
+    Ok(out.to_string_lossy().into_owned())
+}
+
+/// Total rows in the library (geotagged or not).
+#[tauri::command]
+async fn photo_count(app: tauri::AppHandle) -> Result<i64, String> {
+    app.state::<AppState>().get_index()?.count().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1733,6 +1890,13 @@ pub fn run() {
             list_photos,
             list_photos_preview,
             list_map_previews,
+            query_map,
+            geo_summary,
+            query_timeline,
+            query_album,
+            photo_count,
+            agent_test_enabled,
+            agent_test_report,
             list_ios_known_ids,
             clear_app_data,
             regenerate_thumbnails,

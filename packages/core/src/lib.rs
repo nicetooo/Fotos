@@ -6,6 +6,7 @@ pub mod fs;
 pub mod image;
 pub mod index;
 pub mod metadata;
+pub mod query;
 
 pub use config::{PhotoCoreConfig, DEFAULT_THUMBNAIL_SIZE};
 pub use error::CoreError;
@@ -20,6 +21,7 @@ pub use image::{
 };
 pub use index::PhotoIndex;
 pub use metadata::{read_date_taken, read_metadata, read_video_metadata};
+pub use query::{parse_date_ms, AlbumItem, AlbumWindow, Bbox, GeoIndex, MapFeature, MapQueryResult};
 
 uniffi::setup_scaffolding!();
 

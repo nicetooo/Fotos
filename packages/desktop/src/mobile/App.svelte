@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+    import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
     import { appDataDir, join } from "@tauri-apps/api/path";
 
@@ -17,12 +17,10 @@
 
     // Shared utilities and types
     import {
-        type PhotoInfo,
-        type PhotoPreview,
         type Theme,
         type ImportStatus,
-        groupPhotos,
     } from "../shared";
+    import { queryAlbum, photoCount, albumItemToPhoto } from "../shared/query";
 
     // i18n
     import { createI18nState, type Locale } from "../shared/i18n";
@@ -62,17 +60,26 @@
     let isScanning = $state(false);
     let error = $state("");
 
-    // Two-phase photo loading:
-    // Phase 1 (instant): lightweight previews for map markers + timeline
-    // Phase 2 (lazy): full PhotoInfo loaded on demand for preview modal
-    let previews = $state.raw<any[]>([]);
-    let photos = $state.raw<PhotoInfo[]>([]);
-    let fullDataLoaded = $state(false);
+    // The UI holds no library data. The map queries what is in view; this key
+    // tells it the library changed and it should ask again.
+    let refreshKey = $state(0);
+    let libraryCount = $state(0);
+
+    function bumpRefresh() {
+        refreshKey++;
+        photoCount().then((c) => { libraryCount = c; }).catch(() => {});
+    }
 
     let dbPath = $state("");
     let thumbDir = $state("");
-    let previewPhoto = $state<PhotoInfo | null>(null);
-    let previewPhotoList = $state.raw<PhotoInfo[] | null>(null);
+    // Viewer: a window of the time-ordered album around the current photo.
+    const ALBUM_RADIUS = 300;
+    const ALBUM_EDGE = 60;
+    let previewPhoto = $state.raw<any | null>(null);
+    let viewerPhotos = $state.raw<any[]>([]);
+    let viewerStart = 0;
+    let viewerTotal = 0;
+    let albumRefetchTimer: ReturnType<typeof setTimeout> | null = null;
 
     // iOS specific state
     let hasFullAccess = $state(false);
@@ -132,28 +139,6 @@
         theme === "system" ? (systemPrefersDark ? "dark" : "light") : theme
     );
 
-    // Group RAW+JPEG pairs (only when full data is loaded)
-    let groupedPhotos = $derived(groupPhotos(photos));
-    let photosByPath = $derived.by(() => {
-        const map = new Map<string, PhotoInfo>();
-        for (const photo of photos) {
-            map.set(photo.path, photo);
-        }
-        return map;
-    });
-
-    // Map-compatible photos: uses lightweight previews for instant render,
-    // upgrades to full grouped data when available.
-    let mapPhotos = $derived.by(() => {
-        if (fullDataLoaded && groupedPhotos.length > 0) {
-            return groupedPhotos;
-        }
-        if (previews.length > 0) {
-            return previews;
-        }
-        return groupedPhotos;
-    });
-
     onMount(async () => {
         // Back button support: close modals on browser history navigation
         window.addEventListener('popstate', handlePopState);
@@ -207,32 +192,30 @@
                     lastPath: progress.lastPath,
                 };
                 if (progress.current <= 5 || progress.current % 400 === 0) {
-                    loadPreviews();
+                    bumpRefresh();
                 }
             });
 
             platformService.onImportComplete((result) => {
                 console.log("[App] Import complete callback triggered:", result);
-                loadPreviews().then(() => {
-                    iosPlatformService?.setKnownPhotoIdentifiers(iosIdentifiersFrom(previews));
-                });
-                loadFullPhotos();
+                bumpRefresh();
+                refreshKnownIosIds();
             });
 
             // Listen for reload-photos event (e.g., after clear cache)
-            await listen("reload-photos", () => {
-                fullDataLoaded = false;
-                loadPreviews();
-                loadFullPhotos();
-            });
+            await listen("reload-photos", () => bumpRefresh());
 
-            // Phase 1: geotagged previews only — enough for map + timeline.
-            await loadPreviews();
-            mark("previews");
+            // DB is ready: let the map run its first viewport query.
+            bumpRefresh();
+            mark("first-query");
+
+            // Agent self-test (scripts/agent-test): seeded data only, so no
+            // PhotoKit / MediaStore sync and no permission dialogs over the UI.
+            const agentScenario = (await invoke("agent_test_enabled")) as string | null;
 
             // iOS: incremental PhotoKit sync after first paint. Known IDs come
             // from a cheap path-only query so we do not miss non-geotagged rows.
-            if (iosPlatformService) {
+            if (iosPlatformService && !agentScenario) {
                 iosPlatformService.onPermissionChange((fullAccess) => {
                     hasFullAccess = fullAccess;
                 });
@@ -251,23 +234,33 @@
             }
 
             // Android: Auto-sync photos from MediaStore if has access
-            if (androidPlatformService) {
+            if (androidPlatformService && !agentScenario) {
                 androidPlatformService.onPermissionChange((hasAccess: boolean) => {
                     hasFullAccess = hasAccess;
                 });
 
                 androidPlatformService.syncPhotosIfHasAccess();
             }
-            (window as any).__footosOpenPreview = (mediaType?: string) => {
-                const list = mapPhotos.filter((p: any) => p.metadata?.lat && p.metadata?.lon);
-                if (list.length === 0) return false;
-                const pick = mediaType
-                    ? list.find((p: any) => (p.media_type || p.metadata?.media_type) === mediaType) || list[0]
-                    : list[0];
-                openPreview(pick, list);
-                return { ok: true, media_type: pick.media_type || pick.metadata?.media_type || "photo", path: pick.path };
+            (window as any).__footosOpenPreview = async () => {
+                const w = await queryAlbum(null, 0);
+                if (w.items.length === 0) return false;
+                await openPreview(w.items[0]);
+                return { ok: true, path: w.items[0].path };
             };
             (window as any).__footosClosePreview = () => closePreview();
+
+            // Agent self-test: only when launched with FOOTOS_AGENT_TEST (scripts/agent-test).
+            const scenario = agentScenario;
+            if (scenario) {
+                const { runAgentTest } = await import("../shared/agent-test");
+                void runAgentTest(scenario, {
+                    getMap: () => (window as any).__footosMap ?? null,
+                    getMapStats: () => (window as any).__footosMapStats?.() ?? {},
+                    openPreview: () => (window as any).__footosOpenPreview(),
+                    closePreview: () => closePreview(),
+                    bootMarks: () => boot.marks,
+                });
+            }
         } catch (e) {
             error = t.errors.initFailed + ": " + e;
         }
@@ -280,121 +273,70 @@
         };
     });
 
-    /**
-     * Phase 1: Fast preview loading.
-     * Fetches lightweight PhotoPreview data (id, path, thumb_path, lat, lon, date_taken).
-     * Zero file I/O — completes in <50ms even for 10K+ photos.
-     * Used for map markers and timeline rendering.
-     */
-    async function loadPreviews() {
-        console.log("[App] loadPreviews called, dbPath:", dbPath);
-        if (!dbPath) {
-            console.log("[App] loadPreviews: dbPath is empty, skipping");
-            return;
-        }
+    async function refreshKnownIosIds() {
+        if (!iosPlatformService) return;
         try {
-            const startTime = performance.now();
-            const file = await invoke("list_map_previews") as {
-                path: string;
-                rows: number;
-                bytes: number;
-                rust_ms: number;
-            };
-            const boot = (window as any).__footosBoot;
-            if (boot?.marks) boot.marks.preview_rust = file.rust_ms;
-            const res = await fetch(convertFileSrc(file.path));
-            const pack = await res.json() as {
-                id: number[];
-                path: string[];
-                thumb: string[];
-                lat: number[];
-                lon: number[];
-                date: string[];
-                media: string[];
-                dur: number[];
-            };
-            const previewList: any[] = new Array(pack.path.length);
-            for (let i = 0; i < pack.path.length; i++) {
-                previewList[i] = {
-                    id: { id: pack.id[i] },
-                    path: pack.path[i],
-                    thumb_path: resolveThumbPath(pack.thumb[i]) || pack.thumb[i],
-                    media_type: pack.media[i] || "photo",
-                    metadata: {
-                        lat: pack.lat[i],
-                        lon: pack.lon[i],
-                        date_taken: pack.date[i] || null,
-                        width: 0,
-                        height: 0,
-                        duration_ms: pack.dur[i] || null,
-                    },
-                    hash: "",
-                    file_size: 0,
-                };
-            }
-            const elapsed = (performance.now() - startTime).toFixed(1);
-            console.log(`[App] loadPreviews: ${previewList.length} rows rust=${file.rust_ms}ms ipc=${elapsed}ms bytes=${file.bytes}`);
-            previews = previewList;
+            const ids = (await invoke("list_ios_known_ids")) as string[];
+            iosPlatformService.setKnownPhotoIdentifiers(ids);
         } catch (e) {
-            console.error("[App] Failed to list previews", e);
-            // Fallback: try full load
-            loadFullPhotos();
+            console.warn("[App] list_ios_known_ids failed", e);
         }
-    }
-
-    /**
-     * Phase 2: Full data loading.
-     * Fetches complete PhotoInfo with metadata, hash, etc.
-     * Used for preview modal (dimensions, camera info, file size).
-     * Runs in background after initial render.
-     */
-    async function loadFullPhotos() {
-        if (!dbPath) return;
-        try {
-            const startTime = performance.now();
-            const result = await invoke("list_photos");
-            const elapsed = (performance.now() - startTime).toFixed(1);
-            const photoList = result as PhotoInfo[];
-            console.log(`[App] loadFullPhotos: got ${photoList.length} photos in ${elapsed}ms`);
-            photos = photoList.map((p) => ({
-                ...p,
-                thumb_path: resolveThumbPath(p.thumb_path) || p.thumb_path,
-            }));
-            fullDataLoaded = true;
-        } catch (e) {
-            console.error("[App] Failed to load full photos", e);
-        }
-    }
-
-    function iosIdentifiersFrom(list: PhotoPreview[]): string[] {
-        return list
-            .filter((p) => p.path.startsWith("ios-photo://"))
-            .map((p) => p.path.slice("ios-photo://".length));
-    }
-
-    /** Reinstalls change the iOS container UUID; DB may still hold the old absolute path. */
-    function resolveThumbPath(stored: string | null | undefined): string {
-        if (!stored) return "";
-        const name = stored.split("/").pop();
-        if (!name || !thumbDir) return stored;
-        return `${thumbDir.replace(/\/$/, "")}/${name}`;
     }
 
     async function handleImport() {
         try {
             error = "";
             importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
-            iosPlatformService?.setKnownPhotoIdentifiers(iosIdentifiersFrom(previews));
+            await refreshKnownIosIds();
             await platformService.requestImport();
         } catch (e) {
             error = String(e);
         }
     }
 
-    function openPreview(photo: any, customList?: any[]) {
-        previewPhoto = photosByPath.get(photo.path) || photo;
-        previewPhotoList = customList || null;
-        history.pushState({ modal: "preview" }, "");
+    async function loadAlbumWindow(centerId: number | null) {
+        const w = await queryAlbum(centerId, ALBUM_RADIUS);
+        viewerStart = w.start;
+        viewerTotal = w.total;
+        viewerPhotos = w.items.map(albumItemToPhoto);
+        return viewerPhotos;
+    }
+
+    async function openPreview(item: { id: number; path: string }) {
+        try {
+            const list = await loadAlbumWindow(item.id);
+            const photo = list.find((p) => p.path === item.path);
+            if (!photo) return;
+            previewPhoto = photo;
+            history.pushState({ modal: "preview" }, "");
+        } catch (e) {
+            console.error("[App] Failed to open preview", e);
+        }
+    }
+
+    /** Near the edge of the loaded window: fetch the next one around the current photo. */
+    function handleViewerNavigate(photo: any) {
+        if (!photo) return;
+        previewPhoto = photo;
+        const idx = viewerPhotos.indexOf(photo);
+        if (idx < 0) return;
+        const moreBefore = viewerStart > 0 && idx < ALBUM_EDGE;
+        const moreAfter = viewerStart + viewerPhotos.length < viewerTotal
+            && idx >= viewerPhotos.length - ALBUM_EDGE;
+        if (albumRefetchTimer) clearTimeout(albumRefetchTimer);
+        if (!moreBefore && !moreAfter) return;
+        // Wait for the swipe / scrub to settle before swapping the list.
+        albumRefetchTimer = setTimeout(() => {
+            albumRefetchTimer = null;
+            const current = previewPhoto;
+            if (!current) return;
+            loadAlbumWindow(current.id.id)
+                .then((list) => {
+                    const same = list.find((p) => p.path === current.path);
+                    if (same && previewPhoto === current) previewPhoto = same;
+                })
+                .catch((e) => console.warn("[App] album window refetch failed", e));
+        }, 500);
     }
 
     async function resolveOriginalForViewer(photo: any): Promise<string | null> {
@@ -439,12 +381,10 @@
     function closePreview() {
         if (!previewPhoto) return;
         previewPhoto = null;
-        previewPhotoList = null;
+        viewerPhotos = [];
         isClosingManually = true;
         history.back();
     }
-
-    let navigationPhotos = $derived(previewPhotoList || groupedPhotos);
 
     // Back button support: manage browser history for modal states
     // When a modal opens, we pushState. When user presses hardware back button,
@@ -472,7 +412,7 @@
         // Hardware/system back button pressed: close topmost modal
         if (previewPhoto) {
             previewPhoto = null;
-            previewPhotoList = null;
+            viewerPhotos = [];
         } else if (showSettings) {
             showSettings = false;
         }
@@ -482,7 +422,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={mapPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
+        <MapView {refreshKey} {libraryCount} onOpenPreview={openPreview} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute left-4 z-[1001] flex flex-col gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
@@ -556,15 +496,12 @@
 
 {#if previewPhoto}
     <PhotoViewer
-        photos={navigationPhotos}
+        photos={viewerPhotos}
         currentPath={previewPhoto.path}
         {t}
         {locale}
         onClose={closePreview}
-        onNavigate={(photo) => {
-            if (!photo) return;
-            previewPhoto = photo;
-        }}
+        onNavigate={handleViewerNavigate}
         resolveOriginal={resolveOriginalForViewer}
         resolveStill={resolveStillForViewer}
         resolveLiveVideo={resolveLiveVideoForViewer}

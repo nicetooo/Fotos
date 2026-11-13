@@ -6,10 +6,33 @@
     import TimelineSlider from "./TimelineSlider.svelte";
     import type { Translations } from "../../shared/i18n/types";
     import type { Locale } from "../../shared/i18n/types";
+    import {
+        queryMap,
+        geoSummary,
+        queryTimeline,
+        paddedBbox,
+        abbreviateCount,
+        type Bbox,
+        type MapFeature,
+    } from "../../shared/query";
 
-    let { photos, onOpenPreview, theme = "dark", tileConfig, t, locale, isSyncing = false } = $props<{
-        photos: any[];
-        onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
+    // The map never receives the library. It asks Rust for what is inside the
+    // viewport (already clustered) and draws exactly that.
+    let {
+        refreshKey = 0,
+        libraryCount = 0,
+        onOpenPreview,
+        theme = "dark",
+        tileConfig,
+        t,
+        locale,
+        isSyncing = false,
+    } = $props<{
+        /** Bump to re-query after the library changed (import progress, delete, clear). */
+        refreshKey?: number;
+        /** Rows in the library, geotagged or not (for the "no GPS" hint). */
+        libraryCount?: number;
+        onOpenPreview?: (item: { id: number; path: string }) => void;
         theme?: "dark" | "light";
         tileConfig?: { tiles: string[]; tileSize: number };
         t: Translations;
@@ -22,98 +45,56 @@
     let mapLoaded = $state(false);
     let isReady = $state(false);
 
-    // Time filter state
-    let timeFilterStart = $state<Date | null>(null);
-    let timeFilterEnd = $state<Date | null>(null);
+    /** Geotagged items in the whole library. */
+    let total = $state(0);
+    let summaryLoaded = $state(false);
+    let hasGeotaggedPhotos = $derived(total > 0);
 
-    // Sync mode: prevent circular updates
-    let syncSource = $state<'map' | 'timeline' | null>(null);
+    // Time filter (wall-clock ms). Set only by the user through the timeline;
+    // map movement never writes it, so there is no map <-> timeline loop to guard.
+    let timeFilterStart = $state<number | null>(null);
+    let timeFilterEnd = $state<number | null>(null);
 
+    // Sorted timestamps the timeline draws. Follows the map viewport until the
+    // user picks a time range; then it stays put until the range is cleared.
+    let timelineStamps = $state.raw<Float64Array>(new Float64Array(0));
+    let mapConstrained = $state(false);
 
-
-    // Resize observer
     let resizeObserver: ResizeObserver | null = null;
 
-    // All photos data (for lookups and timeline)
-    let allPhotosData: any[] = [];
-    // Photo lookup by path
-    let photoByPath: Map<string, any> = new Map();
-    // Pre-parsed dates by path
-    let dateByPath: Map<string, Date> = new Map();
-
-    // Parse date from photo metadata
-    function parsePhotoDate(dateStr: string | null): Date | null {
-        if (!dateStr) return null;
-        const cleaned = dateStr.replace(/"/g, '').trim();
-        const date = new Date(cleaned.replace(' ', 'T'));
-        return isNaN(date.getTime()) ? null : date;
-    }
-
-    // Geotagged photos (reactive)
-    let geotaggedPhotos = $derived(photos.filter((p: any) => p.metadata?.lat && p.metadata?.lon));
-    let hasGeotaggedPhotos = $derived(geotaggedPhotos.length > 0);
-
-    function handleTimeRangeChange(start: Date, end: Date) {
-        // If this change was triggered by map pan sync, skip GeoJSON data update.
-        // Map panning should only update the timeline display (via mapViewTimeRange prop),
-        // NOT filter GeoJSON data. Filtering on pan causes setData() → cluster ID regeneration
-        // → thumbnails disappear → white circle flash.
-        if (syncSource === 'map') {
-            syncSource = null;
-            return;
-        }
-        syncSource = 'timeline';
+    function handleTimeRangeChange(start: number | null, end: number | null) {
+        if (start === timeFilterStart && end === timeFilterEnd) return;
         timeFilterStart = start;
         timeFilterEnd = end;
-        // Reset sync source after a short delay
-        setTimeout(() => {
-            syncSource = null;
-        }, 100);
+        refresh();
+        if (start === null) scheduleTimelineSync();
     }
 
-    // Format time range for display
-    function formatTimeRange(start: Date | null, end: Date | null, short: boolean = false): string {
-        if (!start || !end) return '';
-        const sameDay = start.toDateString() === end.toDateString();
+    function formatTimeRange(start: number | null, end: number | null): string {
+        if (start === null || end === null) return '';
+        const a = new Date(start);
+        const b = new Date(end);
+        const sameDay = a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
         const formatDate = (d: Date) => d.toLocaleDateString(locale, {
-            month: 'short',
-            day: 'numeric',
-            year: short ? '2-digit' : 'numeric'
+            month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC'
         });
         const formatTime = (d: Date) => d.toLocaleTimeString(locale, {
-            hour: short ? 'numeric' : '2-digit',
-            minute: '2-digit'
+            hour: 'numeric', minute: '2-digit', timeZone: 'UTC'
         });
         if (sameDay) {
-            return `${formatDate(start)} ${formatTime(start)} - ${formatTime(end)}`;
+            return `${formatDate(a)} ${formatTime(a)} - ${formatTime(b)}`;
         }
-        return `${formatDate(start)} - ${formatDate(end)}`;
+        return `${formatDate(a)} - ${formatDate(b)}`;
     }
 
-    let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd, true));
-
-    // Photos with markers for TimelineSlider
-    let photosWithMarkers = $state.raw<any[]>([]);
-    let timelineReady = $state(false);
-
-    // Filmstrip uses the full geotagged library, like the iOS Photos album strip.
-    let albumPhotosSorted = $derived.by(() => {
-        const items: { photo: any; date: Date }[] = [];
-        for (const photo of geotaggedPhotos) {
-            const date = dateByPath.get(photo.path) || parsePhotoDate(photo.metadata?.date_taken);
-            if (!date) continue;
-            items.push({ photo, date });
-        }
-        items.sort((a, b) => a.date.getTime() - b.date.getTime());
-        return items.map((v) => v.photo);
-    });
+    let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd));
 
     function getThumbnailUrl(path: string): string {
         return convertFileSrc(path);
     }
 
     // ============================================================
-    // GeoJSON Clustering Implementation
+    // Layers
     // ============================================================
 
     const SOURCE_ID = 'photos-source';
@@ -130,39 +111,35 @@
     const THUMB_BORDER_WIDTH = 3;    // Border width in canvas pixels
     const THUMB_PIXEL_RATIO = 1.5;   // Balance between clarity and GPU memory
 
-    // Track previous photo count to detect add vs remove
-    let prevPhotoCount = 0;
+    const IS_CLUSTER: any = ['>', ['get', 'count'], 1];
+    const IS_SINGLE: any = ['==', ['get', 'count'], 1];
 
-    // Track loaded thumbnail map images (imageId -> loaded status)
+    // Image ids are derived from the thumbnail path, so they survive re-queries:
+    // `thumb:<path>` (bordered, single item) and `cthumb:<path>` (borderless, cluster).
     let loadedImages = new Set<string>();
-    // Track images currently being loaded (prevent duplicate loads)
     let loadingImages = new Set<string>();
-    // Cache rendered ImageData by thumbPath — avoids re-fetch + re-canvas-render
-    // LRU eviction: Map insertion order = oldest first. On access, delete+re-insert.
+    // LRU of rendered ImageData. Map insertion order = oldest first.
     let thumbDataCache = new Map<string, ImageData>();
-    const THUMB_CACHE_MAX = 120;   // Max ImageData entries in JS heap (~3.6MB)
-    const ATLAS_BUDGET = 180;      // Max images in MapLibre GPU atlas (~5.5MB)
-    // GeoJSON fingerprint to skip redundant source.setData() calls
-    let lastGeoJSONFingerprint = '';
+    const THUMB_CACHE_MAX = 120;   // Max ImageData entries in JS heap (~2MB)
+    const ATLAS_BUDGET = 180;      // Max images in MapLibre GPU atlas
 
-    /** LRU get from thumbDataCache — moves entry to end (most recent). */
+    // What is currently in the source.
+    let currentFeatures: MapFeature[] = [];
+    let currentImageIds = new Set<string>();
+    let lastFingerprint = '';
+
     function thumbCacheGet(key: string): ImageData | undefined {
         const val = thumbDataCache.get(key);
         if (val !== undefined) {
-            // Move to end (most recently used)
             thumbDataCache.delete(key);
             thumbDataCache.set(key, val);
         }
         return val;
     }
 
-    /** LRU set into thumbDataCache — evicts oldest if over limit. */
     function thumbCacheSet(key: string, value: ImageData) {
-        if (thumbDataCache.has(key)) {
-            thumbDataCache.delete(key);
-        }
+        if (thumbDataCache.has(key)) thumbDataCache.delete(key);
         thumbDataCache.set(key, value);
-        // Evict oldest entries if over limit
         while (thumbDataCache.size > THUMB_CACHE_MAX) {
             const oldest = thumbDataCache.keys().next().value;
             if (oldest !== undefined) thumbDataCache.delete(oldest);
@@ -170,38 +147,15 @@
         }
     }
 
-    /**
-     * Evict non-visible images from MapLibre's GPU atlas to stay under budget.
-     * Called on 'idle' after loading visible thumbnails.
-     * Safe: evicted images are re-loaded on demand via styleimagemissing handler.
-     */
-    function evictNonVisibleImages() {
+    /** Drop atlas images that no current feature uses, down to the budget. */
+    function evictUnusedImages() {
         if (!map) return;
         if (loadedImages.size <= ATLAS_BUDGET) return;
-
-        // Collect visible image IDs from rendered features
-        const visibleIds = new Set<string>();
-        try {
-            const clusters = map.queryRenderedFeatures(undefined, { layers: [CLUSTER_THUMB_LAYER_ID] });
-            for (const f of clusters) {
-                const cid = f.properties?.cluster_id;
-                if (cid !== undefined) visibleIds.add(`cluster:${cid}`);
-            }
-        } catch (_) { /* layer may not exist */ }
-        try {
-            const singles = map.queryRenderedFeatures(undefined, { layers: [UNCLUSTERED_THUMB_LAYER_ID] });
-            for (const f of singles) {
-                const id = f.properties?.imageId;
-                if (id) visibleIds.add(id);
-            }
-        } catch (_) { /* layer may not exist */ }
-
-        // Remove non-visible images until under budget
         let removed = 0;
         const target = loadedImages.size - ATLAS_BUDGET;
         for (const imageId of loadedImages) {
             if (removed >= target) break;
-            if (visibleIds.has(imageId)) continue;
+            if (currentImageIds.has(imageId)) continue;
             try {
                 if (map.hasImage(imageId)) map.removeImage(imageId);
             } catch (_) { /* ignore */ }
@@ -210,137 +164,59 @@
         }
     }
 
-    /**
-     * Build GeoJSON FeatureCollection from photos, optionally filtered by time.
-     */
-    function buildGeoJSON(
-        photos: any[],
-        start: Date | null = null,
-        end: Date | null = null
-    ): GeoJSON.FeatureCollection {
-        const features: GeoJSON.Feature[] = [];
-
-        for (const photo of photos) {
-            const lat = photo.metadata?.lat;
-            const lon = photo.metadata?.lon;
-            if (!lat || !lon) continue;
-
-            // Time filter
-            if (start && end) {
-                const date = dateByPath.get(photo.path);
-                if (date && (date < start || date > end)) continue;
-            }
-
-            const thumbPath = photo.thumb_path || photo.path;
-            const imageId = `thumb:${thumbPath}`;
-            const date = dateByPath.get(photo.path);
-            const dateTs = date ? date.getTime() : 0;
-
-            features.push({
-                type: 'Feature',
-                geometry: {
-                    type: 'Point',
-                    coordinates: [lon, lat]
-                },
-                properties: {
-                    path: photo.path,
-                    thumb_path: thumbPath,
-                    imageId,
-                    date_ts: dateTs,
-                    date_taken: photo.metadata?.date_taken || '',
-                    hasRaw: photo.hasRaw || false,
-                    mediaType: photo.media_type || 'photo',
-                    durationMs: photo.metadata?.duration_ms || 0,
-                }
-            });
-        }
-
-        return { type: 'FeatureCollection', features };
+    function imageIdFor(f: MapFeature): string {
+        if (!f.thumb) return '';
+        return (f.count > 1 ? 'cthumb:' : 'thumb:') + f.thumb;
     }
 
-    /**
-     * Setup GeoJSON source and cluster layers on the map.
-     * Called once after map load.
-     */
     function setupClusterLayers() {
         if (!map) return;
-        // Guard against duplicate calls
         if (map.getSource(SOURCE_ID)) return;
 
-        // Add clustered GeoJSON source
+        // Plain (non-clustering) source: Rust already clustered the viewport.
         map.addSource(SOURCE_ID, {
             type: 'geojson',
             data: { type: 'FeatureCollection', features: [] },
-            cluster: true,
-            clusterMaxZoom: 14,  // Cluster up to zoom 14
-            clusterRadius: 50,   // Cluster radius in pixels
         });
 
         const isDark = theme === 'dark';
 
-        // Cluster circles layer — white border behind thumbnail.
-        // Radius = thumbnail apparent radius + 3px border.
-        // Thumbnail: 44px CSS diameter (radius 22) * icon-size → apparent radius.
-        // icon-size: 1.0→22, 1.15→25.3, 1.3→28.6, 1.45→31.9, 1.6→35.2
-        // border radii: +3 each → 25, 28, 32, 35, 38
+        // Cluster border circle. Radius = thumbnail apparent radius + 3px.
         map.addLayer({
             id: CLUSTER_LAYER_ID,
             type: 'circle',
             source: SOURCE_ID,
-            filter: ['has', 'point_count'],
+            filter: IS_CLUSTER,
             paint: {
-                'circle-radius': [
-                    'step', ['get', 'point_count'],
-                    25,       // < 10
-                    10, 28,   // 10+
-                    50, 32,   // 50+
-                    100, 35,  // 100+
-                    500, 38   // 500+
-                ],
+                'circle-radius': ['step', ['get', 'count'], 25, 10, 28, 50, 32, 100, 35, 500, 38],
                 'circle-color': isDark ? '#ffffff' : '#1e293b',
                 'circle-stroke-width': 0,
             }
         });
 
-        // Cluster thumbnail symbol layer — shows the most recent photo in the cluster.
-        // Images are loaded asynchronously via getClusterLeaves on idle.
-        // icon-image uses "cluster:{cluster_id}" as the key.
+        // Cluster thumbnail: the most recent photo in the cluster.
         map.addLayer({
             id: CLUSTER_THUMB_LAYER_ID,
             type: 'symbol',
             source: SOURCE_ID,
-            filter: ['has', 'point_count'],
+            filter: IS_CLUSTER,
             layout: {
-                'icon-image': ['concat', 'cluster:', ['to-string', ['get', 'cluster_id']]],
-                'icon-size': [
-                    'step', ['get', 'point_count'],
-                    1.0,       // default (count < 10)
-                    10, 1.15,  // 10+
-                    50, 1.3,   // 50+
-                    100, 1.45, // 100+
-                    500, 1.6   // 500+
-                ],
+                'icon-image': ['get', 'imageId'],
+                'icon-size': ['step', ['get', 'count'], 1.0, 10, 1.15, 50, 1.3, 100, 1.45, 500, 1.6],
                 'icon-allow-overlap': true,
                 'icon-ignore-placement': true,
             }
         });
 
-        // Cluster count text (symbol layer — with halo for readability over thumbnail)
         map.addLayer({
             id: CLUSTER_COUNT_LAYER_ID,
             type: 'symbol',
             source: SOURCE_ID,
-            filter: ['has', 'point_count'],
+            filter: IS_CLUSTER,
             layout: {
-                'text-field': ['get', 'point_count_abbreviated'],
+                'text-field': ['get', 'label'],
                 'text-font': ['Open Sans Semibold'],
-                'text-size': [
-                    'step', ['get', 'point_count'],
-                    13,      // default
-                    10, 14,
-                    100, 15,
-                    500, 16
-                ],
+                'text-size': ['step', ['get', 'count'], 13, 10, 14, 100, 15, 500, 16],
                 'text-allow-overlap': true,
             },
             paint: {
@@ -350,12 +226,11 @@
             }
         });
 
-        // Unclustered photo dots (circle layer — GPU accelerated)
         map.addLayer({
             id: UNCLUSTERED_BORDER_LAYER_ID,
             type: 'circle',
             source: SOURCE_ID,
-            filter: ['!', ['has', 'point_count']],
+            filter: IS_SINGLE,
             paint: {
                 'circle-radius': 22,
                 'circle-color': isDark ? '#ffffff' : '#1e293b',
@@ -367,24 +242,21 @@
             id: UNCLUSTERED_LAYER_ID,
             type: 'circle',
             source: SOURCE_ID,
-            filter: ['!', ['has', 'point_count']],
+            filter: IS_SINGLE,
             paint: {
                 'circle-radius': 20,
-                'circle-color': isDark
-                    ? 'rgba(99, 102, 241, 0.9)'
-                    : 'rgba(79, 70, 229, 0.9)',
+                'circle-color': isDark ? 'rgba(99, 102, 241, 0.9)' : 'rgba(79, 70, 229, 0.9)',
                 'circle-stroke-width': 2,
                 'circle-stroke-color': isDark ? '#ffffff' : '#1e293b',
             }
         });
 
-        // Thumbnail symbol layer — renders circular photo thumbnails on top of circle layers.
-        // Images are loaded asynchronously; circle layers serve as placeholder until loaded.
+        // Circular photo thumbnail; the circle layers are the placeholder until it loads.
         map.addLayer({
             id: UNCLUSTERED_THUMB_LAYER_ID,
             type: 'symbol',
             source: SOURCE_ID,
-            filter: ['!', ['has', 'point_count']],
+            filter: IS_SINGLE,
             layout: {
                 'icon-image': ['get', 'imageId'],
                 'icon-size': 1,
@@ -394,54 +266,144 @@
         });
     }
 
-    /**
-     * Update the GeoJSON source data (e.g., when photos change or time filter changes).
-     */
-    function updateSourceData(photos: any[], start: Date | null = null, end: Date | null = null) {
+    // ============================================================
+    // Viewport query
+    // ============================================================
+
+    let querySeq = 0;
+    let lastVersion = '';
+    // Counters for the agent self-test (shared/agent-test.ts).
+    const stats = { queries: 0, setData: 0, lastQueryMs: 0 };
+
+    /** Ask Rust for the clusters in (a padded) viewport and draw them. */
+    async function refresh() {
+        const m = map;
+        if (!m || !mapLoaded) return;
+        const seq = ++querySeq;
+        const b = m.getBounds();
+        const bbox = paddedBbox(b.getWest(), b.getSouth(), b.getEast(), b.getNorth());
+        try {
+            const t0 = performance.now();
+            const res = await queryMap(bbox, m.getZoom(), timeFilterStart, timeFilterEnd);
+            stats.queries++;
+            stats.lastQueryMs = Math.round((performance.now() - t0) * 10) / 10;
+            if (seq !== querySeq || map !== m) return;
+            const becameNonEmpty = total === 0 && res.total > 0;
+            total = res.total;
+            summaryLoaded = true;
+            applyFeatures(res.features);
+            if (res.version !== lastVersion) {
+                lastVersion = res.version;
+                // Library changed. Frame everything only the first time photos
+                // appear; later imports must not steal the camera.
+                if (becameNonEmpty) fitAll(true);
+                loadStamps(timelineBbox);
+            }
+        } catch (e) {
+            console.error("[Map] query_map failed", e);
+        }
+    }
+
+    function applyFeatures(features: MapFeature[]) {
         if (!map) return;
         const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
         if (!source) return;
 
-        const geojson = buildGeoJSON(photos, start, end);
-
-        // Content-based fingerprint: skip setData if the actual photo set hasn't changed.
-        // Uses count + sampled paths instead of time ranges, so that identical photo sets
-        // with slightly different time ranges don't trigger unnecessary cluster regeneration.
-        const n = geojson.features.length;
-        let fingerprint: string;
-        if (n === 0) {
-            fingerprint = '0';
-        } else {
-            const firstPath = (geojson.features[0].properties as any)?.path || '';
-            const lastPath = (geojson.features[n - 1].properties as any)?.path || '';
-            const midPath = (geojson.features[Math.floor(n / 2)].properties as any)?.path || '';
-            fingerprint = `${n}:${firstPath}:${midPath}:${lastPath}`;
+        currentFeatures = features;
+        const ids = new Set<string>();
+        let fingerprint = '';
+        const out: GeoJSON.Feature[] = new Array(features.length);
+        for (let i = 0; i < features.length; i++) {
+            const f = features[i];
+            const imageId = imageIdFor(f);
+            if (imageId) ids.add(imageId);
+            fingerprint += f.key + ':' + f.count + ':' + f.id + '|';
+            out[i] = {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [f.lon, f.lat] },
+                properties: {
+                    key: f.key,
+                    count: f.count,
+                    label: abbreviateCount(f.count),
+                    id: f.id,
+                    path: f.path,
+                    imageId,
+                    w: f.bounds[0],
+                    s: f.bounds[1],
+                    e: f.bounds[2],
+                    n: f.bounds[3],
+                },
+            };
         }
-        if (fingerprint === lastGeoJSONFingerprint) return;
-        lastGeoJSONFingerprint = fingerprint;
+        currentImageIds = ids;
+        if (fingerprint === lastFingerprint) return;
+        lastFingerprint = fingerprint;
+        stats.setData++;
+        source.setData({ type: 'FeatureCollection', features: out });
+    }
 
-        // Data is changing — clear cluster tracking sets (but DON'T removeImage from atlas).
-        // Old cluster images stay in the atlas and render instantly if the same cluster ID reappears.
-        for (const imageId of loadedImages) {
-            if (imageId.startsWith('cluster:')) loadedImages.delete(imageId);
-        }
-        for (const imageId of loadingImages) {
-            if (imageId.startsWith('cluster:')) loadingImages.delete(imageId);
-        }
+    // Re-query while the camera moves so markers fill in at the edges.
+    const MOVE_QUERY_INTERVAL = 120;
+    let moveTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastMoveQuery = 0;
 
-        source.setData(geojson);
+    function handleMove() {
+        const now = performance.now();
+        if (now - lastMoveQuery >= MOVE_QUERY_INTERVAL) {
+            lastMoveQuery = now;
+            refresh();
+        } else if (!moveTimer) {
+            moveTimer = setTimeout(() => {
+                moveTimer = null;
+                lastMoveQuery = performance.now();
+                refresh();
+            }, MOVE_QUERY_INTERVAL);
+        }
+    }
+
+    function handleMoveEnd() {
+        refresh();
+        scheduleTimelineSync();
     }
 
     // ============================================================
-    // Thumbnail Loading for Unclustered Points
+    // Timeline data
     // ============================================================
 
-    /**
-     * Draw a circular thumbnail image onto a canvas.
-     * @param img - Source image element
-     * @param borderWidth - Border width in canvas pixels (0 = no border, used for clusters)
-     * Returns ImageData ready for map.addImage().
-     */
+    let timelineBbox: Bbox | null = null;
+    let stampSeq = 0;
+    let timelineSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+    async function loadStamps(bbox: Bbox | null) {
+        const seq = ++stampSeq;
+        try {
+            const stamps = await queryTimeline(bbox);
+            if (seq !== stampSeq) return;
+            // An empty viewport keeps the previous timeline instead of blanking it.
+            if (stamps.length === 0 && bbox !== null && timelineStamps.length > 0) return;
+            timelineBbox = bbox;
+            timelineStamps = stamps;
+            mapConstrained = bbox !== null && stamps.length < total;
+        } catch (e) {
+            console.error("[Map] query_timeline failed", e);
+        }
+    }
+
+    /** After the map settles, show the timeline of what is in view (unless the user set a range). */
+    function scheduleTimelineSync() {
+        if (timelineSyncTimer) clearTimeout(timelineSyncTimer);
+        timelineSyncTimer = setTimeout(() => {
+            timelineSyncTimer = null;
+            if (!map || timeFilterStart !== null) return;
+            const b = map.getBounds();
+            loadStamps(paddedBbox(b.getWest(), b.getSouth(), b.getEast(), b.getNorth(), 0));
+        }, 300);
+    }
+
+    // ============================================================
+    // Thumbnails
+    // ============================================================
+
     function drawCircularThumbnail(img: HTMLImageElement, borderWidth: number = THUMB_BORDER_WIDTH): ImageData {
         const size = THUMB_CANVAS_SIZE;
         const radius = size / 2;
@@ -452,7 +414,6 @@
         canvas.height = size;
         const ctx = canvas.getContext('2d')!;
 
-        // Circular clip for the photo
         ctx.save();
         ctx.beginPath();
         ctx.arc(radius, radius, radius - inset, 0, Math.PI * 2);
@@ -471,7 +432,6 @@
         ctx.drawImage(img, sx, sy, sw, sh, inset, inset, size - 2 * inset, size - 2 * inset);
         ctx.restore();
 
-        // Draw border (only if borderWidth > 0)
         if (borderWidth > 0) {
             ctx.beginPath();
             ctx.arc(radius, radius, radius - borderWidth / 2, 0, Math.PI * 2);
@@ -483,45 +443,35 @@
         return ctx.getImageData(0, 0, size, size);
     }
 
-    /**
-     * Load a single thumbnail image and add it to the map.
-     */
-    /**
-     * Add an image to the map from cache or by fetching.
-     * Uses thumbDataCache to avoid re-fetch + re-canvas-render.
-     */
-    function addImageToMap(imageId: string, thumbPath: string, borderWidth: number = THUMB_BORDER_WIDTH) {
-        if (!map) return;
+    /** Put the image for `imageId` into the atlas, from cache or by decoding the file. */
+    function loadImage(imageId: string) {
+        if (!map || !imageId) return;
+        if (loadingImages.has(imageId) || loadedImages.has(imageId)) return;
+        if (map.hasImage(imageId)) { loadedImages.add(imageId); return; }
 
-        // Fast-path: image already in map atlas
-        if (map.hasImage(imageId)) {
-            loadedImages.add(imageId);
-            loadingImages.delete(imageId);
-            return;
-        }
+        const isCluster = imageId.startsWith('cthumb:');
+        const thumbPath = imageId.slice(isCluster ? 7 : 6);
+        const borderWidth = isCluster ? 0 : THUMB_BORDER_WIDTH;
 
-        // Check ImageData cache (same thumbPath, possibly different imageId for cluster vs unclustered)
-        const cacheKey = `${borderWidth}:${thumbPath}`;
-        const cached = thumbCacheGet(cacheKey);
+        const cached = thumbCacheGet(imageId);
         if (cached) {
             try {
                 map.addImage(imageId, cached, { pixelRatio: THUMB_PIXEL_RATIO });
                 loadedImages.add(imageId);
             } catch (_) { /* ignore */ }
-            loadingImages.delete(imageId);
             return;
         }
 
-        // Fetch and render
+        loadingImages.add(imageId);
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
-            if (!map) return;
             loadingImages.delete(imageId);
+            if (!map) return;
             if (map.hasImage(imageId)) { loadedImages.add(imageId); return; }
             try {
                 const imageData = drawCircularThumbnail(img, borderWidth);
-                thumbCacheSet(cacheKey, imageData);
+                thumbCacheSet(imageId, imageData);
                 map.addImage(imageId, imageData, { pixelRatio: THUMB_PIXEL_RATIO });
                 loadedImages.add(imageId);
             } catch (_) { /* ignore */ }
@@ -530,279 +480,73 @@
         img.src = getThumbnailUrl(thumbPath);
     }
 
-    function loadThumbnailForMap(imageId: string, thumbPath: string, _originalPath: string) {
-        if (loadingImages.has(imageId) || loadedImages.has(imageId)) return;
-        // Fast-path: already in atlas from a previous load
-        if (map?.hasImage(imageId)) { loadedImages.add(imageId); return; }
-        loadingImages.add(imageId);
-        addImageToMap(imageId, thumbPath, THUMB_BORDER_WIDTH);
-    }
-
-    /**
-     * Handle missing image event from MapLibre.
-     * Fires immediately when the renderer encounters an icon-image id not in the atlas.
-     * This provides near-instant thumbnail loading after setData() regenerates cluster IDs.
-     */
+    /** MapLibre met an icon that is not in the atlas yet: load it right away. */
     function handleMissingImage(e: { id: string }) {
-        const imageId = e.id;
-        if (!map) return;
-
-        // Skip if already loading
-        if (loadingImages.has(imageId)) return;
-
-        if (imageId.startsWith('cluster:')) {
-            // Extract cluster ID and load its thumbnail
-            const clusterId = parseInt(imageId.replace('cluster:', ''), 10);
-            if (isNaN(clusterId)) return;
-
-            const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource;
-            if (!source) return;
-
-            loadingImages.add(imageId);
-
-            source.getClusterLeaves(clusterId, 20, 0).then((leaves) => {
-                if (!map || leaves.length === 0) {
-                    loadingImages.delete(imageId);
-                    return;
-                }
-
-                // Find leaf with latest date_ts
-                let bestLeaf = leaves[0];
-                let bestTs = (leaves[0].properties?.date_ts as number) || 0;
-                for (let i = 1; i < leaves.length; i++) {
-                    const ts = (leaves[i].properties?.date_ts as number) || 0;
-                    if (ts > bestTs) {
-                        bestTs = ts;
-                        bestLeaf = leaves[i];
-                    }
-                }
-
-                const thumbPath = bestLeaf.properties?.thumb_path as string;
-                if (!thumbPath) {
-                    loadingImages.delete(imageId);
-                    return;
-                }
-
-                addImageToMap(imageId, thumbPath, 0);
-            }).catch(() => {
-                loadingImages.delete(imageId);
-            });
-        } else if (imageId.startsWith('thumb:')) {
-            // Individual photo thumbnail
-            const thumbPath = imageId.replace('thumb:', '');
-            loadingImages.add(imageId);
-            addImageToMap(imageId, thumbPath, THUMB_BORDER_WIDTH);
+        if (e.id.startsWith('thumb:') || e.id.startsWith('cthumb:')) {
+            // An evicted image may still be marked as loaded.
+            loadedImages.delete(e.id);
+            loadImage(e.id);
         }
     }
 
-    /**
-     * Scan visible features (clusters + unclustered) and load thumbnails.
-     * Called on map 'idle' event (after all tiles/rendering finishes).
-     */
-    function loadVisibleThumbnails() {
+    /** Safety net on idle: load anything still missing, then trim the atlas. */
+    function handleIdle() {
         if (!map) return;
-
-        // 1. Load thumbnails for visible clusters
-        loadClusterThumbnails();
-
-        // 2. Load thumbnails for visible unclustered photo features
-        let features: maplibregl.MapGeoJSONFeature[];
-        try {
-            features = map.queryRenderedFeatures(undefined, {
-                layers: [UNCLUSTERED_LAYER_ID]
-            });
-        } catch (_) {
-            return; // Layer might not exist yet
-        }
-
-        if (features.length === 0) {
-            // No visible features, but still run eviction
-            evictNonVisibleImages();
-            return;
-        }
-
-        // Limit batch size to avoid blocking
-        let loaded = 0;
-        const BATCH_SIZE = 15;
-
-        for (const feature of features) {
-            if (loaded >= BATCH_SIZE) break;
-
-            const imageId = feature.properties?.imageId;
-            if (!imageId) continue;
-            // Skip already loaded or loading
+        let started = 0;
+        for (const imageId of currentImageIds) {
+            if (started >= 20) break;
             if (loadedImages.has(imageId) || loadingImages.has(imageId)) continue;
-
-            const thumbPath = feature.properties?.thumb_path;
-            const originalPath = feature.properties?.path;
-            if (!thumbPath) continue;
-
-            loadThumbnailForMap(imageId, thumbPath, originalPath);
-            loaded++;
+            loadImage(imageId);
+            started++;
         }
-
-        // 3. Evict non-visible images to keep GPU memory under budget
-        evictNonVisibleImages();
-    }
-
-    /**
-     * Scan visible clusters and load a thumbnail for each (most recent photo).
-     * Called on map 'idle' event.
-     */
-    function loadClusterThumbnails() {
-        if (!map) return;
-
-        let clusterFeatures: maplibregl.MapGeoJSONFeature[];
-        try {
-            clusterFeatures = map.queryRenderedFeatures(undefined, {
-                layers: [CLUSTER_LAYER_ID]
-            });
-        } catch (_) {
-            return;
-        }
-
-        if (clusterFeatures.length === 0) return;
-
-        const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource;
-        if (!source) return;
-
-        for (const cluster of clusterFeatures) {
-            const clusterId = cluster.properties?.cluster_id;
-            if (clusterId === undefined) continue;
-
-            const imageId = `cluster:${clusterId}`;
-            if (loadedImages.has(imageId) || loadingImages.has(imageId)) continue;
-
-            // Fast-path: image already in atlas from a previous load (e.g., same cluster ID after pan)
-            if (map.hasImage(imageId)) {
-                loadedImages.add(imageId);
-                continue;
-            }
-
-            loadingImages.add(imageId);
-
-            // Get a sample of leaves to find the most recent photo
-            source.getClusterLeaves(clusterId, 20, 0).then((leaves) => {
-                if (!map || leaves.length === 0) {
-                    loadingImages.delete(imageId);
-                    return;
-                }
-
-                // Find leaf with latest date_ts
-                let bestLeaf = leaves[0];
-                let bestTs = (leaves[0].properties?.date_ts as number) || 0;
-                for (let i = 1; i < leaves.length; i++) {
-                    const ts = (leaves[i].properties?.date_ts as number) || 0;
-                    if (ts > bestTs) {
-                        bestTs = ts;
-                        bestLeaf = leaves[i];
-                    }
-                }
-
-                const thumbPath = bestLeaf.properties?.thumb_path as string;
-                if (!thumbPath) {
-                    loadingImages.delete(imageId);
-                    return;
-                }
-
-                // Use shared addImageToMap (with cache + fast-path)
-                addImageToMap(imageId, thumbPath, 0);
-            }).catch(() => {
-                loadingImages.delete(imageId);
-            });
-        }
-    }
-
-    /**
-     * Initialize photos on the map.
-     * Called when photos prop changes.
-     */
-    function initializePhotos(photos: any[]) {
-        if (!map || !mapLoaded) return;
-
-        // Debounce: skip if same photo count as last call (rapid re-renders)
-        if (photos.length === prevPhotoCount && photos.length > 0) return;
-
-        const isInitialLoad = prevPhotoCount === 0;
-        const isAddingPhotos = photos.length > prevPhotoCount;
-
-        // Build lookup caches
-        allPhotosData = photos;
-        photoByPath.clear();
-        dateByPath.clear();
-        for (const photo of photos) {
-            photoByPath.set(photo.path, photo);
-            const date = parsePhotoDate(photo.metadata?.date_taken);
-            if (date) dateByPath.set(photo.path, date);
-        }
-
-        // Update GeoJSON source
-        updateSourceData(photos, timeFilterStart, timeFilterEnd);
-
-        // Fit bounds only on initial load or when adding new photos
-        if (photos.length > 0 && (isInitialLoad || isAddingPhotos)) {
-            fitBoundsToPhotos(photos, isInitialLoad);
-        }
-
-        prevPhotoCount = photos.length;
-        photosWithMarkers = photos;
-        if (!timelineReady && photos.length > 0) {
-            requestAnimationFrame(() => {
-                timelineReady = true;
-            });
-        }
-    }
-
-    /**
-     * Fit map bounds to show all geotagged photos.
-     */
-    function fitBoundsToPhotos(photos: any[], delay: boolean = false) {
-        if (!map) return;
-
-        const bounds = new maplibregl.LngLatBounds();
-        let hasPoints = false;
-        for (const photo of photos) {
-            const lat = photo.metadata?.lat;
-            const lon = photo.metadata?.lon;
-            if (lat && lon) {
-                bounds.extend([lon, lat]);
-                hasPoints = true;
-            }
-        }
-
-        if (!hasPoints) return;
-
-        const doFit = () => {
-            map?.fitBounds(bounds, { padding: 100, maxZoom: 15 });
-        };
-
-        if (delay) {
-            setTimeout(doFit, 150);
-        } else {
-            doFit();
-        }
+        evictUnusedImages();
     }
 
     // ============================================================
-    // Interaction Handlers
+    // Camera
     // ============================================================
+
+    /** Frame every geotagged item. */
+    async function fitAll(delay: boolean = false) {
+        try {
+            const summary = await geoSummary();
+            if (!map || !summary.extent) return;
+            const [w, s, e, n] = summary.extent;
+            const doFit = () => {
+                map?.fitBounds([[w, s], [e, n]], { padding: 100, maxZoom: 15 });
+            };
+            if (delay) setTimeout(doFit, 150);
+            else doFit();
+        } catch (e) {
+            console.error("[Map] geo_summary failed", e);
+        }
+    }
+
+    function handleShowAllPhotos() {
+        fitAll(false);
+    }
+
+    // ============================================================
+    // Interaction
+    // ============================================================
+
+    // Above this zoom a cluster is photos taken at the same spot: open it instead of zooming.
+    const CLUSTER_OPEN_ZOOM = 17;
 
     /**
      * Global click handler using queryRenderedFeatures.
-     * Layer-specific click handlers don't reliably fire on Android WebView touch events,
-     * so we use a single global handler and manually query features at the click point.
+     * Layer-specific click handlers don't reliably fire on Android WebView touch
+     * events, so query features around the tap point manually.
      */
     function handleMapClick(e: maplibregl.MapMouseEvent) {
         if (!map) return;
 
-        // Use a generous tolerance for touch events (fat finger)
-        const tolerance = 15;
+        const tolerance = 15; // fat finger
         const bbox: [maplibregl.PointLike, maplibregl.PointLike] = [
             [e.point.x - tolerance, e.point.y - tolerance],
             [e.point.x + tolerance, e.point.y + tolerance]
         ];
 
-        // Find the feature closest to the tap point among candidates
         function closestFeature(features: maplibregl.GeoJSONFeature[], point: maplibregl.Point): maplibregl.GeoJSONFeature {
             if (features.length === 1) return features[0];
             let best = features[0];
@@ -821,123 +565,29 @@
             return best;
         }
 
-        // Check clusters first (higher priority — check all cluster layers)
-        const clusterFeatures = map.queryRenderedFeatures(bbox, {
-            layers: [CLUSTER_THUMB_LAYER_ID, CLUSTER_LAYER_ID, CLUSTER_COUNT_LAYER_ID]
+        const features = map.queryRenderedFeatures(bbox, {
+            layers: [
+                CLUSTER_THUMB_LAYER_ID, CLUSTER_LAYER_ID, CLUSTER_COUNT_LAYER_ID,
+                UNCLUSTERED_THUMB_LAYER_ID, UNCLUSTERED_LAYER_ID, UNCLUSTERED_BORDER_LAYER_ID,
+            ]
         });
-        if (clusterFeatures.length > 0) {
-            const feature = closestFeature(clusterFeatures, e.point);
-            const clusterId = feature.properties?.cluster_id;
-            if (clusterId !== undefined) {
-                const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource;
-                // Use getClusterChildren to compute bounding box for accurate zoom
-                source.getClusterChildren(clusterId).then((children) => {
-                    if (!map || children.length === 0) return;
-                    // Compute bounds that contain all children
-                    const bounds = new maplibregl.LngLatBounds();
-                    for (const child of children) {
-                        const coords = (child.geometry as GeoJSON.Point).coordinates as [number, number];
-                        bounds.extend(coords);
-                    }
-                    map.fitBounds(bounds, {
-                        padding: 80,
-                        maxZoom: 15,
-                        duration: 300
-                    });
-                });
-            }
+        if (features.length === 0) return;
+
+        const p = closestFeature(features, e.point).properties as any;
+        if (!p) return;
+
+        const degenerate = p.w === p.e && p.s === p.n;
+        if (p.count > 1 && !degenerate && map.getZoom() < CLUSTER_OPEN_ZOOM) {
+            // Zoom to the extent of the cluster's members (computed in Rust).
+            map.fitBounds([[p.w, p.s], [p.e, p.n]], {
+                padding: 80,
+                maxZoom: 18,
+                duration: 300
+            });
             return;
         }
 
-        // Check unclustered photo points (including thumbnail symbol layer)
-        const photoFeatures = map.queryRenderedFeatures(bbox, {
-            layers: [UNCLUSTERED_THUMB_LAYER_ID, UNCLUSTERED_LAYER_ID, UNCLUSTERED_BORDER_LAYER_ID]
-        });
-        if (photoFeatures.length > 0) {
-            const feature = closestFeature(photoFeatures, e.point);
-            const path = feature.properties?.path;
-            if (!path) return;
-
-            const photo = photoByPath.get(path);
-            if (!photo) return;
-
-            if (onOpenPreview) {
-                onOpenPreview(photo, albumPhotosSorted);
-            }
-            return;
-        }
-    }
-
-
-
-    // ============================================================
-    // Map sync (for timeline)
-    // ============================================================
-
-    /**
-     * Get time range of photos visible in current map bounds.
-     */
-    function getVisiblePhotosTimeRange(): { start: Date; end: Date; photos: any[] } | null {
-        if (!map || allPhotosData.length === 0) return null;
-
-        const bounds = map.getBounds();
-        const visibleDates: Date[] = [];
-        const visiblePhotos: any[] = [];
-
-        for (const photo of allPhotosData) {
-            const lat = photo.metadata?.lat;
-            const lon = photo.metadata?.lon;
-            if (!lat || !lon) continue;
-
-            if (bounds.contains(new maplibregl.LngLat(lon, lat))) {
-                visiblePhotos.push(photo);
-                const date = dateByPath.get(photo.path);
-                if (date) visibleDates.push(date);
-            }
-        }
-
-        if (visibleDates.length === 0) return null;
-
-        visibleDates.sort((a, b) => a.getTime() - b.getTime());
-        return {
-            start: visibleDates[0],
-            end: visibleDates[visibleDates.length - 1],
-            photos: visiblePhotos
-        };
-    }
-
-    // Debounce timer for map move → timeline sync
-    let mapMoveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    function handleMapMove() {
-        if (syncSource === 'timeline') return;
-
-        // Debounce: during continuous drag/inertia, only fire after 300ms idle.
-        // This avoids ~5 × O(n) recalculations per moveend event in TimelineSlider.
-        if (mapMoveDebounceTimer) clearTimeout(mapMoveDebounceTimer);
-        mapMoveDebounceTimer = setTimeout(() => {
-            mapMoveDebounceTimer = null;
-            if (syncSource === 'timeline') return;
-
-            const result = getVisiblePhotosTimeRange();
-            if (result) {
-                syncSource = 'map';
-                mapVisibleTimeRange = { start: result.start, end: result.end };
-                mapVisiblePhotos = result.photos;
-                setTimeout(() => {
-                    syncSource = null;
-                }, 100);
-            }
-        }, 300);
-    }
-
-    let mapVisibleTimeRange = $state<{ start: Date; end: Date } | null>(null);
-    let mapVisiblePhotos = $state.raw<any[] | null>(null);
-    let timelinePhotos = $derived(mapVisiblePhotos ?? photosWithMarkers);
-
-    function handleShowAllPhotos() {
-        if (!map || allPhotosData.length === 0) return;
-        fitBoundsToPhotos(allPhotosData, false);
+        onOpenPreview?.({ id: p.id, path: p.path });
     }
 
     // ============================================================
@@ -1013,12 +663,36 @@
         });
 
         setupMapControls();
+
+        (window as any).__footosMap = map;
+        (window as any).__footosMapStats = () => ({
+            ...stats,
+            total,
+            features: currentFeatures.length,
+            stamps: timelineStamps.length,
+            atlasImages: loadedImages.size,
+        });
     });
+
+    function registerHandlers(m: maplibregl.Map) {
+        m.on('click', handleMapClick);
+        m.on('idle', handleIdle);
+        m.on('styleimagemissing', handleMissingImage);
+        m.on('move', handleMove);
+        m.on('moveend', handleMoveEnd);
+    }
+
+    function unregisterHandlers(m: maplibregl.Map) {
+        m.off('click', handleMapClick);
+        m.off('idle', handleIdle);
+        m.off('styleimagemissing', handleMissingImage);
+        m.off('move', handleMove);
+        m.off('moveend', handleMoveEnd);
+    }
 
     function setupMapControls() {
         if (!map) return;
 
-        // Show All Photos control
         class ShowAllControl {
             _container: HTMLDivElement | undefined;
             _button: HTMLButtonElement | undefined;
@@ -1051,7 +725,6 @@
         map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
 
-        // Handle resize
         resizeObserver = new ResizeObserver(() => {
             map?.resize();
         });
@@ -1065,29 +738,15 @@
             if (!map || mapLoaded) return;
             mapLoaded = true;
 
-            // Setup cluster layers
             setupClusterLayers();
+            registerHandlers(map);
+            refresh();
 
-            // Register interaction handlers
-            // Use global click handler with queryRenderedFeatures for reliable
-            // touch event handling on Android WebView
-            map.on('click', handleMapClick);
-
-            // Load thumbnail images for visible unclustered points
-            map.on('idle', loadVisibleThumbnails);
-
-            // Eagerly load missing images when MapLibre tries to render them.
-            // This fires before idle, so cluster/photo thumbnails appear faster
-            // after setData() regenerates cluster IDs.
-            map.on('styleimagemissing', handleMissingImage);
-
-            // Ready for timeline
             requestAnimationFrame(() => {
                 isReady = true;
             });
         }
 
-        // Handle both cases: map already loaded or not yet
         if (map.loaded()) {
             onMapReady();
         } else {
@@ -1097,21 +756,19 @@
                 if (!mapLoaded) onMapReady();
             });
         }
-
-        map.on('moveend', handleMapMove);
     }
 
     onDestroy(() => {
         loadedImages.clear();
         loadingImages.clear();
         thumbDataCache.clear();
-        photoByPath.clear();
-        dateByPath.clear();
+        querySeq++;
+        stampSeq++;
+        delete (window as any).__footosMap;
+        delete (window as any).__footosMapStats;
 
-        if (mapMoveDebounceTimer) {
-            clearTimeout(mapMoveDebounceTimer);
-            mapMoveDebounceTimer = null;
-        }
+        if (moveTimer) clearTimeout(moveTimer);
+        if (timelineSyncTimer) clearTimeout(timelineSyncTimer);
         if (resizeObserver) {
             resizeObserver.disconnect();
             resizeObserver = null;
@@ -1146,23 +803,19 @@
         };
 
         try {
-            // Theme changed — thumbnail border color depends on theme, so clear all caches
+            // Thumbnail border colour depends on the theme: drop every cached image.
             loadedImages.clear();
             loadingImages.clear();
             thumbDataCache.clear();
-            lastGeoJSONFingerprint = '';
+            lastFingerprint = '';
 
-            // Remove handlers that survive setStyle() to prevent duplicates
-            map.off('click', handleMapClick);
-            map.off('idle', loadVisibleThumbnails);
-            map.off('styleimagemissing', handleMissingImage);
-            map.off('moveend', handleMapMove);
+            // Handlers survive setStyle(); remove them to prevent duplicates.
+            unregisterHandlers(map);
 
             map.setStyle(newStyle);
 
-            // After setStyle(), re-add cluster layers and data once the new style is ready.
-            // NOTE: map.once('style.load') is unreliable in Android WebView — the event
-            // may never fire for inline style specifications. Use isStyleLoaded() polling instead.
+            // NOTE: map.once('style.load') is unreliable in Android WebView for inline
+            // styles. Poll isStyleLoaded() instead.
             const mapRef = map;
             function onStyleReady() {
                 if (!mapRef || !mapRef.isStyleLoaded()) {
@@ -1170,15 +823,10 @@
                     return;
                 }
                 setupClusterLayers();
-                prevPhotoCount = 0;
-                initializePhotos(untrack(() => geotaggedPhotos));
+                applyFeatures(currentFeatures);
                 mapRef.jumpTo(camera);
-
-                // Re-register all interaction handlers
-                mapRef.on('click', handleMapClick);
-                mapRef.on('idle', loadVisibleThumbnails);
-                mapRef.on('styleimagemissing', handleMissingImage);
-                mapRef.on('moveend', handleMapMove);
+                registerHandlers(mapRef);
+                refresh();
             }
             requestAnimationFrame(onStyleReady);
         } catch (_) {
@@ -1186,39 +834,11 @@
         }
     });
 
-    // Update map data when photos change
+    // Library changed (import progress, delete, clear): query again.
     $effect(() => {
-        const currentMap = map;
-        const geo = geotaggedPhotos;
-        const loaded = mapLoaded;
-
-        if (!currentMap || !loaded) return;
-
-        initializePhotos(geo);
-    });
-
-    // Update GeoJSON source when time filter changes (instead of toggling DOM visibility).
-    // Uses rAF throttle: if rapid filter changes arrive (e.g. during timeline pinch),
-    // only the latest one executes per animation frame, avoiding redundant buildGeoJSON + setData.
-    let pendingSourceUpdateRaf: number | null = null;
-    $effect(() => {
-        const start = timeFilterStart;
-        const end = timeFilterEnd;
-        const loaded = mapLoaded;
-
-        if (!loaded || allPhotosData.length === 0) return;
-
-        if (pendingSourceUpdateRaf !== null) cancelAnimationFrame(pendingSourceUpdateRaf);
-        pendingSourceUpdateRaf = requestAnimationFrame(() => {
-            pendingSourceUpdateRaf = null;
-            updateSourceData(allPhotosData, start, end);
-        });
-        return () => {
-            if (pendingSourceUpdateRaf !== null) {
-                cancelAnimationFrame(pendingSourceUpdateRaf);
-                pendingSourceUpdateRaf = null;
-            }
-        };
+        refreshKey;
+        if (!mapLoaded) return;
+        untrack(() => refresh());
     });
 </script>
 
@@ -1233,7 +853,7 @@
         <!-- Time range indicator -->
         {#if timeRangeDisplay && hasGeotaggedPhotos}
             <div class="absolute left-1/2 -translate-x-1/2 z-[1000] pointer-events-none max-w-[95%]" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
-                <div class="px-3 py-1.5 text-[11px] theme-bg-card backdrop-blur-sm rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-1.5">
+                <div class="px-3 py-1.5 text-[11px] theme-bg-card rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-1.5">
                     <i class="fa-regular fa-calendar text-[var(--accent)] text-[10px] flex-shrink-0"></i>
                     <span class="tabular-nums whitespace-nowrap">{timeRangeDisplay}</span>
                 </div>
@@ -1241,8 +861,8 @@
         {/if}
 
         <!-- No geotagged photos message -->
-        {#if !isSyncing && photos.length > 0 && !hasGeotaggedPhotos}
-            <div class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-[1000] pointer-events-none">
+        {#if !isSyncing && summaryLoaded && libraryCount > 0 && !hasGeotaggedPhotos}
+            <div class="absolute inset-0 flex items-center justify-center bg-black/30 z-[1000] pointer-events-none">
                 <div class="text-center p-6 theme-bg-secondary rounded-2xl border theme-border shadow-xl">
                     <i class="fa-solid fa-location-slash text-4xl theme-text-muted mb-4"></i>
                     <h3 class="text-xl font-bold theme-text-primary mb-2">{t.map.noGeotaggedPhotos}</h3>
@@ -1254,13 +874,12 @@
     </div>
 
     <!-- Timeline slider -->
-    {#if hasGeotaggedPhotos && map && isReady && photosWithMarkers.length > 0 && timelineReady}
+    {#if hasGeotaggedPhotos && map && isReady && timelineStamps.length > 0}
         <div class="flex-shrink-0">
             <TimelineSlider
-                photos={timelinePhotos}
-                mapViewTimeRange={mapVisibleTimeRange}
+                stamps={timelineStamps}
+                {mapConstrained}
                 onTimeRangeChange={handleTimeRangeChange}
-                onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
                 onShowAll={handleShowAllPhotos}
                 {t}
                 {locale}
