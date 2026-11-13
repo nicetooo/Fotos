@@ -24,3 +24,6 @@ Thumbs.db
 # Project specific
 packages/desktop/src-tauri/target/
 ANDROID_RELEASE.md
+
+# Process docs (local only, never committed)
+/docs/

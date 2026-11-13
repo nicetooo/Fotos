@@ -1,13 +1,13 @@
 # 足迹相册 (footos)
 
-一个现代化的照片管理桌面应用，专注于地理位置可视化和 RAW 文件支持。
+一个跨平台（Desktop / iOS / Android）的本地照片管理应用，专注于地理位置可视化，支持 RAW、视频和实况照片。
 
 ## 功能特性
 
 ### 照片导入与管理
 
 - **文件夹/文件导入** - 支持递归扫描文件夹或选择单个文件导入
-- **多格式支持** - JPEG、PNG、WebP 以及多种 RAW 格式
+- **多格式支持** - JPEG、PNG、WebP、HEIC/HEIF、多种 RAW 格式，以及常见视频格式（MP4、MOV、M4V 等）
 - **实时进度** - 导入过程中显示实时进度和状态
 - **智能去重** - 基于感知哈希的照片去重，避免重复导入
 - **SQLite 索引** - 快速的数据库查询和照片检索
@@ -21,10 +21,21 @@
 
 > **注意**: RAW 文件的全尺寸预览提取目前仅支持部分相机格式。较新的相机（如 Nikon Zf）使用的 NEF 格式暂不支持全尺寸预览提取，仅显示小缩略图。
 
+### 视频与实况照片
+
+- **视频导入** - 与照片一同导入，可按照片 / 视频筛选
+- **视频缩略图与元数据** - 桌面端通过系统中的 `ffmpeg` / `ffprobe` 生成缩略图、读取时长和 GPS（未安装时视频没有缩略图）
+- **实况照片** - 桌面端自动配对同名的图片与视频文件；iOS 端长按播放
+
+### 移动端
+
+- **iOS** - 通过 PhotoKit 直接同步系统相册，原片按需导出，不整库复制
+- **Android** - 通过 MediaStore / 系统照片选择器导入
+
 ### 地图与地理位置
 
-- **全屏地图界面** - 基于 Leaflet.js 的交互式地图作为主界面
-- **照片标记** - 在地图上以圆形缩略图显示有 GPS 信息的照片
+- **全屏地图界面** - 基于 MapLibre GL 的交互式地图作为主界面
+- **照片标记** - 在地图上以缩略图显示有 GPS 信息的照片，密集处自动聚类
 - **悬停预览** - 鼠标悬停时显示大图预览和元数据
 - **智能聚焦** - 自动缩放地图以适应所有标记点
 
@@ -46,9 +57,9 @@
 
 ### 图库抽屉
 
-- **虚拟滚动** - 基于 TanStack Virtual 的高性能网格
-- **排序选项** - 按日期、名称、尺寸排序
-- **懒加载** - 使用 IntersectionObserver 实现图片懒加载
+- **虚拟滚动** - 自研的高性能虚拟网格（`VirtualPhotoGrid`，零依赖）
+- **排序选项** - 按日期、名称、文件大小、尺寸排序
+- **懒加载** - 使用浏览器原生 `loading="lazy"` 实现图片懒加载
 - **RAW 标记** - 显示 RAW 文件和 RAW+JPEG 配对状态
 
 ### 主题系统
@@ -75,11 +86,10 @@
 - **Tailwind CSS** - 原子化 CSS 框架
 - **TypeScript** - 类型安全
 - **Vite** - 快速构建工具
-- **Leaflet.js** - 地图库
-- **TanStack Virtual** - 虚拟滚动
+- **MapLibre GL** - 地图库
 
 ### 后端
-- **Tauri 2** - 跨平台桌面框架
+- **Tauri 2** - 跨平台应用框架（桌面 + 移动）
 - **Rust** - 高性能核心引擎
 - **SQLite** - 本地数据库
 - **UniFFI** - 跨平台库生成
@@ -90,43 +100,48 @@
 - `image_hasher` - 感知哈希
 - `walkdir` - 目录遍历
 - `rusqlite` - SQLite 绑定
+- `mp4` - 视频容器元数据解析
 
 ## 项目结构
 
 ```
 packages/
-├── core/           # Rust 核心库
+├── core/               # Rust 核心库（平台无关）
 │   └── src/
-│       ├── fs/     # 文件扫描
-│       ├── image/  # 图像处理、缩略图、哈希
-│       ├── index/  # 数据库索引
+│       ├── fs/         # 文件扫描、实况照片配对
+│       ├── image/      # 缩略图、哈希、格式解析
+│       ├── metadata/   # EXIF、视频元数据
+│       ├── index/      # SQLite 索引
 │       └── types.rs
-├── desktop/        # Tauri 桌面应用
-│   ├── src/        # Svelte 前端
-│   │   ├── components/
-│   │   │   ├── Map.svelte
-│   │   │   ├── TimelineSlider.svelte
-│   │   │   ├── ImagePreview.svelte
-│   │   │   ├── Settings.svelte
-│   │   │   └── VirtualPhotoGrid.svelte
-│   │   ├── App.svelte
-│   │   └── types.ts
-│   └── src-tauri/  # Tauri/Rust 后端
+└── desktop/            # Tauri 应用（桌面 / iOS / Android 共用）
+    ├── src/            # Svelte 前端
+    │   ├── main.ts     # 入口：检测平台后加载对应 UI
+    │   ├── desktop/    # 桌面端 UI（App.svelte + components/）
+    │   ├── mobile/     # 移动端 UI（App.svelte + components/）
+    │   ├── shared/     # 共享类型、工具函数、i18n
+    │   └── lib/platform/  # 平台服务抽象（desktop / ios / android）
+    └── src-tauri/      # Tauri/Rust 后端
+        └── gen/        # iOS（Xcode）与 Android（Gradle）原生工程
 ```
 
 ## 开发
 
 ```bash
-# 安装依赖
-cd packages/desktop
-npm install
+# 安装依赖（项目根目录）
+pnpm install
 
-# 开发模式
-npm run tauri dev
+# 桌面开发模式
+pnpm desktop
 
 # 构建
-npm run tauri build
+cd packages/desktop && pnpm tauri build
+
+# 测试
+cd packages/core && cargo test
+cd packages/desktop && pnpm test
 ```
+
+移动端的运行和打包命令见 `CLAUDE.md`。
 
 ## 数据存储
 
@@ -135,7 +150,7 @@ npm run tauri build
 - `footos.db` - SQLite 数据库
 - `thumbnails/` - 缩略图缓存
 - `raw_previews/` - RAW 预览缓存
-- `tiles/` - 地图瓦片缓存
+- `Photos/` - 单文件导入和移动端导出的原片副本
 
 ## 许可证
 

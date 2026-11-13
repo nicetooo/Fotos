@@ -7,9 +7,18 @@
 ```
 packages/
 ├── core/              # Rust 核心引擎（纯逻辑，零平台依赖）
-├── shared/            # 跨平台抽象层（traits + 类型定义）
-├── platform-*/        # 平台实现（desktop/ios/android）
-└── desktop/           # Tauri 应用（Svelte 前端 + Rust 后端）
+├── desktop/           # Tauri 应用，三端共用（Svelte 前端 + Rust 后端 + gen/ 下的 iOS/Android 原生工程）
+├── shared/            # 跨平台抽象层（traits + 类型定义）— 当前未被应用依赖
+└── platform-{ios,android}/  # 上述 traits 的 Rust 实现 — 当前未被应用依赖
+```
+
+实际运行路径（Tauri 应用的 `Cargo.toml` 只依赖 `footos-core`）：
+
+```
+原生桥（iOS: PhotoLibraryBridge.m / Android: bridge/*.kt）
+  ⇄ WebView JS（src/lib/platform/ios.ts、android.ts）
+  ⇄ Tauri 命令（src-tauri/src/lib.rs）
+  ⇄ footos-core
 ```
 
 ## 分层底线
@@ -55,21 +64,20 @@ src/lib/platform/
 ```
 src/
 ├── shared/              # 纯逻辑复用（无 UI）
-│   ├── stores/
-│   └── utils/
+│   ├── types.ts
+│   ├── utils/
+│   └── i18n/
 ├── desktop/             # 桌面端完整 UI
 │   ├── App.svelte
-│   ├── components/
-│   └── layouts/
+│   └── components/
 └── mobile/              # 移动端完整 UI
     ├── App.svelte
-    ├── components/
-    └── layouts/
+    └── components/
 ```
 
 **隔离原则**：
 - UI 组件按平台完全独立，不共享 .svelte 文件
-- 仅 `shared/` 下的纯逻辑（stores、utils、类型）可复用
+- 仅 `shared/` 下的纯逻辑（utils、i18n、类型）可复用
 - 入口根据平台加载 `desktop/App.svelte` 或 `mobile/App.svelte`
 
 **跨平台只共享**：
@@ -109,6 +117,7 @@ export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 pnpm install                              # 安装依赖
 pnpm desktop                              # 启动桌面开发（从项目根目录）
 cd packages/core && cargo test            # Rust 测试
+cd packages/desktop && pnpm test          # 前端测试（vitest）
 cd packages/desktop && pnpm tauri build   # 构建发布
 
 # iOS 开发（模拟器，默认 iPhone 14 Pro）
@@ -156,19 +165,22 @@ lsof -i:1420 || echo "Port 1420 is free"
 ## 缩略图规格
 
 - **唯一真相源**：`core/src/config.rs` 中的 `DEFAULT_THUMBNAIL_SIZE`（当前值 `256`）
-- `ThumbnailSpec::default()` 自动使用该常量，所有平台（Tauri `lib.rs`、`platform-desktop`、`platform-ios`、`platform-android`）统一引用
+- `ThumbnailSpec::default()` 自动使用该常量，所有调用方（Tauri `lib.rs`、`platform-ios`、`platform-android`）统一引用
 - ❌ 禁止在任何 crate 中硬编码缩略图尺寸魔数（如 `ThumbnailSpec { width: 300, height: 300 }`）
 - ⚠️ 修改 `DEFAULT_THUMBNAIL_SIZE` 会改变缓存 key（`thumbnail_key` 将 width/height 哈希进 FNV-1a），导致所有已有缩略图缓存失效，需配合缓存清除
 
 ## 数据库
 
-SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去重)、`lat/lon`(地理位置)、`date_taken`
+SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去重)、`lat/lon`(地理位置)、`date_taken`、`media_type`(photo / video / live_photo)、`video_path`(实况照片的配对视频)
+
+iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localIdentifier>`，原片在查看时按需导出。
 
 ## 技术栈
 
 - 前端：Svelte 5 + TypeScript + Tailwind + MapLibre GL
 - 后端：Tauri 2 + Rust
-- 移动端桥接：iOS Swift (WebKit MessageHandler) / Android JNI
+- 移动端桥接：iOS Objective-C（`PhotoLibraryBridge.m`，WebKit MessageHandler + PhotoKit）/ Android Kotlin（`FootosWebViewBridge`，`@JavascriptInterface`）
+- 视频：桌面端调用系统 `ffmpeg` / `ffprobe` CLI 生成缩略图和读取元数据
 
 ## 移动端时间轴交互设计
 
@@ -285,8 +297,8 @@ handleMapMove → getVisiblePhotosTimeRange()
 
 ### 两阶段加载
 
-- **第一阶段**：Rust 返回 `PhotoPreview`（path + lat/lon + date_taken），立即渲染地图
-- **第二阶段**：异步加载完整 `PhotoInfo`（含 EXIF、dimensions 等）
+- **第一阶段**：`list_map_previews` 把带 GPS 的预览（path + lat/lon + date_taken 等）以列式 JSON 写入 `thumbnails/map_previews.json`，前端经 asset 协议 `fetch` 后立即渲染地图（不走 invoke 返回值：iOS WKWebView 上返回 5k+ 对象约需 8s）
+- **第二阶段**：`list_photos` 加载完整 `PhotoInfo`（含 EXIF、dimensions 等），在导入完成或收到 `reload-photos` 事件时触发
 - ❌ 禁止首屏等待所有 EXIF 数据加载完毕才渲染地图
 
 ### 精细时间轴边缘堆叠
