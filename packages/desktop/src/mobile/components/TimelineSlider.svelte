@@ -115,22 +115,25 @@
 
     const MIN_HANDLE_WIDTH_PX = 4; // 2px border on each side
 
-    // Report the selection upward — only when the user made it. Debounced so a
-    // pinch or pan does not trigger a map query per touch event.
+    // Report the selection upward — only when the user made it. Once per frame:
+    // the map query is cheap enough to follow the finger, and the map itself
+    // drops intermediate requests while one is in flight.
     $effect(() => {
         const start = viewWindow.startMs;
         const end = viewWindow.endMs;
         const all = coversAll;
         if (!userActive) return;
-        const timer = setTimeout(() => {
+        const raf = requestAnimationFrame(() => {
             if (all) {
-                userActive = false;
+                // Keep following the finger; only hand control back to the map
+                // once the gesture is over.
                 onTimeRangeChange(null, null);
+                if (dragMode === 'none' && !isPinching) userActive = false;
             } else {
                 onTimeRangeChange(start, end);
             }
-        }, 120);
-        return () => clearTimeout(timer);
+        });
+        return () => cancelAnimationFrame(raf);
     });
 
     // === Dragging state ===

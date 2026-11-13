@@ -201,7 +201,54 @@ export async function runAgentTest(scenario: string, hooks: AgentTestHooks): Pro
             });
         }
 
-        // 5. Viewer opens on an album window.
+        // 5. Time scrub: slide a 30-day window across the whole range, one
+        // filter change per frame, the way a finger on the timeline would.
+        await step("time-scrub", async () => {
+            const setFilter = (window as any).__footosSetTimeFilter as
+                | ((start: number | null, end: number | null) => void)
+                | undefined;
+            if (!setFilter) return { ok: false, detail: "time filter hook missing" };
+            const stamps = await queryTimeline(null);
+            if (stamps.length < 2) return { ok: false, detail: "no timestamps" };
+            const min = stamps[0];
+            const max = stamps[stamps.length - 1];
+            const windowMs = 30 * 24 * 3600 * 1000;
+            const before = hooks.getMapStats();
+            const durationMs = 3000;
+            const frames = await measureFrames(
+                () =>
+                    new Promise<void>((resolve) => {
+                        const t0 = performance.now();
+                        const tick = (now: number) => {
+                            const k = Math.min(1, (now - t0) / durationMs);
+                            const start = min + (max - min - windowMs) * k;
+                            setFilter(start, start + windowMs);
+                            if (k < 1) requestAnimationFrame(tick);
+                            else resolve();
+                        };
+                        requestAnimationFrame(tick);
+                    }),
+            );
+            await sleep(500);
+            const after = hooks.getMapStats();
+            const filtered = after.features;
+            setFilter(null, null);
+            await sleep(500);
+            return {
+                ok: frames.frames > 0 && after.queries > before.queries,
+                frames,
+                detail: {
+                    queries: after.queries - before.queries,
+                    setData: after.setData - before.setData,
+                    queriesPerSecond: Math.round(((after.queries - before.queries) / durationMs) * 1000),
+                    lastQueryMs: after.lastQueryMs,
+                    featuresWhileFiltered: filtered,
+                    atlasImages: after.atlasImages,
+                },
+            };
+        });
+
+        // 6. Viewer opens on an album window.
         await step("viewer-open", async () => {
             const t0 = performance.now();
             const result = await hooks.openPreview();

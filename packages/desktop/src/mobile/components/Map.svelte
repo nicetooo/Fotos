@@ -276,7 +276,29 @@
     const stats = { queries: 0, setData: 0, lastQueryMs: 0 };
 
     /** Ask Rust for the clusters in (a padded) viewport and draw them. */
+    // One query at a time. Requests that arrive meanwhile collapse into a
+    // single follow-up, so a fast drag never queues up stale work.
+    let queryInFlight = false;
+    let queryQueued = false;
+
     async function refresh() {
+        if (queryInFlight) {
+            queryQueued = true;
+            return;
+        }
+        queryInFlight = true;
+        try {
+            await runQuery();
+        } finally {
+            queryInFlight = false;
+            if (queryQueued) {
+                queryQueued = false;
+                refresh();
+            }
+        }
+    }
+
+    async function runQuery() {
         const m = map;
         if (!m || !mapLoaded) return;
         const seq = ++querySeq;
@@ -618,6 +640,7 @@
         setupMapControls();
 
         (window as any).__footosMap = map;
+        (window as any).__footosSetTimeFilter = handleTimeRangeChange;
         (window as any).__footosMapStats = () => ({
             ...stats,
             total,
@@ -719,6 +742,7 @@
         stampSeq++;
         delete (window as any).__footosMap;
         delete (window as any).__footosMapStats;
+        delete (window as any).__footosSetTimeFilter;
 
         if (moveTimer) clearTimeout(moveTimer);
         if (timelineSyncTimer) clearTimeout(timelineSyncTimer);

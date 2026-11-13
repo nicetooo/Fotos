@@ -264,8 +264,9 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 | 路径 | 触发 | 做什么 | 延迟 |
 |------|------|--------|------|
 | 地图 → 时间轴 | `moveend` | `query_timeline(视口 bbox)` 取可见照片的时间戳，交给时间轴显示 | 300ms 防抖 |
-| 时间轴 → 地图 | **用户**操作时间轴 | `onTimeRangeChange(startMs, endMs)` → 设置时间过滤 → `query_map` | 120ms 防抖 |
+| 时间轴 → 地图 | **用户**操作时间轴 | `onTimeRangeChange(startMs, endMs)` → 设置时间过滤 → `query_map` | 每帧一次（rAF），实时跟手 |
 
+- 地图同一时刻只跑一个 `query_map`，期间到达的请求合并成一次后续查询（`queryInFlight` / `queryQueued`），拖得再快也不会堆积
 - ❌ 地图移动**永远不**写时间过滤；时间轴的数据变化（`stamps` 换了）**永远不**触发 `onTimeRangeChange`
 - 时间轴内部用 `userActive` 区分：只有用户手势会把它置为 true；选区重新覆盖全部范围时置回 false 并上报 `(null, null)` 清除过滤
 - 用户设置了时间范围后，地图移动不再替换时间轴的数据（否则会重置用户刚选的范围）；清除过滤后恢复跟随地图
