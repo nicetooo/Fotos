@@ -248,7 +248,7 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 实测 GL mtrack 从 228MB 降至 94MB（交互后），总 PSS 从 490MB 降至 346MB。
 
 - **@1x 瓦片**：使用 `{z}/{x}/{y}.png` 而非 `@2x.png`。每张瓦片 256×256×4=256KB（@2x 为 1MB）
-- **底图来源**：OpenStreetMap 标准瓦片，定义在 `shared/map-style.ts`（桌面、移动共用）。只有浅色一种样式，深色主题靠 raster paint 压暗；CARTO 的瓦片现在需要 API key，不再使用
+- **底图来源**：OpenStreetMap 标准瓦片，定义在 `shared/map-style.ts`（桌面、移动共用）。只有浅色一种样式，深色主题用 raster paint 反转明度并保持色相（`hue-rotate 180` + `brightness-min > brightness-max`），叠在应用背景色的 background 图层上；不要改回「压暗」，那样看起来像蒙了一层灰。CARTO 的瓦片现在需要 API key，不再使用
 - ❌ 禁止在移动端使用 `@2x` 瓦片（GL 内存会翻 4 倍）
 - **瓦片缓存上限**：Map 构造器设置 `maxTileCacheSize: 50`，限制 GPU 瓦片缓存
 - **帧缓冲降分辨率**：Map 构造器设置 `pixelRatio: 2`（设备默认 DPR=2.75），降低 WebGL canvas 像素数

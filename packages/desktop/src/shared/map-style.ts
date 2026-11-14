@@ -2,8 +2,12 @@
  * Base map style shared by the desktop and mobile maps.
  *
  * Tiles: OpenStreetMap standard raster tiles (no API key). They only come in
- * one light style, so the dark theme dims and desaturates them with raster
- * paint properties instead of switching tile sets.
+ * one light style, so the dark theme is made from the same tiles with raster
+ * paint properties: lightness is inverted (brightness-min above
+ * brightness-max) and the hue turned half a circle first, so colours keep
+ * their hue: light land becomes dark, dark labels become light, water stays
+ * blue. Dimming the light tiles instead only looks like a grey veil over the
+ * map.
  *
  * Usage policy: https://operations.osmfoundation.org/policies/tiles/
  * Standard tiles are 256px (@1x) only, which also satisfies the mobile
@@ -17,6 +21,24 @@ export const GLYPHS_URL = "https://demotiles.maplibre.org/font/{fontstack}/{rang
 const OSM_TILES = ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"];
 const OSM_ATTRIBUTION =
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+// App background colours (app.css: --bg-primary).
+const DARK_BACKGROUND = "#0f172a";
+const LIGHT_BACKGROUND = "#f8fafc";
+
+const DARK_PAINT = {
+    "raster-hue-rotate": 180,
+    "raster-brightness-min": 0.92,
+    "raster-brightness-max": 0.1,
+    "raster-saturation": -0.55,
+    "raster-contrast": 0.1,
+    "raster-opacity": 0.85,
+};
+
+// A little calmer than the stock tiles, so photo markers stand out.
+const LIGHT_PAINT = {
+    "raster-saturation": -0.25,
+};
 
 export function baseMapStyle(
     isDark: boolean,
@@ -35,17 +57,18 @@ export function baseMapStyle(
             },
         },
         layers: [
+            // What shows before tiles arrive, and what the dark map is blended
+            // onto so that it leans towards the app's background colour.
+            {
+                id: "basemap-background",
+                type: "background",
+                paint: { "background-color": isDark ? DARK_BACKGROUND : LIGHT_BACKGROUND },
+            },
             {
                 id: "basemap-layer",
                 type: "raster",
                 source: "basemap",
-                paint: isDark
-                    ? {
-                          "raster-brightness-max": 0.42,
-                          "raster-saturation": -0.55,
-                          "raster-contrast": 0.1,
-                      }
-                    : {},
+                paint: isDark ? DARK_PAINT : LIGHT_PAINT,
             },
         ],
     };
