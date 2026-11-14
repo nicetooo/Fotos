@@ -340,6 +340,10 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
     }
     self.videoView.hidden = NO;
     self.playGlyph.hidden = YES;
+    // The default audio session is silenced by the ring/silent switch. A video
+    // the user chose to play should be heard, as in Photos.
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:nil];
+    [[AVAudioSession sharedInstance] setActive:YES error:nil];
     if (self.player) {
         [self.player play];
         return YES;
@@ -926,6 +930,12 @@ static __weak FootosPhotoViewer *sCurrentViewer;
     self.onDismiss = nil;
     sCurrentViewer = nil;
     [self dismissViewControllerAnimated:NO completion:^{
+        // Hand audio back (resumes the user's music) once our players have stopped.
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        [session setActive:NO
+               withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+                     error:nil];
+        [session setCategory:AVAudioSessionCategoryAmbient error:nil];
         if (callback) {
             callback(index);
         }
