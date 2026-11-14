@@ -127,6 +127,11 @@ export const ko: Translations = {
     map: {
         showAllPhotos: '모든 사진 표시',
         openAlbum: '현재 영역의 사진 보기',
+        locateOnMap: '지도에서 보기',
+        backToList: '목록으로 돌아가기',
+        copyPhoto: '복사',
+        sharePhoto: '공유',
+        viewPhoto: '사진 보기',
         boxSelect: '영역 선택',
         noGeotaggedPhotos: '위치 정보 사진 없음',
         noGeotaggedPhotosDesc: '가져온 사진 중 GPS 데이터가 포함된 사진이 없습니다.',

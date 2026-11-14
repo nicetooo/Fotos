@@ -5,10 +5,11 @@
     import type { Locale } from "../../shared/i18n/types";
     import type { Bbox } from "../../shared/query";
 
-    let { refreshKey = 0, libraryCount = 0, onOpenPreview, onOpenAlbum, theme = "dark", t, locale, isSyncing = false } = $props<{
+    let { refreshKey = 0, libraryCount = 0, onOpenPreview, onOpenAlbum, focusRequest = null, theme = "dark", t, locale, isSyncing = false } = $props<{
         refreshKey?: number;
         libraryCount?: number;
         onOpenPreview?: (item: { id: number; path: string }) => void;
+        focusRequest?: { lon: number; lat: number; seq: number } | null;
         onOpenAlbum?: (bbox: Bbox, startMs: number | null, endMs: number | null) => void;
         theme?: "dark" | "light";
         t: Translations;
@@ -19,4 +20,4 @@
     const tileConfig = getPlatformService().getMapTileConfig();
 </script>
 
-<Map {refreshKey} {libraryCount} {onOpenPreview} {onOpenAlbum} {theme} {tileConfig} {t} {locale} {isSyncing} />
+<Map {refreshKey} {libraryCount} {onOpenPreview} {onOpenAlbum} {focusRequest} {theme} {tileConfig} {t} {locale} {isSyncing} />

@@ -127,6 +127,11 @@ export const ar: Translations = {
     map: {
         showAllPhotos: 'عرض جميع الصور',
         openAlbum: 'Browse photos in view',
+        locateOnMap: 'Show on map',
+        backToList: 'Back to list',
+        copyPhoto: 'Copy',
+        sharePhoto: 'Share',
+        viewPhoto: 'View photo',
         boxSelect: 'تحديد منطقة',
         noGeotaggedPhotos: 'لا توجد صور بموقع جغرافي',
         noGeotaggedPhotosDesc: 'لا تحتوي أي من صورك المستوردة على بيانات GPS.',

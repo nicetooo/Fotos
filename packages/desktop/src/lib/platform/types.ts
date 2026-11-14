@@ -15,6 +15,8 @@ export interface PlatformCapabilities {
     revealInFileManager: boolean;
     /** 支持文件夹选择 (Desktop: true, Mobile: false) */
     folderSelection: boolean;
+    /** 相册网格的长按菜单由系统原生菜单承担 (iOS: true)。为 false 时网格自己画菜单 */
+    nativeContextMenu: boolean;
     /** 有原生照片查看器 (iOS、Android: true)。为 true 时用 openNativeViewer，否则用 Web 查看器 */
     nativePhotoViewer: boolean;
 }
@@ -135,6 +137,12 @@ export interface IOSPlatformService extends PlatformService, NativeViewerHost {
 
     /** 视频/实况封面：屏幕尺寸静帧，比 256 缩略图清晰，也比整段视频快 */
     ensureViewerStill(path: string): Promise<string | null>;
+
+    /**
+     * 告诉原生侧相册网格里现在有哪些条目，以及长按菜单的文案。
+     * 网格格子是 `footos-album://item/<index>` 链接，长按时系统菜单按下标取条目。
+     */
+    setAlbumMenuContext(items: NativeViewerItem[], titles: { copy: string; share: string; locate: string }): void;
 
     /** 实况配对视频，长按时播放 */
     ensureLiveVideo(path: string): Promise<string | null>;

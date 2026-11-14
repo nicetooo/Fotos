@@ -145,6 +145,11 @@
         // Back button support: close modals on browser history navigation
         window.addEventListener('popstate', handlePopState);
         // The native viewer reports where it was closed.
+        // A choice made in the system context menu of an album cell.
+        (window as any).__handleAlbumMenu = (action: string, index: number) => {
+            if (action === "locate") locateAlbumItem(index);
+            else if (action === "open") openAlbumItem(index);
+        };
         const onNativeViewerClosed = (index: number) => albumGridRef?.reveal(index);
         (window as any).__handleIOSViewerClosed = onNativeViewerClosed;
         (window as any).__handleNativeViewerClosed = onNativeViewerClosed;
@@ -343,7 +348,11 @@
     const VIEWPORT_ALBUM_LIMIT = 1000;
 
     // The album grid (what is on the map), shown before any single photo.
-    let albumGrid = $state.raw<{ items: AlbumItem[]; total: number } | null>(null);
+    let albumGrid = $state.raw<{ items: AlbumItem[]; total: number; initialIndex?: number } | null>(null);
+    // The list the user left to look at one photo on the map, and which photo.
+    // The map button that would reopen "what is in view" now shows only the
+    // few photos around that spot, so this is the way back to the same list.
+    let albumReturn = $state.raw<{ items: AlbumItem[]; total: number; index: number } | null>(null);
     let albumGridRef = $state<{ reveal: (index: number) => void } | null>(null);
 
     /** Open the album of what is on the map now as a grid. */
@@ -351,11 +360,31 @@
         try {
             const w = await queryAlbumIn(bbox, startMs, endMs, VIEWPORT_ALBUM_LIMIT);
             if (w.items.length === 0) return;
-            albumGrid = { items: w.items, total: w.total };
-            history.pushState({ modal: "album" }, "");
+            // A new list replaces the one to go back to.
+            albumReturn = null;
+            showAlbum({ items: w.items, total: w.total });
         } catch (e) {
             console.error("[App] Failed to open viewport album", e);
         }
+    }
+
+    function showAlbum(grid: { items: AlbumItem[]; total: number; initialIndex?: number }) {
+        albumGrid = grid;
+        if (platformService.capabilities.nativeContextMenu) {
+            iosPlatformService?.setAlbumMenuContext(
+                grid.items.map((p) => ({ path: p.path, thumb: p.thumb, media_type: p.media_type, date_taken: p.date_taken })),
+                { copy: t.map.copyPhoto, share: t.map.sharePhoto, locate: t.map.locateOnMap },
+            );
+        }
+        history.pushState({ modal: "album" }, "");
+    }
+
+    /** Back to the list the user located a photo from, at that photo. */
+    function returnToAlbum() {
+        const saved = albumReturn;
+        if (!saved) return;
+        albumReturn = null;
+        showAlbum({ items: saved.items, total: saved.total, initialIndex: saved.index });
     }
 
     /** A cell of the grid was tapped: open the viewer on it, over the grid. */
@@ -382,6 +411,19 @@
         viewerTotal = viewerPhotos.length;
         previewPhoto = viewerPhotos[index];
         history.pushState({ modal: "preview" }, "");
+    }
+
+    // Where the map should go next (an item picked in the grid).
+    let mapFocus = $state.raw<{ lon: number; lat: number; seq: number } | null>(null);
+
+    /** Leave the grid and show this item's place on the map. */
+    function locateAlbumItem(index: number) {
+        const grid = albumGrid;
+        const item = grid?.items[index];
+        if (!grid || !item) return;
+        albumReturn = { items: grid.items, total: grid.total, index };
+        closeAlbum();
+        mapFocus = { lon: item.lon, lat: item.lat, seq: (mapFocus?.seq ?? 0) + 1 };
     }
 
     function closeAlbum() {
@@ -512,7 +554,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView {refreshKey} {libraryCount} onOpenPreview={openPreview} onOpenAlbum={openViewportAlbum} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
+        <MapView {refreshKey} {libraryCount} onOpenPreview={openPreview} onOpenAlbum={openViewportAlbum} focusRequest={mapFocus} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute left-4 z-[1001] flex flex-col gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
@@ -533,6 +575,19 @@
             >
                 <i class="fa-solid fa-gear text-lg"></i>
             </button>
+
+            <!-- Back to the list a photo was located from -->
+            {#if albumReturn && !albumGrid}
+                <button
+                    onclick={returnToAlbum}
+                    data-album-return
+                    class="h-12 pl-3 pr-4 rounded-full bg-[var(--accent)] text-black font-medium text-sm flex items-center gap-2 shadow-lg transition-all whitespace-nowrap self-start"
+                    aria-label={t.map.backToList}
+                >
+                    <i class="fa-solid fa-chevron-left"></i>
+                    <span>{t.map.backToList}</span>
+                </button>
+            {/if}
         </div>
 
         <!-- Import progress indicator -->
@@ -589,7 +644,10 @@
         bind:this={albumGridRef}
         items={albumGrid.items}
         total={albumGrid.total}
+        initialIndex={albumGrid.initialIndex ?? null}
         onOpen={openAlbumItem}
+        onLocate={locateAlbumItem}
+        nativeMenu={platformService.capabilities.nativeContextMenu}
         onClose={closeAlbum}
         {t}
         {locale}

@@ -127,6 +127,11 @@ export const fr: Translations = {
     map: {
         showAllPhotos: 'Afficher toutes les photos',
         openAlbum: 'Browse photos in view',
+        locateOnMap: 'Show on map',
+        backToList: 'Back to list',
+        copyPhoto: 'Copy',
+        sharePhoto: 'Share',
+        viewPhoto: 'View photo',
         boxSelect: 'Sélection rectangulaire',
         noGeotaggedPhotos: 'Aucune photo géolocalisée',
         noGeotaggedPhotosDesc: 'Aucune de vos photos importées ne contient de données GPS.',

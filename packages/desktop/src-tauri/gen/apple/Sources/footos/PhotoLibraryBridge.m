@@ -9,9 +9,34 @@
 #import <WebKit/WebKit.h>
 
 static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown";
+/// Cells of the album grid are links with this scheme; the host path is the index.
+static NSString * const kFootosAlbumScheme = @"footos-album";
+
+@class PhotoLibraryBridge;
+
+/// Stands in front of the WebView's own UI delegate so that a long press on an
+/// album cell shows the system context menu with our actions instead of the
+/// default link / image menu. Everything else goes to the original delegate.
+@interface FootosUIDelegateProxy : NSObject <WKUIDelegate>
+@property (nonatomic, weak) id<WKUIDelegate> original;
+@property (nonatomic, weak) PhotoLibraryBridge *bridge;
+@end
+
+/// The preview shown above the context menu: the thumbnail at once, then a
+/// sharper image when it is ready.
+@interface FootosAlbumPreview : UIViewController
+@property (nonatomic, copy) NSDictionary *item;
+@property (nonatomic, strong) UIImageView *imageView;
+@end
 
 @interface PhotoLibraryBridge () <WKScriptMessageHandler, CLLocationManagerDelegate>
 @property (nonatomic, weak) WKWebView *webView;
+@property (nonatomic, strong) FootosUIDelegateProxy *uiProxy;
+/// Items of the album grid on screen, and the titles for its menu.
+@property (nonatomic, copy) NSArray<NSDictionary *> *albumMenuItems;
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *albumMenuTitles;
+/// What the chosen menu item does, held until the menu has finished closing.
+@property (nonatomic, copy) void (^albumPendingAction)(void);
 @property (nonatomic, copy) NSString *dbPath;
 @property (nonatomic, copy) NSString *thumbDir;
 @property (nonatomic, assign) BOOL attached;
@@ -48,6 +73,13 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
 - (void)writePreviewThumbnailForAsset:(PHAsset *)asset toPath:(NSString *)thumbPath fileSize:(unsigned long long *)fileSize;
 - (NSString *)writeViewerStillForAsset:(PHAsset *)asset toDirectory:(NSString *)exportDir;
 - (void)emitViewerStill:(NSString *)path identifier:(NSString *)identifier;
+- (NSInteger)albumIndexForURL:(NSURL *)url;
+- (UIContextMenuConfiguration *)albumMenuForIndex:(NSInteger)index;
+- (void)albumMenuAction:(NSString *)action index:(NSInteger)index;
+- (void)runAlbumPendingAction;
+- (void)hideContextMenuLeftovers;
+- (void)shareAlbumItem:(NSDictionary *)item;
+- (void)copyAlbumItem:(NSDictionary *)item;
 @end
 
 @implementation PhotoLibraryBridge
@@ -104,6 +136,10 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
     self.webView = webView;
     [webView.configuration.userContentController addScriptMessageHandler:self name:@"footosPhotos"];
     self.attached = YES;
+    self.uiProxy = [[FootosUIDelegateProxy alloc] init];
+    self.uiProxy.original = webView.UIDelegate;
+    self.uiProxy.bridge = self;
+    webView.UIDelegate = self.uiProxy;
     [self eval:@"window.__FOOTOS_BRIDGE_READY__=true;window.dispatchEvent(new CustomEvent('footos-bridge-ready'));"];
     NSLog(@"[footos] PhotoKit bridge attached to WKWebView");
     __weak typeof(self) weakSelf = self;
@@ -266,6 +302,11 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
               self.dbPath ?: @"");
     }
 
+    if ([command isEqualToString:@"albumMenu"]) {
+        self.albumMenuItems = [body[@"items"] isKindOfClass:[NSArray class]] ? body[@"items"] : @[];
+        self.albumMenuTitles = [body[@"titles"] isKindOfClass:[NSDictionary class]] ? body[@"titles"] : @{};
+        return;
+    }
     if ([command isEqualToString:@"openViewer"]) {
         NSArray *items = [body[@"items"] isKindOfClass:[NSArray class]] ? body[@"items"] : @[];
         NSInteger index = [body[@"index"] respondsToSelector:@selector(integerValue)] ? [body[@"index"] integerValue] : 0;
@@ -1129,6 +1170,299 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
         return;
     }
     [webView evaluateJavaScript:js completionHandler:nil];
+}
+
+#pragma mark Album context menu
+
+/// Index of the album item a link points at, or -1.
+- (NSInteger)albumIndexForURL:(NSURL *)url {
+    if (!url || ![url.scheme isEqualToString:kFootosAlbumScheme]) {
+        return -1;
+    }
+    NSInteger index = url.lastPathComponent.integerValue;
+    return (index >= 0 && index < (NSInteger)self.albumMenuItems.count) ? index : -1;
+}
+
+- (NSString *)albumTitle:(NSString *)key fallback:(NSString *)fallback {
+    NSString *title = self.albumMenuTitles[key];
+    return ([title isKindOfClass:[NSString class]] && title.length) ? title : fallback;
+}
+
+- (UIContextMenuConfiguration *)albumMenuForIndex:(NSInteger)index {
+    NSDictionary *item = self.albumMenuItems[index];
+    BOOL isVideo = [item[@"media_type"] isKindOfClass:[NSString class]] && [item[@"media_type"] isEqualToString:@"video"];
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:^UIViewController *{
+        FootosAlbumPreview *preview = [[FootosAlbumPreview alloc] init];
+        preview.item = item;
+        return preview;
+    } actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
+        // Copying puts an image on the pasteboard; a video has none to offer.
+        if (!isVideo) {
+            [actions addObject:[UIAction actionWithTitle:[weakSelf albumTitle:@"copy" fallback:@"Copy"]
+                                                   image:[UIImage systemImageNamed:@"doc.on.doc"]
+                                              identifier:nil
+                                                 handler:^(UIAction *action) {
+                [weakSelf copyAlbumItem:item];
+            }]];
+        }
+        [actions addObject:[UIAction actionWithTitle:[weakSelf albumTitle:@"share" fallback:@"Share"]
+                                               image:[UIImage systemImageNamed:@"square.and.arrow.up"]
+                                          identifier:nil
+                                             handler:^(UIAction *action) {
+            [weakSelf shareAlbumItem:item];
+        }]];
+        [actions addObject:[UIAction actionWithTitle:[weakSelf albumTitle:@"locate" fallback:@"Show on map"]
+                                               image:[UIImage systemImageNamed:@"mappin.and.ellipse"]
+                                          identifier:nil
+                                             handler:^(UIAction *action) {
+            // Closing the grid under the menu while it animates back into its
+            // cell leaves the preview hanging on screen until the map has
+            // settled. Run it once the menu is gone (contextMenuDidEnd).
+            weakSelf.albumPendingAction = ^{
+                [weakSelf albumMenuAction:@"locate" index:index];
+            };
+        }]];
+        return [UIMenu menuWithTitle:@"" children:actions];
+    }];
+}
+
+/// The original of an album item as a file on disk (the full-quality photo or
+/// video, not the thumbnail). Library assets are written to a temporary file.
+- (void)originalFileForItem:(NSDictionary *)item completion:(void (^)(NSURL *fileURL))completion {
+    NSString *path = [item[@"path"] isKindOfClass:[NSString class]] ? item[@"path"] : @"";
+    if (![path hasPrefix:@"ios-photo://"]) {
+        completion(path.length ? [NSURL fileURLWithPath:path] : nil);
+        return;
+    }
+    NSString *identifier = [path substringFromIndex:@"ios-photo://".length];
+    PHAsset *asset = [PHAsset fetchAssetsWithLocalIdentifiers:@[identifier] options:nil].firstObject;
+    if (!asset) {
+        completion(nil);
+        return;
+    }
+    // The edited version when there is one, otherwise the original.
+    PHAssetResource *resource = nil;
+    BOOL wantVideo = asset.mediaType == PHAssetMediaTypeVideo;
+    for (PHAssetResource *candidate in [PHAssetResource assetResourcesForAsset:asset]) {
+        PHAssetResourceType type = candidate.type;
+        if (wantVideo) {
+            if (type == PHAssetResourceTypeFullSizeVideo) { resource = candidate; break; }
+            if (type == PHAssetResourceTypeVideo && !resource) { resource = candidate; }
+        } else {
+            if (type == PHAssetResourceTypeFullSizePhoto) { resource = candidate; break; }
+            if (type == PHAssetResourceTypePhoto && !resource) { resource = candidate; }
+        }
+    }
+    if (!resource) {
+        completion(nil);
+        return;
+    }
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-share"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *name = resource.originalFilename.length ? resource.originalFilename : @"photo.jpg";
+    NSURL *dest = [NSURL fileURLWithPath:[dir stringByAppendingPathComponent:name]];
+    [[NSFileManager defaultManager] removeItemAtURL:dest error:nil];
+    PHAssetResourceRequestOptions *options = [[PHAssetResourceRequestOptions alloc] init];
+    options.networkAccessAllowed = YES;
+    [[PHAssetResourceManager defaultManager] writeDataForAssetResource:resource
+                                                                toFile:dest
+                                                               options:options
+                                                     completionHandler:^(NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(error ? nil : dest);
+        });
+    }];
+}
+
+- (void)shareAlbumItem:(NSDictionary *)item {
+    __weak typeof(self) weakSelf = self;
+    [self originalFileForItem:item completion:^(NSURL *fileURL) {
+        UIViewController *presenter = [weakSelf topViewController];
+        if (!fileURL || !presenter) {
+            return;
+        }
+        UIActivityViewController *sheet = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL]
+                                                                            applicationActivities:nil];
+        // iPad shows it as a popover and needs an anchor.
+        sheet.popoverPresentationController.sourceView = presenter.view;
+        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(presenter.view.bounds),
+                                                                    CGRectGetMidY(presenter.view.bounds), 1, 1);
+        [presenter presentViewController:sheet animated:YES completion:nil];
+    }];
+}
+
+- (void)copyAlbumItem:(NSDictionary *)item {
+    [self originalFileForItem:item completion:^(NSURL *fileURL) {
+        if (!fileURL) {
+            return;
+        }
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            UIImage *image = [UIImage imageWithContentsOfFile:fileURL.path];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (image) {
+                    UIPasteboard.generalPasteboard.image = image;
+                }
+            });
+        });
+    }];
+}
+
+- (void)runAlbumPendingAction {
+    void (^action)(void) = self.albumPendingAction;
+    self.albumPendingAction = nil;
+    if (!action) {
+        return;
+    }
+    // The menu reports its end while the preview is still shrinking back into
+    // its cell (about 0.4 s). After that WebKit keeps the shrunken preview on
+    // top of the page for roughly another half second: invisible while the
+    // cell is still under it, but left floating over the map once the grid
+    // closes. So wait for the animation, hide what is left of the preview,
+    // then act.
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf hideContextMenuLeftovers];
+        action();
+    });
+}
+
+/// Hide the preview views WebKit has not removed yet. They sit in a container
+/// whose layer WebKit names "Context Menu Hint Container"; only its children
+/// are hidden, so the container keeps working for the next menu. If WebKit
+/// renames it this finds nothing and the preview simply lingers a moment.
+- (void)hideContextMenuLeftovers {
+    UIView *root = self.webView.window ?: self.webView;
+    NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:root];
+    while (queue.count) {
+        UIView *view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([view.layer.name containsString:@"Context Menu Hint"]) {
+            for (UIView *child in view.subviews) {
+                child.hidden = YES;
+            }
+            continue;
+        }
+        [queue addObjectsFromArray:view.subviews];
+    }
+}
+
+- (void)albumMenuAction:(NSString *)action index:(NSInteger)index {
+    [self eval:[NSString stringWithFormat:
+        @"(function(){if(window.__handleAlbumMenu)window.__handleAlbumMenu('%@',%ld);})()",
+        action, (long)index]];
+}
+
+@end
+
+@implementation FootosUIDelegateProxy
+
+- (BOOL)respondsToSelector:(SEL)selector {
+    return [super respondsToSelector:selector] || [self.original respondsToSelector:selector];
+}
+
+- (id)forwardingTargetForSelector:(SEL)selector {
+    return self.original;
+}
+
+- (void)webView:(WKWebView *)webView
+    contextMenuConfigurationForElement:(WKContextMenuElementInfo *)elementInfo
+                     completionHandler:(void (^)(UIContextMenuConfiguration *))completionHandler {
+    NSInteger index = [self.bridge albumIndexForURL:elementInfo.linkURL];
+    if (index >= 0) {
+        completionHandler([self.bridge albumMenuForIndex:index]);
+        return;
+    }
+    if ([self.original respondsToSelector:_cmd]) {
+        [self.original webView:webView contextMenuConfigurationForElement:elementInfo completionHandler:completionHandler];
+        return;
+    }
+    completionHandler(nil);
+}
+
+- (void)webView:(WKWebView *)webView contextMenuDidEndForElement:(WKContextMenuElementInfo *)elementInfo {
+    [self.bridge runAlbumPendingAction];
+    if ([self.original respondsToSelector:_cmd]) {
+        [self.original webView:webView contextMenuDidEndForElement:elementInfo];
+    }
+}
+
+// Tapping the preview opens the photo, as in Photos.
+- (void)webView:(WKWebView *)webView
+    contextMenuForElement:(WKContextMenuElementInfo *)elementInfo
+    willCommitWithAnimator:(id<UIContextMenuInteractionCommitAnimating>)animator {
+    NSInteger index = [self.bridge albumIndexForURL:elementInfo.linkURL];
+    if (index >= 0) {
+        __weak PhotoLibraryBridge *bridge = self.bridge;
+        [animator addCompletion:^{
+            [bridge albumMenuAction:@"open" index:index];
+        }];
+        return;
+    }
+    if ([self.original respondsToSelector:_cmd]) {
+        [self.original webView:webView contextMenuForElement:elementInfo willCommitWithAnimator:animator];
+    }
+}
+
+@end
+
+@implementation FootosAlbumPreview
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = UIColor.blackColor;
+    self.imageView = [[UIImageView alloc] initWithFrame:self.view.bounds];
+    self.imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.imageView.contentMode = UIViewContentModeScaleAspectFill;
+    self.imageView.clipsToBounds = YES;
+    [self.view addSubview:self.imageView];
+
+    NSString *thumb = [self.item[@"thumb"] isKindOfClass:[NSString class]] ? self.item[@"thumb"] : @"";
+    NSString *path = [self.item[@"path"] isKindOfClass:[NSString class]] ? self.item[@"path"] : @"";
+    UIImage *small = thumb.length ? [UIImage imageWithContentsOfFile:thumb] : nil;
+    [self show:small];
+
+    CGFloat scale = UIScreen.mainScreen.scale;
+    CGSize target = CGSizeMake(UIScreen.mainScreen.bounds.size.width * scale,
+                               UIScreen.mainScreen.bounds.size.width * scale);
+    __weak typeof(self) weakSelf = self;
+    if ([path hasPrefix:@"ios-photo://"]) {
+        NSString *identifier = [path substringFromIndex:@"ios-photo://".length];
+        PHAsset *asset = [PHAsset fetchAssetsWithLocalIdentifiers:@[identifier] options:nil].firstObject;
+        if (!asset) {
+            return;
+        }
+        PHImageRequestOptions *options = [[PHImageRequestOptions alloc] init];
+        options.networkAccessAllowed = YES;
+        options.deliveryMode = PHImageRequestOptionsDeliveryModeOpportunistic;
+        [[PHImageManager defaultManager] requestImageForAsset:asset
+                                                   targetSize:target
+                                                  contentMode:PHImageContentModeAspectFit
+                                                      options:options
+                                                resultHandler:^(UIImage *image, NSDictionary *info) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf show:image];
+            });
+        }];
+    } else if (path.length) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            UIImage *full = [UIImage imageWithContentsOfFile:path];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf show:full];
+            });
+        });
+    }
+}
+
+/// Show `image` and size the preview to its shape.
+- (void)show:(UIImage *)image {
+    if (!image || image.size.width <= 0 || image.size.height <= 0) {
+        return;
+    }
+    self.imageView.image = image;
+    CGFloat width = UIScreen.mainScreen.bounds.size.width;
+    self.preferredContentSize = CGSizeMake(width, width * image.size.height / image.size.width);
 }
 
 @end

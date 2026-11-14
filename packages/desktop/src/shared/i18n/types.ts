@@ -159,6 +159,11 @@ export interface Translations {
     map: {
         showAllPhotos: string;
         openAlbum: string;
+        locateOnMap: string;
+        backToList: string;
+        copyPhoto: string;
+        sharePhoto: string;
+        viewPhoto: string;
         boxSelect: string;
         noGeotaggedPhotos: string;
         noGeotaggedPhotosDesc: string;

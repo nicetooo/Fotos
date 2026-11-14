@@ -23,6 +23,7 @@
         refreshKey = 0,
         libraryCount = 0,
         onOpenAlbum,
+        focusRequest = null,
         onOpenPreview,
         theme = "dark",
         tileConfig,
@@ -32,6 +33,8 @@
     } = $props<{
         /** Bump to re-query after the library changed (import progress, delete, clear). */
         refreshKey?: number;
+        /** Move the camera to a place; a new `seq` asks again for the same place. */
+        focusRequest?: { lon: number; lat: number; seq: number } | null;
         /** Open the album of what is on the map now (viewport + time filter). */
         onOpenAlbum?: (bbox: Bbox, startMs: number | null, endMs: number | null) => void;
         /** Rows in the library, geotagged or not (for the "no GPS" hint). */
@@ -845,6 +848,19 @@
         } catch (_) {
             // Style change failed — non-critical
         }
+    });
+
+    // Asked to show a place (an item picked in the album grid).
+    $effect(() => {
+        const request = focusRequest;
+        if (!request || !mapLoaded) return;
+        untrack(() => {
+            map?.easeTo({
+                center: [request.lon, request.lat],
+                zoom: Math.max(map.getZoom(), 16),
+                duration: 600,
+            });
+        });
     });
 
     // Library changed (import progress, delete, clear): query again.

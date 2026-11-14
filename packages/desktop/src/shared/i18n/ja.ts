@@ -127,6 +127,11 @@ export const ja: Translations = {
     map: {
         showAllPhotos: 'すべての写真を表示',
         openAlbum: '表示範囲の写真を見る',
+        locateOnMap: '地図で表示',
+        backToList: 'リストに戻る',
+        copyPhoto: 'コピー',
+        sharePhoto: '共有',
+        viewPhoto: '写真を見る',
         boxSelect: '範囲選択',
         noGeotaggedPhotos: '位置情報付き写真なし',
         noGeotaggedPhotosDesc: 'インポートした写真にGPSデータが含まれていません。',

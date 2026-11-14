@@ -295,7 +295,7 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 
 - 移动端和桌面端的 `App.svelte` 都不保存照片列表。地图、时间轴、查看器、图库抽屉各自向 Rust 查询当前需要的那一部分
 - 查看器：`query_album(center_id, radius)` 取时间顺序相册里当前照片前后各 300 张的窗口；浏览到距边缘 60 张以内时，停顿 500ms 后以当前照片为中心重新取
-- 地图右下角控件从上到下：显示所有照片、放大/缩小/指北、「浏览当前区域照片」（单独在最下面）。后者用 `query_album_in(视口 bbox, 时间过滤, limit=1000)` 取视口内按时间排序的照片（超出时保留最新的），先打开网格（`mobile/components/AlbumGrid.svelte`，虚拟滚动，停在最新），点格子再进查看器。这份列表是固定的，浏览时不换成全库窗口
+- 地图右下角控件从上到下：显示所有照片、放大/缩小/指北、「浏览当前区域照片」（单独在最下面）。后者用 `query_album_in(视口 bbox, 时间过滤, limit=1000)` 取视口内按时间排序的照片（超出时保留最新的），先打开网格（`mobile/components/AlbumGrid.svelte`，虚拟滚动，停在最新），点格子再进查看器。这份列表是固定的，浏览时不换成全库窗口。网格里长按：iOS 走系统上下文菜单（格子是 `footos-album://item/<index>` 链接，`PhotoLibraryBridge.m` 的 `FootosUIDelegateProxy` 接管，菜单为拷贝/分享/在地图上定位，用原图），其他平台用网格自绘的底部菜单（`capabilities.nativeContextMenu`）。定位后左上角出现「回到列表」按钮，回到原列表的同一位置
 - 库发生变化（导入进度、删除、清空）时只递增 `refreshKey`，由地图重新查询；Rust 侧 `AppState::geo()` 按 DB 变更计数惰性重建内存索引
 - 只在照片**第一次出现**时自动 `fitBounds`；后续导入不得抢镜头
 - ❌ 禁止通过 invoke 返回全量照片对象（iOS WKWebView 上 5k+ 对象约 8s）。需要批量数值时用 `tauri::ipc::Response` 返回原始字节
