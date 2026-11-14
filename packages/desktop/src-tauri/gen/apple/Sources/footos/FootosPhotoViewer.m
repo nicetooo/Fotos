@@ -105,20 +105,32 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
 
 #pragma mark - Page
 
+/// The default audio session is silenced by the ring/silent switch. Media the
+/// user chose to play (a video, a Live Photo held down) should be heard.
+static void FVActivatePlaybackAudio(void) {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    if (![session.category isEqualToString:AVAudioSessionCategoryPlayback]) {
+        [session setCategory:AVAudioSessionCategoryPlayback error:nil];
+    }
+    [session setActive:YES error:nil];
+}
+
 @interface FootosPhotoPage : UIViewController <UIScrollViewDelegate>
 @property (nonatomic, strong) NSDictionary *item;
 @property (nonatomic, assign) NSInteger index;
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIImageView *imageView;
 @property (nonatomic, strong, nullable) PHAsset *asset;
-@property (nonatomic, strong, nullable) PHLivePhotoView *livePhotoView;
+@property (nonatomic, strong, nullable) UIView *liveView;
+@property (nonatomic, strong, nullable) AVPlayer *livePlayer;
+@property (nonatomic, strong, nullable) AVPlayerLayer *livePlayerLayer;
+@property (nonatomic, assign) BOOL liveLoading;
 @property (nonatomic, strong, nullable) AVPlayer *player;
 @property (nonatomic, strong, nullable) AVPlayerLayer *playerLayer;
 @property (nonatomic, strong) UIView *videoView;
 @property (nonatomic, strong) UIImageView *playGlyph;
 @property (nonatomic, strong) UILabel *liveBadge;
 @property (nonatomic, assign) PHImageRequestID imageRequest;
-@property (nonatomic, assign) PHImageRequestID liveRequest;
 @property (nonatomic, assign) BOOL hasFullImage;
 @property (nonatomic, assign) BOOL livePressed;
 @property (nonatomic, strong, nullable) id playbackObserver;
@@ -149,7 +161,6 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.clearColor;
     self.imageRequest = PHInvalidImageRequestID;
-    self.liveRequest = PHInvalidImageRequestID;
     self.asset = FVAsset(FVString(self.item, @"path"));
 
     self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
@@ -206,7 +217,8 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
         self.imageView.frame = bounds;
     }
     self.playerLayer.frame = self.videoView.bounds;
-    self.livePhotoView.frame = bounds;
+    self.liveView.frame = bounds;
+    self.livePlayerLayer.frame = bounds;
     [self.playGlyph sizeToFit];
     self.playGlyph.center = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
     CGSize badge = [self.liveBadge sizeThatFits:CGSizeMake(200, 18)];
@@ -223,9 +235,6 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
 - (void)dealloc {
     if (_imageRequest != PHInvalidImageRequestID) {
         [[PHImageManager defaultManager] cancelImageRequest:_imageRequest];
-    }
-    if (_liveRequest != PHInvalidImageRequestID) {
-        [[PHImageManager defaultManager] cancelImageRequest:_liveRequest];
     }
     if (_playbackObserver) {
         [[NSNotificationCenter defaultCenter] removeObserver:_playbackObserver];
@@ -340,10 +349,7 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
     }
     self.videoView.hidden = NO;
     self.playGlyph.hidden = YES;
-    // The default audio session is silenced by the ring/silent switch. A video
-    // the user chose to play should be heard, as in Photos.
-    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:nil];
-    [[AVAudioSession sharedInstance] setActive:YES error:nil];
+    FVActivatePlaybackAudio();
     if (self.player) {
         [self.player play];
         return YES;
@@ -378,56 +384,111 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
 
 #pragma mark Live Photo
 
+// The paired video is played with our own AVPlayer rather than PHLivePhotoView:
+// that view stayed silent with the ring/silent switch on even after the app's
+// audio session was set to playback, while AVPlayer follows the session.
+
+/// Where the paired video of this asset is cached.
+- (NSString *)liveVideoPath {
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-live"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *name = [self.asset.localIdentifier stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+    return [dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"mov"]];
+}
+
+- (void)attachLiveVideo:(NSString *)path {
+    if (self.livePlayer) {
+        return;
+    }
+    self.livePlayer = [AVPlayer playerWithURL:[NSURL fileURLWithPath:path]];
+    self.livePlayer.actionAtItemEnd = AVPlayerActionAtItemEndPause;
+    self.liveView = [[UIView alloc] initWithFrame:self.view.bounds];
+    self.liveView.userInteractionEnabled = NO;
+    self.liveView.backgroundColor = UIColor.clearColor;
+    self.liveView.alpha = 0;
+    self.livePlayerLayer = [AVPlayerLayer playerLayerWithPlayer:self.livePlayer];
+    self.livePlayerLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+    self.livePlayerLayer.frame = self.liveView.bounds;
+    [self.liveView.layer addSublayer:self.livePlayerLayer];
+    [self.view insertSubview:self.liveView aboveSubview:self.scrollView];
+}
+
+- (void)playLiveVideo {
+    if (!self.livePlayer || !self.livePressed) {
+        return;
+    }
+    FVActivatePlaybackAudio();
+    [self.livePlayer seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+    [self.livePlayer play];
+    [UIView animateWithDuration:0.15 animations:^{
+        self.liveView.alpha = 1;
+    }];
+}
+
 - (void)startLivePhoto {
     if (![self isLivePhoto] || [self isZoomed]) {
         return;
     }
     self.livePressed = YES;
-    if (self.livePhotoView.livePhoto) {
-        self.livePhotoView.hidden = NO;
-        [self.livePhotoView startPlaybackWithStyle:PHLivePhotoViewPlaybackStyleFull];
+    if (self.livePlayer) {
+        [self playLiveVideo];
         return;
     }
-    if (self.liveRequest != PHInvalidImageRequestID) {
+    if (self.liveLoading) {
         return;
     }
-    if (!self.livePhotoView) {
-        self.livePhotoView = [[PHLivePhotoView alloc] initWithFrame:self.view.bounds];
-        self.livePhotoView.contentMode = UIViewContentModeScaleAspectFit;
-        self.livePhotoView.userInteractionEnabled = NO;
-        self.livePhotoView.hidden = YES;
-        [self.view insertSubview:self.livePhotoView aboveSubview:self.scrollView];
+    NSString *path = [self liveVideoPath];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        [self attachLiveVideo:path];
+        [self playLiveVideo];
+        return;
     }
-    PHLivePhotoRequestOptions *options = [[PHLivePhotoRequestOptions alloc] init];
+    PHAssetResource *resource = nil;
+    for (PHAssetResource *candidate in [PHAssetResource assetResourcesForAsset:self.asset]) {
+        if (candidate.type == PHAssetResourceTypePairedVideo) {
+            resource = candidate;
+            break;
+        }
+        if (candidate.type == PHAssetResourceTypeFullSizePairedVideo && !resource) {
+            resource = candidate;
+        }
+    }
+    if (!resource) {
+        return;
+    }
+    self.liveLoading = YES;
+    PHAssetResourceRequestOptions *options = [[PHAssetResourceRequestOptions alloc] init];
     options.networkAccessAllowed = YES;
-    options.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
-    CGFloat scale = UIScreen.mainScreen.scale;
-    CGSize screen = UIScreen.mainScreen.bounds.size;
+    // Write beside the final name, so a half-written file is never played.
+    NSString *partial = [path stringByAppendingString:@".part"];
+    [[NSFileManager defaultManager] removeItemAtPath:partial error:nil];
     __weak typeof(self) weakSelf = self;
-    self.liveRequest = [[PHImageManager defaultManager]
-        requestLivePhotoForAsset:self.asset
-                      targetSize:CGSizeMake(screen.width * scale, screen.height * scale)
-                     contentMode:PHImageContentModeAspectFit
-                         options:options
-                   resultHandler:^(PHLivePhoto *livePhoto, NSDictionary *info) {
+    [[PHAssetResourceManager defaultManager] writeDataForAssetResource:resource
+                                                                toFile:[NSURL fileURLWithPath:partial]
+                                                               options:options
+                                                     completionHandler:^(NSError *error) {
+        if (!error) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+            [[NSFileManager defaultManager] moveItemAtPath:partial toPath:path error:nil];
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
-            weakSelf.liveRequest = PHInvalidImageRequestID;
-            if (!livePhoto) {
+            weakSelf.liveLoading = NO;
+            if (error || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
                 return;
             }
-            weakSelf.livePhotoView.livePhoto = livePhoto;
-            if (weakSelf.livePressed) {
-                weakSelf.livePhotoView.hidden = NO;
-                [weakSelf.livePhotoView startPlaybackWithStyle:PHLivePhotoViewPlaybackStyleFull];
-            }
+            [weakSelf attachLiveVideo:path];
+            [weakSelf playLiveVideo];
         });
     }];
 }
 
 - (void)stopLivePhoto {
     self.livePressed = NO;
-    [self.livePhotoView stopPlayback];
-    self.livePhotoView.hidden = YES;
+    [self.livePlayer pause];
+    UIView *view = self.liveView;
+    [UIView animateWithDuration:0.15 animations:^{
+        view.alpha = 0;
+    }];
 }
 
 @end
