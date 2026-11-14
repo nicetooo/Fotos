@@ -138,11 +138,12 @@ def main() -> int:
         path = os.path.join(photos_dir, f"seed_{i:06d}.jpg")
         os.link(original, path)
         is_video = i % 97 == 0
+        is_live = not is_video and i % 53 == 1
         rows.append((
             path, f"seed:{i}", "Seed", "Synthetic",
             None if i % 211 == 0 else taken.strftime("%Y-%m-%d %H:%M:%S"),
             1280, 1280, lat, lon, 100, 1.8, "1/120", 1,
-            thumbs[v], size, "video" if is_video else "photo",
+            thumbs[v], size, "video" if is_video else "live_photo" if is_live else "photo",
             12000 if is_video else None,
         ))
 

@@ -75,6 +75,16 @@ export interface PlatformService {
     /** 检查权限状态（移动端）*/
     checkPermissionStatus(): Promise<PermissionStatus>;
 
+    /**
+     * Better thumbnails for the album grid, made on demand for the given item
+     * paths. `onReady` gets a map of item path -> image file as they arrive.
+     * Each call replaces the previous request.
+     */
+    requestGridThumbs?(paths: string[], onReady: (thumbs: Record<string, string>) => void): void;
+
+    /** 重新扫描记住的文件夹（桌面端）；返回库是否有变化 */
+    rescanLibrary?(): Promise<boolean>;
+
     /** 订阅导入进度 */
     onImportProgress(callback: (progress: ImportProgress) => void): () => void;
 

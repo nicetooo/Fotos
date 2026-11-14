@@ -145,13 +145,26 @@
         return paddedBbox(r.west, r.south, r.east, r.north, pad);
     }
 
+    // Clusters are computed per whole zoom level. The system map keeps the
+    // camera height while it is dragged, so its zoom level drifts with
+    // latitude; without some slack a drag near a whole number flips the level
+    // back and forth and every cluster is rebuilt each time.
+    const LEVEL_SLACK = 0.3;
+    let stickyLevel: number | null = null;
+    function clusterLevel(zoom: number): number {
+        if (stickyLevel === null || zoom < stickyLevel - LEVEL_SLACK || zoom >= stickyLevel + 1 + LEVEL_SLACK) {
+            stickyLevel = Math.floor(zoom);
+        }
+        return stickyLevel;
+    }
+
     async function runQuery() {
         const r = region;
         if (!r) return;
         const seq = ++querySeq;
         try {
             const t0 = performance.now();
-            const res = await queryMap(queryBox(r, 0.5), r.zoom, timeFilterStart, timeFilterEnd);
+            const res = await queryMap(queryBox(r, 0.5), clusterLevel(r.zoom) + 0.5, timeFilterStart, timeFilterEnd);
             stats.queries++;
             stats.lastQueryMs = Math.round((performance.now() - t0) * 10) / 10;
             if (seq !== querySeq) return;
@@ -226,7 +239,7 @@
             // Zoom to the extent of the cluster's members (computed in Rust).
             // Clusters are computed per whole zoom level, so the tap must reach
             // at least the next one or the same cluster may come back.
-            const minZoom = Math.floor(region?.zoom ?? 0) + 1.05;
+            const minZoom = (stickyLevel ?? Math.floor(region?.zoom ?? 0)) + 1 + LEVEL_SLACK + 0.05;
             command("mapFitBounds", { w, s, e: east, n, ...FIT_PADDING, maxZoom: 18, minZoom, animated: true });
             return;
         }

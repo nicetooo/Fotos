@@ -298,17 +298,43 @@ impl GeoIndex {
             [(0, self.len()), (0, 0)]
         };
 
+        // Whole cells only: every cell the box touches is counted in full,
+        // plus a margin of cells around it so that merging near the edge sees
+        // the same neighbours it would in any other viewport. Otherwise a
+        // cluster cut by the edge of the box changes its count and position
+        // (and who it merges with) as the map is dragged.
+        const MARGIN: i64 = 2;
+        let cell_of = |v: f64| (v / cell).floor() as i64;
+        let (y_a, y_b) = (cell_of(mercator_y(bbox.north)), cell_of(mercator_y(bbox.south)));
+        let (cy_min, cy_max) = (y_a.min(y_b) - MARGIN, y_a.max(y_b) + MARGIN);
+        let columns = (1.0 / cell).ceil() as i64;
+        let cx_west = cell_of(mercator_x(bbox.west)) - MARGIN;
+        let cx_east = cell_of(mercator_x(bbox.east)) + MARGIN;
+        let whole_width = bbox.east - bbox.west >= 360.0
+            || (bbox.west <= bbox.east && cx_east - cx_west + 1 >= columns);
+        let in_columns = |cx: i64| {
+            if whole_width {
+                true
+            } else if bbox.west <= bbox.east {
+                // The margin may reach past the antimeridian on either side.
+                (cx >= cx_west && cx <= cx_east)
+                    || (cx + columns >= cx_west && cx + columns <= cx_east)
+                    || (cx - columns >= cx_west && cx - columns <= cx_east)
+            } else {
+                cx >= cx_west || cx <= cx_east
+            }
+        };
+
         for (from, to) in ranges {
             for i in from..to {
                 let (lat, lon) = (self.lat[i], self.lon[i]);
-                if !bbox.contains(lat, lon) {
+                let key = (cell_of(self.mx[i]), cell_of(self.my[i]));
+                if key.1 < cy_min || key.1 > cy_max || !in_columns(key.0) {
                     continue;
                 }
-                matched += 1;
-                let key = (
-                    (self.mx[i] / cell).floor() as i64,
-                    (self.my[i] / cell).floor() as i64,
-                );
+                if bbox.contains(lat, lon) {
+                    matched += 1;
+                }
                 let acc = cells.entry(key).or_insert(Acc {
                     count: 0,
                     sum_x: 0.0,
@@ -619,6 +645,27 @@ mod tests {
             None,
         );
         assert_eq!(a.features[0].key, b.features[0].key);
+    }
+
+    #[test]
+    fn a_cluster_cut_by_the_viewport_edge_is_still_whole() {
+        // Two photos 0.02 degrees apart: one cluster at zoom 5.
+        let idx = GeoIndex::build(vec![
+            row(1, 48.85, 2.34, Some("2024-01-01 00:00:00")),
+            row(2, 48.85, 2.36, Some("2024-01-02 00:00:00")),
+        ]);
+        let whole = idx.query_map(WORLD, 5.0, None, None);
+        assert_eq!(whole.features.len(), 1);
+        // The box ends between the two photos.
+        let cut = idx.query_map(Bbox { west: 2.35, south: 40.0, east: 10.0, north: 55.0 }, 5.0, None, None);
+        assert_eq!(cut.features.len(), 1);
+        assert_eq!(cut.features[0].key, whole.features[0].key);
+        assert_eq!(cut.features[0].count, 2);
+        assert_eq!(cut.features[0].lon, whole.features[0].lon);
+        assert_eq!(cut.matched, 1);
+        // Far away, nothing.
+        let away = idx.query_map(Bbox { west: 100.0, south: 0.0, east: 120.0, north: 20.0 }, 5.0, None, None);
+        assert!(away.features.is_empty());
     }
 
     #[test]

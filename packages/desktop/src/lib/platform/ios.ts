@@ -242,6 +242,27 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         }
     }
 
+    private gridThumbsReady: ((thumbs: Record<string, string>) => void) | null = null;
+    private gridThumbsListening = false;
+
+    requestGridThumbs(paths: string[], onReady: (thumbs: Record<string, string>) => void): void {
+        this.gridThumbsReady = onReady;
+        if (!this.gridThumbsListening) {
+            this.gridThumbsListening = true;
+            this.addListener("ios-grid-thumbs", (e) => {
+                const out: Record<string, string> = {};
+                for (const [id, file] of Object.entries((e.detail?.thumbs ?? {}) as Record<string, string>)) {
+                    out["ios-photo://" + id] = file;
+                }
+                this.gridThumbsReady?.(out);
+            });
+        }
+        const identifiers = paths
+            .filter((p) => p.startsWith("ios-photo://"))
+            .map((p) => p.slice("ios-photo://".length));
+        this.postNative({ command: "gridThumbs", identifiers });
+    }
+
     setKnownPhotoIdentifiers(ids: string[]): void {
         this.knownIdentifiers = ids;
     }

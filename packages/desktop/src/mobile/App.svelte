@@ -21,7 +21,7 @@
         type Theme,
         type ImportStatus,
     } from "../shared";
-    import { queryAlbum, queryAlbumIn, photoCount, albumItemToPhoto, type AlbumItem, type Bbox } from "../shared/query";
+    import { queryAlbum, queryAlbumIn, photoCount, albumItemToPhoto, type AlbumItem, type Bbox, type MediaFilter } from "../shared/query";
 
     // i18n
     import { createI18nState, type Locale } from "../shared/i18n";
@@ -31,6 +31,7 @@
     import PhotoViewer from "./components/PhotoViewer.svelte";
     import AlbumGrid from "./components/AlbumGrid.svelte";
     import MapView from "./components/MapView.svelte";
+    import MediaFilterButton from "./components/MediaFilterButton.svelte";
 
     // Platform service received as prop from main.ts
     let { platformService } = $props<{ platformService: PlatformService }>();
@@ -70,6 +71,42 @@
     function bumpRefresh() {
         refreshKey++;
         photoCount().then((c) => { libraryCount = c; }).catch(() => {});
+    }
+
+    /** Self-test: each media filter narrows the map, and together they add up. */
+    async function agentFilterSteps() {
+        const { geoSummary } = await import("../shared/query");
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const counts: Record<string, number> = {};
+        const drawn: Record<string, number> = {};
+        for (const kind of ["all", "photo", "video", "live_photo", "all"] as MediaFilter[]) {
+            await setMediaFilter(kind);
+            await sleep(700);
+            counts[kind] = (await geoSummary()).total;
+            drawn[kind] = (window as any).__footosMapStats?.().total ?? -1;
+        }
+        const button = document.querySelector("[data-media-filter]");
+        const parts = counts.photo + counts.video + counts.live_photo;
+        return [{
+            name: "mobile:media-filter",
+            ok: !!button && counts.photo > 0 && counts.video > 0 && counts.live_photo > 0 && parts === counts.all
+                && mediaFilter === "all",
+            detail: { ...counts, mapTotals: drawn },
+        }];
+    }
+
+    // Photos / videos / Live Photos. Rust narrows the query index, so the
+    // map, the timeline and the album all follow without knowing about it.
+    let mediaFilter = $state<MediaFilter>("all");
+    async function setMediaFilter(next: MediaFilter) {
+        try {
+            await invoke("set_media_filter", { filter: next === "all" ? null : next });
+            mediaFilter = next;
+            albumReturn = null;
+            bumpRefresh();
+        } catch (e) {
+            console.error("[filter] set_media_filter failed", e);
+        }
     }
 
     let dbPath = $state("");
@@ -298,6 +335,7 @@
                     openPreview: () => (window as any).__footosOpenPreview(),
                     closePreview: () => closePreview(),
                     bootMarks: () => boot.marks,
+                    extraSteps: agentFilterSteps,
                 });
             }
         } catch (e) {
@@ -641,6 +679,8 @@
                 <i class="fa-solid fa-gear text-lg"></i>
             </button>
 
+            <MediaFilterButton value={mediaFilter} onChange={setMediaFilter} {t} />
+
             <!-- Back to the list a photo was located from -->
             {#if albumReturn && !albumGrid}
                 <button
@@ -714,6 +754,7 @@
         onOpen={openAlbumItem}
         onLocate={locateAlbumItem}
         nativeMenu={platformService.capabilities.nativeContextMenu}
+        requestThumbs={platformService.requestGridThumbs ? (paths, onReady) => platformService.requestGridThumbs!(paths, onReady) : undefined}
         onClose={closeAlbum}
         {t}
         {locale}

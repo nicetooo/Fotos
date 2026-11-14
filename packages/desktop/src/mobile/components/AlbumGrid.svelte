@@ -9,7 +9,9 @@
      * like the system Photos app. Tapping a cell opens the viewer on that item.
      * Only the rows near the viewport are in the DOM.
      */
-    let { items, total, initialIndex = null, onOpen, onLocate, nativeMenu = false, onClose, t, locale } = $props<{
+    let { items, total, initialIndex = null, onOpen, onLocate, nativeMenu = false, requestThumbs = undefined, onClose, t, locale } = $props<{
+        /** Asks the platform for sharper thumbnails of the given item paths. */
+        requestThumbs?: (paths: string[], onReady: (thumbs: Record<string, string>) => void) => void;
         /** Time-ordered, oldest first. */
         items: AlbumItem[];
         /** How many matched in all (may be more than `items`). */
@@ -56,6 +58,19 @@
             out.push({ item: items[index], index });
         }
         return out;
+    });
+
+    // The stored thumbnails are small (made for the map). Once scrolling
+    // settles, ask for sharp ones for what is on screen and swap them in.
+    let sharp = $state<Record<string, string>>({});
+    $effect(() => {
+        if (!requestThumbs) return;
+        const wanted = visible.map((v) => v.item.path).filter((path) => !(path in sharp));
+        if (wanted.length === 0) return;
+        const timer = setTimeout(() => {
+            requestThumbs(wanted, (thumbs: Record<string, string>) => { sharp = { ...sharp, ...thumbs }; });
+        }, 120);
+        return () => clearTimeout(timer);
     });
 
     /** Scroll so that `index` is on screen (used when the viewer closes). */
@@ -273,7 +288,7 @@
                     oncontextmenu={(e: Event) => { if (!nativeMenu) e.preventDefault(); }}
                 >
                     {#if item.thumb}
-                        <img src={convertFileSrc(item.thumb)} alt="" loading="lazy" decoding="async" draggable="false" />
+                        <img src={convertFileSrc(sharp[item.path] ?? item.thumb)} alt="" loading="lazy" decoding="async" draggable="false" />
                     {/if}
                     {#if item.media_type === "video"}
                         <span class="badge">{duration(item.duration_ms)}</span>

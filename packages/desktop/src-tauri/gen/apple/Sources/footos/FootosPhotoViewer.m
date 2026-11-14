@@ -15,6 +15,9 @@ static const CGFloat kThumbH = 48.0;
 static const CGFloat kThumbGap = 2.0;
 static const CGFloat kStripHeight = 56.0;
 static const CGFloat kMaxZoom = 4.0;
+/// Longest side of the image loaded for zooming. A 24 MP photo fits whole;
+/// larger ones are scaled to this, which keeps one decoded image near 110 MB.
+static const CGFloat kZoomMaxPixel = 6048.0;
 static const CGFloat kDoubleTapZoom = 2.5;
 static const CGFloat kDismissDistance = 110.0;
 static const CGFloat kDismissVelocity = 900.0;
@@ -132,6 +135,10 @@ static void FVActivatePlaybackAudio(void) {
 @property (nonatomic, strong) UILabel *liveBadge;
 @property (nonatomic, assign) PHImageRequestID imageRequest;
 @property (nonatomic, assign) BOOL hasFullImage;
+/// The full-resolution image was asked for (the user zoomed in).
+@property (nonatomic, assign) BOOL wantsOriginal;
+@property (nonatomic, assign) BOOL hasOriginal;
+@property (nonatomic, assign) PHImageRequestID originalRequest;
 @property (nonatomic, assign) BOOL livePressed;
 @property (nonatomic, strong, nullable) id playbackObserver;
 @end
@@ -161,6 +168,7 @@ static void FVActivatePlaybackAudio(void) {
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.clearColor;
     self.imageRequest = PHInvalidImageRequestID;
+    self.originalRequest = PHInvalidImageRequestID;
     self.asset = FVAsset(FVString(self.item, @"path"));
 
     self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
@@ -230,11 +238,15 @@ static void FVActivatePlaybackAudio(void) {
     [self stopPlayback];
     [self stopLivePhoto];
     [self.scrollView setZoomScale:1.0 animated:NO];
+    [self dropOriginal];
 }
 
 - (void)dealloc {
     if (_imageRequest != PHInvalidImageRequestID) {
         [[PHImageManager defaultManager] cancelImageRequest:_imageRequest];
+    }
+    if (_originalRequest != PHInvalidImageRequestID) {
+        [[PHImageManager defaultManager] cancelImageRequest:_originalRequest];
     }
     if (_playbackObserver) {
         [[NSNotificationCenter defaultCenter] removeObserver:_playbackObserver];
@@ -272,7 +284,9 @@ static void FVActivatePlaybackAudio(void) {
             }
             dispatch_async(dispatch_get_main_queue(), ^{
                 weakSelf.hasFullImage = YES;
-                weakSelf.imageView.image = image;
+                if (!weakSelf.hasOriginal) {
+                    weakSelf.imageView.image = image;
+                }
             });
         }];
         return;
@@ -289,12 +303,88 @@ static void FVActivatePlaybackAudio(void) {
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             weakSelf.hasFullImage = YES;
-            weakSelf.imageView.image = image;
+            if (!weakSelf.hasOriginal) {
+                weakSelf.imageView.image = image;
+            }
         });
     });
 }
 
+/// The screen-sized image is all that is needed until the user zooms in;
+/// then the picture is loaded at its own resolution and swapped in.
+- (void)loadOriginal {
+    if (self.wantsOriginal || [self isVideo]) {
+        return;
+    }
+    self.wantsOriginal = YES;
+    __weak typeof(self) weakSelf = self;
+    void (^show)(UIImage *) = ^(UIImage *image) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Zoomed back out or swiped away in the meantime.
+            if (!image || !weakSelf.wantsOriginal) {
+                return;
+            }
+            weakSelf.hasOriginal = YES;
+            weakSelf.imageView.image = image;
+        });
+    };
+
+    if (self.asset) {
+        CGFloat width = (CGFloat)MAX(self.asset.pixelWidth, 1);
+        CGFloat height = (CGFloat)MAX(self.asset.pixelHeight, 1);
+        CGFloat longSide = MAX(width, height);
+        if (longSide > kZoomMaxPixel) {
+            width *= kZoomMaxPixel / longSide;
+            height *= kZoomMaxPixel / longSide;
+        }
+        PHImageRequestOptions *options = [[PHImageRequestOptions alloc] init];
+        options.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
+        options.resizeMode = PHImageRequestOptionsResizeModeExact;
+        options.networkAccessAllowed = YES;
+        self.originalRequest = [[PHImageManager defaultManager]
+            requestImageForAsset:self.asset
+                      targetSize:CGSizeMake(width, height)
+                     contentMode:PHImageContentModeAspectFit
+                         options:options
+                   resultHandler:^(UIImage *image, NSDictionary *info) {
+            if ([info[PHImageResultIsDegradedKey] boolValue]) {
+                return;
+            }
+            show(image);
+        }];
+        return;
+    }
+    NSString *file = FVString(self.item, @"path");
+    dispatch_async(FVDecodeQueue(), ^{
+        show(FVDownsample(file, kZoomMaxPixel));
+    });
+}
+
+/// Back to the screen-sized image, so a page that is off screen does not
+/// keep a full-resolution picture in memory.
+- (void)dropOriginal {
+    if (!self.wantsOriginal) {
+        return;
+    }
+    self.wantsOriginal = NO;
+    if (self.originalRequest != PHInvalidImageRequestID) {
+        [[PHImageManager defaultManager] cancelImageRequest:self.originalRequest];
+        self.originalRequest = PHInvalidImageRequestID;
+    }
+    if (self.hasOriginal) {
+        self.hasOriginal = NO;
+        self.hasFullImage = NO;
+        [self loadImage];
+    }
+}
+
 #pragma mark Zoom
+
+- (void)scrollViewDidZoom:(UIScrollView *)scrollView {
+    if (scrollView.zoomScale > scrollView.minimumZoomScale + 0.05) {
+        [self loadOriginal];
+    }
+}
 
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
     return self.imageView;

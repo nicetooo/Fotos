@@ -177,9 +177,19 @@ lsof -i:1420 || echo "Port 1420 is free"
 
 ## 数据库
 
-SQLite 单表 `photos`，关键字段：`path`(唯一)、`hash`(感知哈希去重)、`lat/lon`(地理位置)、`date_taken`、`media_type`(photo / video / live_photo)、`video_path`(实况照片的配对视频)
+SQLite 表 `photos`（另有 `library_roots` 记录导入过的文件夹），关键字段：`path`(唯一)、`hash`(内容哈希去重)、`file_size`/`file_mtime`(增量扫描比对)、`lat/lon`(地理位置)、`date_taken`、`media_type`(photo / video / live_photo)、`video_path`(实况照片的配对视频)
 
 iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localIdentifier>`，原片在查看时按需导出。
+
+## 桌面端导入与增量扫描
+
+- **判重按文件内容**：`compute_content_hash`（大小 + 头尾各 64KB 的 FNV-1a，`c:<hex>`）。内容相同、路径不同才算重复；连拍、RAW+JPEG、相似照片都各自入库
+- ❌ 导入**永远不删用户的文件**。只有应用自己 `Photos/` 目录下的拷贝（移动端）可以删
+- **分批**：`import_files` 每批 256 个：并行哈希 → 判重 → 并行元数据+缩略图 → 一个事务 → `import-progress`。前端按进度刷新，每秒最多一次
+- **记住文件夹**：导入文件夹时写入 `library_roots`；`rescan_library` 用 core 的纯函数 `plan_rescan` 比对 (路径, 大小, 修改时间)，处理新增/修改/删除/移动（内容相同且旧路径已不存在 → 行跟着走）。桌面端启动时自动跑一次，导入菜单里有「重新扫描」，设置页「照片文件夹」可移除
+- **防误删**：文件夹读不了（外接盘没插）整个跳过；扫出 0 个文件时不删记录
+- **缩略图**：先取内嵌预览，没有就解码缩小（RAW 除外）
+- 测试：`IMPORT=1 ./scripts/agent-test/run-desktop.sh`（应用内）；`FOOTOS_IMPORT_FIXTURE=<dir> FOOTOS_IMPORT_EXPECTED=<n> cargo test import_fixture`（改/删/增/移/离线，fixture 由 `scripts/agent-test/make-import-fixture.py` 生成）
 
 ## 技术栈
 
@@ -234,6 +244,8 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 - ❌ 禁止把整个照片库传给地图组件或在前端聚类（成本随库规模线性增长）
 - ✅ 地图只画 Rust 返回的结果：`query_map(bbox, zoom, start_ms, end_ms)` 在 `footos-core` 的 `GeoIndex` 里按世界对齐网格聚类，只返回（外扩 50% 的）视口内的聚类和单点
 - ✅ 结果 `setData` 到**非聚类**的 GeoJSON Source，由 Symbol/Circle Layer 绘制；`count > 1` 为聚类
+- 聚类按**整格**统计：查询框碰到的格子完整计入（外加 2 格边距），聚类的数量和位置与视口无关，拖动时不会变。❌ 不要改回只统计框内的点
+- iOS 系统地图的缩放级别会随南北向拖动漂移，`NativeMap.svelte` 的 `clusterLevel()` 给聚类级别加了 0.3 的粘滞，避免在整数附近来回重聚
 - 触发查询：`move`（节流 120ms）、`moveend`、时间过滤变化、`refreshKey` 变化（库有变更）
 - 缩略图通过 `map.addImage()` 注入 GL atlas，由 `styleimagemissing` 事件按需加载。图片 ID 由缩略图路径决定（`thumb:<path>` / `cthumb:<path>`），重新查询后不会失效
 - 图层 ID：`CLUSTER_THUMB_LAYER_ID`（聚类缩略图）、`UNCLUSTERED_THUMB_LAYER_ID`（单点缩略图）
@@ -310,6 +322,7 @@ iOS 的底图是系统地图（大陆上架要求合规底图；OSM 的边界画
 - 移动端和桌面端的 `App.svelte` 都不保存照片列表。地图、时间轴、查看器、图库抽屉各自向 Rust 查询当前需要的那一部分
 - 查看器：`query_album(center_id, radius)` 取时间顺序相册里当前照片前后各 300 张的窗口；浏览到距边缘 60 张以内时，停顿 500ms 后以当前照片为中心重新取
 - 地图右下角控件从上到下：显示所有照片、放大/缩小/指北、「浏览当前区域照片」（单独在最下面）。后者用 `query_album_in(视口 bbox, 时间过滤, limit=1000)` 取视口内按时间排序的照片（超出时保留最新的），先打开网格（`mobile/components/AlbumGrid.svelte`，虚拟滚动，停在最新），点格子再进查看器。这份列表是固定的，浏览时不换成全库窗口。网格里长按：iOS 走系统上下文菜单（格子是 `footos-album://item/<index>` 链接，`PhotoLibraryBridge.m` 的 `FootosUIDelegateProxy` 接管，菜单为拷贝/分享/在地图上定位，用原图），其他平台用网格自绘的底部菜单（`capabilities.nativeContextMenu`）。定位后左上角出现「回到列表」按钮，回到原列表的同一位置
+- 移动端媒体类型过滤（左上角第三个按钮，`MediaFilterButton.svelte`）：`set_media_filter` 让 Rust 的查询索引只保留该类型，地图、时间轴、网格、查看器自动跟随；前端只需 `bumpRefresh()`，不要在各个查询里单独传过滤参数
 - 库发生变化（导入进度、删除、清空）时只递增 `refreshKey`，由地图重新查询；Rust 侧 `AppState::geo()` 按 DB 变更计数惰性重建内存索引
 - 只在照片**第一次出现**时自动 `fitBounds`；后续导入不得抢镜头
 - ❌ 禁止通过 invoke 返回全量照片对象（iOS WKWebView 上 5k+ 对象约 8s）。需要批量数值时用 `tauri::ipc::Response` 返回原始字节

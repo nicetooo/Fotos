@@ -38,6 +38,8 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
 @property (nonatomic, copy) NSDictionary<NSString *, NSString *> *albumMenuTitles;
 /// What the chosen menu item does, held until the menu has finished closing.
 @property (nonatomic, copy) void (^albumPendingAction)(void);
+@property (nonatomic, strong) dispatch_queue_t gridQueue;
+@property (atomic, assign) NSInteger gridGeneration;
 @property (nonatomic, copy) NSString *dbPath;
 @property (nonatomic, copy) NSString *thumbDir;
 @property (nonatomic, assign) BOOL attached;
@@ -79,6 +81,8 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
 - (void)emitViewerStill:(NSString *)path identifier:(NSString *)identifier;
 - (void)presentAccessDeniedAlert;
 - (void)clearExportCaches;
+- (NSString *)gridThumbDir;
+- (void)makeGridThumbsForIdentifiers:(NSArray<NSString *> *)identifiers;
 - (NSInteger)albumIndexForURL:(NSURL *)url;
 - (UIContextMenuConfiguration *)albumMenuForIndex:(NSInteger)index;
 - (void)albumMenuAction:(NSString *)action index:(NSInteger)index;
@@ -104,6 +108,7 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
     if (self) {
         _pendingExportPaths = [NSMutableArray array];
         _exportLock = [[NSLock alloc] init];
+        _gridQueue = dispatch_queue_create("app.footos.grid-thumbs", DISPATCH_QUEUE_SERIAL);
         _locationManager = [[CLLocationManager alloc] init];
     }
     return self;
@@ -353,6 +358,11 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
         [self requestAccessAndSyncPresentLimitedPicker:YES];
         return;
     }
+    if ([command isEqualToString:@"gridThumbs"]) {
+        NSArray *ids = [body[@"identifiers"] isKindOfClass:[NSArray class]] ? body[@"identifiers"] : @[];
+        [self makeGridThumbsForIdentifiers:ids];
+        return;
+    }
     if ([command isEqualToString:@"exportOriginal"]) {
         NSString *identifier = [body[@"identifier"] isKindOfClass:[NSString class]] ? body[@"identifier"] : @"";
         [self exportOriginalForIdentifier:identifier];
@@ -477,6 +487,7 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
         [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-live"],
         [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-share"],
         [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-originals"],
+        [self gridThumbDir],
     ]];
     if (self.thumbDir.length > 0) {
         [dirs addObject:[[self.thumbDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Photos"]];
@@ -746,6 +757,87 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
     if (fileSize) {
         *fileSize = data.length;
     }
+}
+
+#pragma mark Sharp thumbnails for the album grid
+
+/// The thumbnails made during sync are small and come from the library's
+/// ready-made (low quality) ones, which is right for the map. The album grid
+/// shows cells at ~300 px, so it asks for better ones for what is on screen.
+/// They live in Caches: the system may drop them, and they are made again.
+- (NSString *)gridThumbDir {
+    NSString *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject
+        ?: NSTemporaryDirectory();
+    return [caches stringByAppendingPathComponent:@"footos-grid"];
+}
+
+- (void)makeGridThumbsForIdentifiers:(NSArray<NSString *> *)identifiers {
+    // Only the latest request matters: what was asked for before has scrolled away.
+    NSInteger generation = ++self.gridGeneration;
+    if (identifiers.count == 0) {
+        return;
+    }
+    dispatch_async(self.gridQueue, ^{
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *dir = [self gridThumbDir];
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+        PHFetchResult<PHAsset *> *assets = [PHAsset fetchAssetsWithLocalIdentifiers:identifiers options:nil];
+        NSMutableDictionary<NSString *, PHAsset *> *byId = [NSMutableDictionary dictionary];
+        for (PHAsset *asset in assets) {
+            byId[asset.localIdentifier] = asset;
+        }
+        PHImageRequestOptions *opts = [[PHImageRequestOptions alloc] init];
+        opts.synchronous = YES;
+        opts.networkAccessAllowed = NO;
+        opts.resizeMode = PHImageRequestOptionsResizeModeFast;
+        opts.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
+
+        NSMutableDictionary<NSString *, NSString *> *ready = [NSMutableDictionary dictionary];
+        void (^flush)(void) = ^{
+            if (ready.count == 0) {
+                return;
+            }
+            NSDictionary *detail = @{@"thumbs": [ready copy]};
+            [ready removeAllObjects];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self emitEvent:@"ios-grid-thumbs" detail:detail];
+            });
+        };
+        for (NSString *identifier in identifiers) {
+            if (self.gridGeneration != generation) {
+                break;
+            }
+            PHAsset *asset = byId[identifier];
+            if (!asset) {
+                continue;
+            }
+            @autoreleasepool {
+                NSString *path = [dir stringByAppendingPathComponent:
+                    [NSString stringWithFormat:@"%@.jpg", [self safeIdForAsset:asset]]];
+                if (![fm fileExistsAtPath:path]) {
+                    __block UIImage *image = nil;
+                    [[PHImageManager defaultManager] requestImageForAsset:asset
+                                                               targetSize:CGSizeMake(400, 400)
+                                                              contentMode:PHImageContentModeAspectFill
+                                                                  options:opts
+                                                            resultHandler:^(UIImage *result, NSDictionary *info) {
+                        (void)info;
+                        image = result;
+                    }];
+                    NSData *data = image ? UIImageJPEGRepresentation(image, 0.8) : nil;
+                    if (data.length == 0 || ![data writeToFile:path atomically:YES]) {
+                        continue;
+                    }
+                }
+                ready[identifier] = path;
+            }
+            if (ready.count >= 8) {
+                flush();
+            }
+        }
+        flush();
+    });
 }
 
 - (NSString *)writeViewerStillForAsset:(PHAsset *)asset toDirectory:(NSString *)exportDir {
