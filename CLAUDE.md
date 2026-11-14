@@ -80,6 +80,8 @@ src/
 - 仅 `shared/` 下的纯逻辑（utils、i18n、类型）可复用
 - 入口根据平台加载 `desktop/App.svelte` 或 `mobile/App.svelte`
 
+**视觉约定**：扁平设计，按钮和浮在地图上的控件一律不加阴影（`shadow-*` / `box-shadow`），也不加背景模糊。
+
 **跨平台只共享**：
 - 组件命名（如都叫 `ImagePreview.svelte`）
 - Props 命名（如都用 `photo`、`onClose`）

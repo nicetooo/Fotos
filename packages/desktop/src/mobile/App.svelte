@@ -621,7 +621,7 @@
                 onclick={() => (hasFullAccess ? handleRefresh() : handleImport())}
                 disabled={isScanning || refreshing}
                 data-import-button
-                class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                class="w-12 h-12 rounded-full theme-bg-card border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center transition-all"
                 title={hasFullAccess ? t.import.refresh : t.import.importPhotos}
                 aria-label={hasFullAccess ? t.import.refresh : t.import.importPhotos}
             >
@@ -635,7 +635,7 @@
             <!-- Settings button -->
             <button
                 onclick={openSettings}
-                class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all"
+                class="w-12 h-12 rounded-full theme-bg-card border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center transition-all"
                 title={t.common.settings}
             >
                 <i class="fa-solid fa-gear text-lg"></i>
@@ -646,7 +646,7 @@
                 <button
                     onclick={returnToAlbum}
                     data-album-return
-                    class="h-12 pl-3 pr-4 rounded-full bg-[var(--accent)] text-black font-medium text-sm flex items-center gap-2 shadow-lg transition-all whitespace-nowrap self-start"
+                    class="h-12 pl-3 pr-4 rounded-full bg-[var(--accent)] text-black font-medium text-sm flex items-center gap-2 transition-all whitespace-nowrap self-start"
                     aria-label={t.map.backToList}
                 >
                     <i class="fa-solid fa-chevron-left"></i>
@@ -681,7 +681,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
         data-map-blocker
-        class="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-end justify-center"
+        class="fixed inset-0 z-[2000] bg-black/50 flex items-end justify-center"
         onclick={closeSettings}
     >
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->

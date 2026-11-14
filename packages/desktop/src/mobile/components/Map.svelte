@@ -882,7 +882,7 @@
         <!-- Time range indicator -->
         {#if timeRangeDisplay && hasGeotaggedPhotos}
             <div class="absolute left-1/2 -translate-x-1/2 z-[1000] pointer-events-none max-w-[95%]" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
-                <div class="px-3 py-1.5 text-[11px] theme-bg-card rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-1.5">
+                <div class="px-3 py-1.5 text-[11px] theme-bg-card rounded-full theme-text-primary font-medium flex items-center gap-1.5">
                     <i class="fa-regular fa-calendar text-[var(--accent)] text-[10px] flex-shrink-0"></i>
                     <span class="tabular-nums whitespace-nowrap">{timeRangeDisplay}</span>
                 </div>
@@ -947,6 +947,8 @@
         color: #818cf8 !important;
     }
     :global(.maplibregl-ctrl-group) {
+        /* Flat: no shadows on controls anywhere in the app. */
+        box-shadow: none !important;
         background: rgba(15, 23, 42, 0.9) !important;
         border: 1px solid rgba(255, 255, 255, 0.1) !important;
     }

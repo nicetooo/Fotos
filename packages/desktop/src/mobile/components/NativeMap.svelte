@@ -449,7 +449,7 @@
         <!-- Time range indicator -->
         {#if timeRangeDisplay && hasGeotaggedPhotos}
             <div class="absolute left-1/2 -translate-x-1/2 z-[1000] pointer-events-none max-w-[95%]" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
-                <div class="px-3 py-1.5 text-[11px] theme-bg-card rounded-full theme-text-primary font-medium shadow-lg flex items-center gap-1.5">
+                <div class="px-3 py-1.5 text-[11px] theme-bg-card rounded-full theme-text-primary font-medium flex items-center gap-1.5">
                     <i class="fa-regular fa-calendar text-[var(--accent)] text-[10px] flex-shrink-0"></i>
                     <span class="tabular-nums whitespace-nowrap">{timeRangeDisplay}</span>
                 </div>
@@ -523,8 +523,8 @@
         flex-direction: column;
         border-radius: 8px;
         overflow: hidden;
+        /* Flat: no shadows on controls anywhere in the app. */
         background: rgba(15, 23, 42, 0.9);
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
     }
     :global(:root.light) .group {
         background: rgba(255, 255, 255, 0.95);
