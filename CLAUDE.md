@@ -236,6 +236,18 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 - 缩略图通过 `map.addImage()` 注入 GL atlas，由 `styleimagemissing` 事件按需加载。图片 ID 由缩略图路径决定（`thumb:<path>` / `cthumb:<path>`），重新查询后不会失效
 - 图层 ID：`CLUSTER_THUMB_LAYER_ID`（聚类缩略图）、`UNCLUSTERED_THUMB_LAYER_ID`（单点缩略图）
 
+### iOS：系统地图（MapKit），不是 MapLibre
+
+iOS 的底图是系统地图（大陆上架要求合规底图；OSM 的边界画法不合规）。安卓和桌面仍是下面说的 MapLibre。
+
+- `MKMapView` 垫在**透明的 WKWebView 下面**，frame 等于网页里地图区域的矩形（`gen/apple/Sources/footos/FootosMapView.m`）。按钮、日期条、时间轴、网格、设置仍是网页
+- 前端用 `mobile/components/NativeMap.svelte`（`capabilities.nativeMap`）。数据流与 MapLibre 版完全相同：原生上报可视范围 → JS `query_map` → 把要素发回原生按 `key` 增删改。聚类仍在 Rust
+- 触摸分发：WebView 的 `hitTest` 被运行时子类接管。地图矩形内、不在 `data-map-overlay` 元素上、且页面上没有 `data-map-blocker` / `[data-album-grid]` / `[data-photo-viewer]` 时，触摸交给地图。**新增盖在地图上的网页控件必须加 `data-map-overlay`，新增全屏弹层必须加 `data-map-blocker`**，否则点不到或者会穿透
+- 网页不能给地图区域上背景色（`:root.native-map` 下 html/body/main 透明）
+- 缩放一律换算成 MapLibre 口径（世界宽 512·2^z）；`MKMapView` 的布局边距必须清零，否则相机请求会差约 0.15 级，聚类粒度就错了
+- 大陆境内系统地图是 GCJ-02：原生侧显示前做 WGS→GCJ，上报范围时反向换算。是否启用**只按时区**判断（Asia/Shanghai、Asia/Urumqi 等；没有公开接口）。不要用地区/语言设置：手机设成 zh_CN 但人在境外时底图不加偏，换算反而会把照片挪开几百米（实测踩过）
+- 自测仍用 `window.__footosMap`（`NativeMap` 提供同名垫片）；fps 只代表网页线程
+
 ### 聚类点击定位：fitBounds 到成员包围盒
 
 - ✅ 每个聚类要素带有成员的包围盒（属性 `w/s/e/n`，Rust 计算），点击时直接 `fitBounds`

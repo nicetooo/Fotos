@@ -21,6 +21,8 @@
 		FCE945A259B8DE9F2DB2C21A /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3C5F59F097E9A423B9468EA2 /* LaunchScreen.storyboard */; };
 		A1B2C3D4E5F60718293A4B01 /* PhotoLibraryBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */; };
 		A1B2C3D4E5F60718293A4C01 /* FootosPhotoViewer.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C02 /* FootosPhotoViewer.m */; };
+		A1B2C3D4E5F60718293A4D01 /* FootosMapView.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D02 /* FootosMapView.m */; };
+		A1B2C3D4E5F60718293A4D03 /* MapKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D04 /* MapKit.framework */; };
 		A1B2C3D4E5F60718293A4B03 /* Photos.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B04 /* Photos.framework */; };
 		A1B2C3D4E5F60718293A4B06 /* PhotosUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B07 /* PhotosUI.framework */; };
 		A1B2C3D4E5F60718293A4B09 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B08 /* Network.framework */; };
@@ -36,6 +38,9 @@
 		754807A182CCEB708272091A /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PhotoLibraryBridge.m; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4C02 /* FootosPhotoViewer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FootosPhotoViewer.m; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4D02 /* FootosMapView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FootosMapView.m; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4D05 /* FootosMapView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FootosMapView.h; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4D04 /* MapKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MapKit.framework; path = System/Library/Frameworks/MapKit.framework; sourceTree = SDKROOT; };
 		A1B2C3D4E5F60718293A4B05 /* PhotoLibraryBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PhotoLibraryBridge.h; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4C05 /* FootosPhotoViewer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FootosPhotoViewer.h; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B04 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
@@ -73,6 +78,7 @@
 				A1B2C3D4E5F60718293A4B06 /* PhotosUI.framework in Frameworks */,
 				A1B2C3D4E5F60718293A4B09 /* Network.framework in Frameworks */,
 				A1B2C3D4E5F60718293A4B0B /* CoreLocation.framework in Frameworks */,
+				A1B2C3D4E5F60718293A4D03 /* MapKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +133,7 @@
 				A1B2C3D4E5F60718293A4B07 /* PhotosUI.framework */,
 				A1B2C3D4E5F60718293A4B08 /* Network.framework */,
 				A1B2C3D4E5F60718293A4B0A /* CoreLocation.framework */,
+				A1B2C3D4E5F60718293A4D04 /* MapKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -169,8 +176,10 @@
 				813D781A90AA13FEA681DA0F /* main.mm */,
 				A1B2C3D4E5F60718293A4B05 /* PhotoLibraryBridge.h */,
 				A1B2C3D4E5F60718293A4C05 /* FootosPhotoViewer.h */,
+				A1B2C3D4E5F60718293A4D05 /* FootosMapView.h */,
 				A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */,
 				A1B2C3D4E5F60718293A4C02 /* FootosPhotoViewer.m */,
+				A1B2C3D4E5F60718293A4D02 /* FootosMapView.m */,
 				C759D25BA82D99E92B87B39A /* bindings */,
 			);
 			path = footos;
@@ -272,6 +281,7 @@
 				B2420FCD73C6EBF096244639 /* main.mm in Sources */,
 				A1B2C3D4E5F60718293A4B01 /* PhotoLibraryBridge.m in Sources */,
 				A1B2C3D4E5F60718293A4C01 /* FootosPhotoViewer.m in Sources */,
+				A1B2C3D4E5F60718293A4D01 /* FootosMapView.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

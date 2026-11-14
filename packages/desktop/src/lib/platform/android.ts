@@ -48,6 +48,7 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
         runtimePermissions: true,
         revealInFileManager: false,
         folderSelection: false,
+        nativeMap: false,
         nativeContextMenu: false,
         nativePhotoViewer: true,
     };

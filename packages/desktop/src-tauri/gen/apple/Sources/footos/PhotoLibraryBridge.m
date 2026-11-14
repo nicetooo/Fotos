@@ -1,5 +1,6 @@
 #import "PhotoLibraryBridge.h"
 #import "FootosPhotoViewer.h"
+#import "FootosMapView.h"
 
 #import <CoreLocation/CoreLocation.h>
 #import <Network/Network.h>
@@ -309,6 +310,13 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
 
     if ([body[@"deniedAlert"] isKindOfClass:[NSDictionary class]]) {
         self.deniedAlertTexts = body[@"deniedAlert"];
+    }
+    if ([command hasPrefix:@"map"] && self.webView) {
+        __weak typeof(self) weakSelf = self;
+        [[FootosMapView shared] handleCommand:command body:body webView:self.webView eval:^(NSString *js) {
+            [weakSelf eval:js];
+        }];
+        return;
     }
     if ([command isEqualToString:@"clearCaches"]) {
         [self clearExportCaches];

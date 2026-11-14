@@ -614,7 +614,7 @@
         <MapView {refreshKey} {libraryCount} onOpenPreview={openPreview} onOpenAlbum={openViewportAlbum} focusRequest={mapFocus} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
 
         <!-- Floating action buttons (top-left, vertical) -->
-        <div class="absolute left-4 z-[1001] flex flex-col gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
+        <div data-map-overlay class="absolute left-4 z-[1001] flex flex-col gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
             <!-- Add photos while access is partial; with access to the whole
                  library there is nothing to pick, so the same button re-syncs. -->
             <button
@@ -657,7 +657,7 @@
 
         <!-- Import progress indicator -->
         {#if isScanning}
-            <div class="absolute left-20 z-[1001] px-3 py-2 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-sm text-white/80 flex items-center gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
+            <div data-map-overlay class="absolute left-20 z-[1001] px-3 py-2 rounded-full bg-black/70 backdrop-blur-sm border border-white/20 text-sm text-white/80 flex items-center gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
                 <i class="fa-solid fa-spinner fa-spin text-xs"></i>
                 {#if importStatus.total > 0}
                     <span>{importStatus.current} / {importStatus.total}</span>
@@ -680,6 +680,7 @@
 {#if showSettings}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
+        data-map-blocker
         class="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-end justify-center"
         onclick={closeSettings}
     >

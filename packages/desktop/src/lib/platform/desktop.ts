@@ -38,6 +38,7 @@ class DesktopPlatformService implements PlatformService {
         runtimePermissions: false,
         revealInFileManager: true,
         folderSelection: true,
+        nativeMap: false,
         nativeContextMenu: false,
         nativePhotoViewer: false,
     };

@@ -26,6 +26,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         runtimePermissions: true,
         revealInFileManager: false,
         folderSelection: false,
+        nativeMap: true,
         nativeContextMenu: true,
         nativePhotoViewer: true,
     };
@@ -360,6 +361,11 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         void invoke("flush_photos_db").catch((e) => console.warn("[iOS] flush_photos_db", e));
         this.completeCallbacks.forEach(cb => cb(result));
         this.scanningCallbacks.forEach(cb => cb(false));
+    }
+
+    nativeMapCommand(name: string, payload: Record<string, unknown> = {}): void {
+        const handler = (window as any).webkit?.messageHandlers?.footosPhotos;
+        handler?.postMessage({ command: name, ...payload });
     }
 
     setAlbumMenuContext(items: NativeViewerItem[], titles: { copy: string; share: string; locate: string }): void {

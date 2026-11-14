@@ -1,6 +1,7 @@
 <script lang="ts">
     import Map from "./Map.svelte";
-    import { getPlatformService } from "../../lib/platform";
+    import NativeMap from "./NativeMap.svelte";
+    import { getPlatformService, type IOSPlatformService } from "../../lib/platform";
     import type { Translations } from "../../shared/i18n/types";
     import type { Locale } from "../../shared/i18n/types";
     import type { Bbox } from "../../shared/query";
@@ -17,7 +18,17 @@
         isSyncing?: boolean;
     }>();
 
-    const tileConfig = getPlatformService().getMapTileConfig();
+    const platform = getPlatformService();
+    const tileConfig = platform.getMapTileConfig();
+    // The platform's own map where there is one; the web map everywhere else.
+    const nativeCommand = platform.capabilities.nativeMap
+        ? (name: string, payload?: Record<string, unknown>) =>
+              (platform as IOSPlatformService).nativeMapCommand(name, payload)
+        : null;
 </script>
 
-<Map {refreshKey} {libraryCount} {onOpenPreview} {onOpenAlbum} {focusRequest} {theme} {tileConfig} {t} {locale} {isSyncing} />
+{#if nativeCommand}
+    <NativeMap {refreshKey} {libraryCount} {onOpenPreview} {onOpenAlbum} {focusRequest} {theme} command={nativeCommand} {t} {locale} {isSyncing} />
+{:else}
+    <Map {refreshKey} {libraryCount} {onOpenPreview} {onOpenAlbum} {focusRequest} {theme} {tileConfig} {t} {locale} {isSyncing} />
+{/if}

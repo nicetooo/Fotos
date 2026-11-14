@@ -15,6 +15,8 @@ export interface PlatformCapabilities {
     revealInFileManager: boolean;
     /** 支持文件夹选择 (Desktop: true, Mobile: false) */
     folderSelection: boolean;
+    /** 地图由平台自己的地图视图绘制，垫在透明的 WebView 下面 (iOS: true)。为 false 时用 MapLibre */
+    nativeMap: boolean;
     /** 相册网格的长按菜单由系统原生菜单承担 (iOS: true)。为 false 时网格自己画菜单 */
     nativeContextMenu: boolean;
     /** 有原生照片查看器 (iOS、Android: true)。为 true 时用 openNativeViewer，否则用 Web 查看器 */
@@ -143,6 +145,9 @@ export interface IOSPlatformService extends PlatformService, NativeViewerHost {
      * 网格格子是 `footos-album://item/<index>` 链接，长按时系统菜单按下标取条目。
      */
     setAlbumMenuContext(items: NativeViewerItem[], titles: { copy: string; share: string; locate: string }): void;
+
+    /** 给原生地图发一条命令（mapAttach / mapSetFeatures / …，见 FootosMapView.h） */
+    nativeMapCommand(name: string, payload?: Record<string, unknown>): void;
 
     /** 没有权限时用户点了导入：原生提示框的文案 */
     setAccessDeniedTexts(texts: { title: string; message: string; settings: string; cancel: string }): void;
