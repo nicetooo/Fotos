@@ -18,6 +18,29 @@
 
     let clearCacheLoading = $state(false);
 
+    interface LibraryRoot { path: string; last_scan: number; available: boolean; photos: number }
+    let roots = $state<LibraryRoot[]>([]);
+
+    async function loadRoots() {
+        try {
+            roots = await invoke("list_library_roots");
+        } catch (e) {
+            console.error("[settings] list_library_roots failed", e);
+        }
+    }
+    $effect(() => { void loadRoots(); });
+
+    async function handleRemoveRoot(path: string) {
+        if (!confirm(t.settings.removeFolderConfirm)) return;
+        try {
+            await invoke("remove_library_root", { path, removePhotos: true });
+            await emit("reload-photos");
+        } catch (e) {
+            alert(String(e));
+        }
+        await loadRoots();
+    }
+
     async function handleClearCache() {
         if (!thumbDir || !dbPath) return;
 
@@ -103,6 +126,46 @@
                 </option>
             {/each}
         </select>
+    </section>
+
+    <!-- Photo folders -->
+    <section class="mb-6">
+        <h3 class="text-sm theme-text-muted mb-1">{t.settings.libraryFolders}</h3>
+        <p class="text-xs theme-text-muted mb-3">{t.settings.libraryFoldersHint}</p>
+        {#if roots.length === 0}
+            <p class="text-sm theme-text-muted py-2">{t.settings.noFolders}</p>
+        {:else}
+            <div class="space-y-1">
+                {#each roots as root (root.path)}
+                    <div class="flex items-center justify-between py-2">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-xs theme-text-secondary font-mono truncate" title={root.path}>{root.path}</p>
+                            <p class="text-xs theme-text-muted">
+                                {root.photos} {t.settings.folderItems}
+                                {#if !root.available}
+                                    · <span class="text-amber-500">{t.settings.folderOffline}</span>
+                                {/if}
+                            </p>
+                        </div>
+                        {#if root.available}
+                            <button
+                                onclick={() => handleOpenPath(root.path)}
+                                class="ml-3 p-1.5 rounded hover:theme-bg-tertiary theme-text-muted hover:theme-text-primary text-xs"
+                            >
+                                <i class="fa-solid fa-folder-open"></i>
+                            </button>
+                        {/if}
+                        <button
+                            onclick={() => handleRemoveRoot(root.path)}
+                            title={t.settings.removeFolder}
+                            class="ml-1 p-1.5 rounded hover:theme-bg-tertiary theme-text-muted hover:text-red-500 text-xs"
+                        >
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                {/each}
+            </div>
+        {/if}
     </section>
 
     <!-- Storage -->

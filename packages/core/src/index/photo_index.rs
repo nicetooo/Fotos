@@ -73,6 +73,21 @@ impl PhotoIndex {
             let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
         }
 
+        // v4: incremental folder scans. `file_mtime` (ms since the epoch, 0 =
+        // not recorded yet) tells a modified file from an unchanged one, and
+        // `library_roots` remembers which folders to scan again.
+        if version < 4 {
+            let _ = conn.execute_batch("ALTER TABLE photos ADD COLUMN file_mtime INTEGER DEFAULT 0;");
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS library_roots (
+                    path TEXT PRIMARY KEY,
+                    added_at INTEGER NOT NULL DEFAULT 0,
+                    last_scan INTEGER NOT NULL DEFAULT 0
+                );",
+            );
+            let _ = conn.pragma_update(None, "user_version", 4);
+        }
+
         let mode: String = conn
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .unwrap_or_else(|_| journal.to_string());
@@ -96,6 +111,194 @@ impl PhotoIndex {
             .lock()
             .map_err(|e| CoreError::Database(e.to_string()))?;
         Ok(conn.query_row("SELECT total_changes()", [], |row| row.get(0))?)
+    }
+}
+
+/// Incremental import and folder scans. Plain Rust API (not exported over FFI).
+impl PhotoIndex {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, CoreError> {
+        self.conn
+            .lock()
+            .map_err(|e| CoreError::Database(e.to_string()))
+    }
+
+    /// Every row as `(id, path, size, mtime)`: what a scan is compared with.
+    pub fn path_stats(&self) -> Result<Vec<crate::fs::KnownFile>, CoreError> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, path, COALESCE(file_size, 0), COALESCE(file_mtime, 0) FROM photos",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(crate::fs::KnownFile {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                size: row.get::<_, i64>(2)?.max(0) as u64,
+                mtime_ms: row.get(3)?,
+            })
+        })?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// The row holding this content hash, if any: `(id, path)`.
+    pub fn find_by_hash(&self, hash: &str) -> Result<Option<(i64, String)>, CoreError> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare("SELECT id, path FROM photos WHERE hash = ?1 LIMIT 1")?;
+        let mut rows = stmt.query_map(params![hash], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Insert one file. Unlike `insert_media` this never merges into another
+    /// row: a path is a row, and whether a file is a duplicate is the
+    /// caller's decision. Returns `false` when the path is already there.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_file(
+        &self,
+        path: &str,
+        hash: &str,
+        metadata: &PhotoMetadata,
+        media_type: MediaType,
+        video_path: Option<&str>,
+        thumb_path: Option<&str>,
+        file_size: u64,
+        mtime_ms: i64,
+    ) -> Result<bool, CoreError> {
+        let conn = self.lock()?;
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO photos (
+                path, hash, make, model, date_taken, width, height,
+                lat, lon, iso, f_number, exposure_time, orientation,
+                media_type, duration_ms, video_codec, audio_codec, video_path,
+                thumb_path, file_size, file_mtime
+            )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            params![
+                path,
+                hash,
+                metadata.make,
+                metadata.model,
+                metadata.date_taken,
+                metadata.width,
+                metadata.height,
+                metadata.lat,
+                metadata.lon,
+                metadata.iso,
+                metadata.f_number,
+                metadata.exposure_time,
+                metadata.orientation,
+                media_type.as_str(),
+                metadata.duration_ms.map(|v| v as i64),
+                metadata.video_codec,
+                metadata.audio_codec,
+                video_path,
+                thumb_path,
+                file_size as i64,
+                mtime_ms,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Rewrite the row of a file that was modified on disk.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_file(
+        &self,
+        path: &str,
+        hash: &str,
+        metadata: &PhotoMetadata,
+        media_type: MediaType,
+        video_path: Option<&str>,
+        thumb_path: Option<&str>,
+        file_size: u64,
+        mtime_ms: i64,
+    ) -> Result<bool, CoreError> {
+        let conn = self.lock()?;
+        let changed = conn.execute(
+            "UPDATE photos SET
+                hash = ?2, make = ?3, model = ?4, date_taken = ?5, width = ?6, height = ?7,
+                lat = ?8, lon = ?9, iso = ?10, f_number = ?11, exposure_time = ?12,
+                orientation = ?13, media_type = ?14, duration_ms = ?15, video_codec = ?16,
+                audio_codec = ?17, video_path = ?18, thumb_path = ?19, file_size = ?20,
+                file_mtime = ?21
+             WHERE path = ?1",
+            params![
+                path,
+                hash,
+                metadata.make,
+                metadata.model,
+                metadata.date_taken,
+                metadata.width,
+                metadata.height,
+                metadata.lat,
+                metadata.lon,
+                metadata.iso,
+                metadata.f_number,
+                metadata.exposure_time,
+                metadata.orientation,
+                media_type.as_str(),
+                metadata.duration_ms.map(|v| v as i64),
+                metadata.video_codec,
+                metadata.audio_codec,
+                video_path,
+                thumb_path,
+                file_size as i64,
+                mtime_ms,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Record size and modification time of an unchanged file.
+    pub fn set_file_stat(&self, id: i64, file_size: u64, mtime_ms: i64) -> Result<(), CoreError> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE photos SET file_size = ?2, file_mtime = ?3 WHERE id = ?1",
+            params![id, file_size as i64, mtime_ms],
+        )?;
+        Ok(())
+    }
+
+    /// The file of this row now lives at `new_path` (it was moved or renamed).
+    pub fn move_path(&self, id: i64, new_path: &str, mtime_ms: i64) -> Result<(), CoreError> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE photos SET path = ?2, file_mtime = ?3 WHERE id = ?1",
+            params![id, new_path, mtime_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Remember a folder to scan again later.
+    pub fn add_root(&self, path: &str, now_ms: i64) -> Result<(), CoreError> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO library_roots (path, added_at, last_scan) VALUES (?1, ?2, 0)",
+            params![path, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Remembered folders with the time of their last scan (0 = never).
+    pub fn list_roots(&self) -> Result<Vec<(String, i64)>, CoreError> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare("SELECT path, last_scan FROM library_roots ORDER BY path")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn remove_root(&self, path: &str) -> Result<(), CoreError> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM library_roots WHERE path = ?1", params![path])?;
+        Ok(())
+    }
+
+    pub fn touch_root(&self, path: &str, now_ms: i64) -> Result<(), CoreError> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE library_roots SET last_scan = ?2 WHERE path = ?1",
+            params![path, now_ms],
+        )?;
+        Ok(())
     }
 }
 

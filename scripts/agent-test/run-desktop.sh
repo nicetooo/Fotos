@@ -6,6 +6,9 @@
 # (WebKit keeps localStorage under the real home; the probe does not rely on it.)
 #
 #   COUNT=20000 SKIP_BUILD=1 FRESH=1 SCENARIO=default TIMEOUT=120 ./run-desktop.sh
+#
+# IMPORT=1 also imports a generated folder of real image files, rescans it,
+# checks it shows up in Settings and removes it again.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -35,6 +38,13 @@ if [ -n "${FRESH:-}" ] || [ ! -f "$DATA_DIR/footos.db" ]; then
 fi
 rm -f "$REPORT"
 
+IMPORT_DIR=""
+if [ -n "${IMPORT:-}" ]; then
+    python3 "$HERE/make-import-fixture.py" "$OUT/import-fixture" >/dev/null
+    IMPORT_DIR="$OUT/import-fixture/lib"
+    log "import fixture at $IMPORT_DIR"
+fi
+
 # The debug binary loads the frontend from the Vite dev server.
 VITE_PID=""
 if ! curl -s -o /dev/null http://localhost:1420; then
@@ -48,7 +58,7 @@ if ! curl -s -o /dev/null http://localhost:1420; then
 fi
 
 log "launching (scenario: $SCENARIO)"
-HOME="$FAKE_HOME" FOOTOS_AGENT_TEST="$SCENARIO" "$BIN" >"$OUT/app.log" 2>&1 &
+HOME="$FAKE_HOME" FOOTOS_AGENT_TEST="$SCENARIO" FOOTOS_AGENT_IMPORT_DIR="$IMPORT_DIR" "$BIN" >"$OUT/app.log" 2>&1 &
 APP_PID=$!
 cleanup() {
     kill "$APP_PID" >/dev/null 2>&1 || true

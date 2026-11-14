@@ -3,7 +3,7 @@ use tauri::Manager;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 
@@ -21,7 +21,9 @@ struct AppState {
     db_path: Mutex<String>,
     thumb_dir: Mutex<String>,
     /// Cached query index, keyed by (connection generation, DB change counter).
-    geo: Mutex<Option<((u64, i64), Arc<GeoIndex>)>>,
+    geo: Mutex<Option<((u64, i64, u8), Arc<GeoIndex>)>>,
+    /// Media type the map, timeline and album are limited to (mobile filter).
+    media_filter: Mutex<Option<MediaType>>,
     /// Cached library list (desktop drawer), same key as `geo`.
     library: Mutex<Option<((u64, i64), Arc<LibraryView>)>>,
     /// The order last asked for, so paging through it does not re-sort.
@@ -38,6 +40,7 @@ impl AppState {
             db_path: Mutex::new(String::new()),
             thumb_dir: Mutex::new(String::new()),
             geo: Mutex::new(None),
+            media_filter: Mutex::new(None),
             library: Mutex::new(None),
             library_order: Mutex::new(None),
             generation: std::sync::atomic::AtomicU64::new(0),
@@ -48,11 +51,19 @@ impl AppState {
     /// Returns the index and a version token the frontend can compare.
     fn geo(&self) -> Result<(Arc<GeoIndex>, String), String> {
         let index = self.get_index()?;
+        let filter = *self.media_filter.lock().map_err(|e| e.to_string())?;
+        let filter_code = match filter {
+            None => 0u8,
+            Some(MediaType::Photo) => 1,
+            Some(MediaType::Video) => 2,
+            Some(MediaType::LivePhoto) => 3,
+        };
         let key = (
             self.generation.load(Ordering::SeqCst),
             index.change_counter().map_err(|e| e.to_string())?,
+            filter_code,
         );
-        let version = format!("{}-{}", key.0, key.1);
+        let version = format!("{}-{}-{}", key.0, key.1, key.2);
         let mut cached = self.geo.lock().map_err(|e| e.to_string())?;
         if let Some((k, geo)) = cached.as_ref() {
             if *k == key {
@@ -62,6 +73,9 @@ impl AppState {
         let started = std::time::Instant::now();
         let thumb_dir = self.get_thumb_dir()?;
         let mut rows = index.list_previews_filtered(true).map_err(|e| e.to_string())?;
+        if let Some(kind) = filter {
+            rows.retain(|row| row.media_type == kind.as_str());
+        }
         for row in &mut rows {
             row.thumb_path = Some(resolve_thumb(&thumb_dir, &row.path, row.thumb_path.take()));
         }
@@ -412,6 +426,13 @@ struct GeoSummary {
     version: String,
 }
 
+/// Limit the map, timeline and album to one media type (`null` = everything).
+#[tauri::command]
+fn set_media_filter(state: tauri::State<'_, AppState>, filter: Option<MediaType>) -> Result<(), String> {
+    *state.media_filter.lock().map_err(|e| e.to_string())? = filter;
+    Ok(())
+}
+
 #[tauri::command]
 async fn geo_summary(app: tauri::AppHandle) -> Result<GeoSummary, String> {
     let (geo, version) = app.state::<AppState>().geo()?;
@@ -463,6 +484,14 @@ async fn query_album_in(
 #[tauri::command]
 fn agent_test_enabled() -> Option<String> {
     std::env::var("FOOTOS_AGENT_TEST").ok().filter(|v| !v.is_empty())
+}
+
+/// A folder of real image files for the self-test to import (see
+/// `scripts/agent-test/make-import-fixture.py`). Agent test mode only.
+#[tauri::command]
+fn agent_test_import_dir() -> Option<String> {
+    agent_test_enabled()?;
+    std::env::var("FOOTOS_AGENT_IMPORT_DIR").ok().filter(|v| !v.is_empty())
 }
 
 /// Write the in-app self-test report next to the database so the test runner
@@ -643,6 +672,12 @@ struct ImportResultWithTiming {
     phase1_ms: u64,
     phase2_ms: u64,
     phase3_ms: u64,
+    /// Rows rewritten because the file changed on disk (folder rescans).
+    updated: u32,
+    /// Rows that followed a moved or renamed file.
+    moved: u32,
+    /// Rows dropped because the file is gone (folder rescans).
+    removed: u32,
 }
 
 /// All data needed to insert a photo into the DB.
@@ -654,6 +689,7 @@ struct ProcessedPhoto {
     metadata: footos_core::PhotoMetadata,
     thumb_path_str: Option<String>,
     file_size: u64,
+    mtime_ms: i64,
     media_type: MediaType,
     video_path: Option<String>,
 }
@@ -788,8 +824,11 @@ async fn import_photos(
                 .unwrap_or(0)));
         let dest_path = photos_dir.join(&filename);
 
-        // Only copy if source and dest are different
-        if root_path_buf != dest_path {
+        // Mobile hands over temporary files that disappear, so they are copied
+        // into the app's storage. On desktop the file stays where the user
+        // keeps it and is referenced in place, like files found in a folder.
+        let copy_into_app = cfg!(any(target_os = "ios", target_os = "android"));
+        if copy_into_app && root_path_buf != dest_path {
             tracing::debug!(dest = ?dest_path, "Import: copying to permanent storage");
             std::fs::copy(&root_path_buf, &dest_path).map_err(|e| {
                 tracing::error!(error = %e, "Import: failed to copy file");
@@ -801,13 +840,47 @@ async fn import_photos(
         }
     } else {
         tracing::debug!("Import: processing as directory");
-        footos_core::scan_photos(root_path_buf).map_err(|e| {
+        // Remember the folder: later scans pick up what changes in it.
+        let root = std::fs::canonicalize(root_path_buf)
+            .unwrap_or_else(|_| root_path_buf.to_path_buf());
+        let _ = index.add_root(&root.to_string_lossy(), now_ms());
+        footos_core::scan_photos(&root).map_err(|e| {
             tracing::error!(error = %e, "Import: scan failed");
             e.to_string()
         })?
     };
     run_import_pipeline(&window, index, thumb_dir, photos, import_start)
 }
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Size and modification time (ms since the epoch) of a file; zeros if unreadable.
+fn file_stat(path: &std::path::Path) -> (u64, i64) {
+    match std::fs::metadata(path) {
+        Ok(m) => {
+            let mtime = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            (m.len(), mtime)
+        }
+        Err(_) => (0, 0),
+    }
+}
+
+/// Files are processed and committed in batches of this size, so photos show
+/// up while a large import is still running and a cancel or crash costs one
+/// batch at most.
+const IMPORT_BATCH: usize = 256;
+
+type Emit<'a> = &'a (dyn Fn(&str, serde_json::Value) + Sync);
 
 fn run_import_pipeline(
     window: &tauri::Window,
@@ -816,394 +889,550 @@ fn run_import_pipeline(
     photos: Vec<std::path::PathBuf>,
     import_start: std::time::Instant,
 ) -> Result<ImportResultWithTiming, String> {
+    use tauri::Emitter;
+    let emit = |event: &str, payload: serde_json::Value| {
+        let _ = window.emit(event, payload);
+    };
+    import_files(&emit, &index, &thumb_dir, photos, false, import_start)
+}
+
+/// Read metadata and make the thumbnail of one file (the expensive part).
+fn process_file(
+    path: &std::path::Path,
+    hash: String,
+    config: &PhotoCoreConfig,
+    thumb_dir: &str,
+) -> ProcessResult {
+    let path_str = path.to_string_lossy().to_string();
+    let is_video = footos_core::is_supported_video(path);
+
+    // Video: mp4 parser, then ffprobe for what it cannot read (GPS, other
+    // containers). Photo: EXIF.
+    let metadata = if is_video {
+        let mut meta = footos_core::read_video_metadata(path).unwrap_or_default();
+        if let Some(probe) = ffprobe_metadata(&path_str) {
+            if meta.duration_ms.is_none() {
+                meta.duration_ms = probe.duration_ms;
+            }
+            if meta.width == 0 && meta.height == 0 {
+                meta.width = probe.width;
+                meta.height = probe.height;
+            }
+            if meta.video_codec.is_none() {
+                meta.video_codec = probe.video_codec;
+            }
+            if meta.audio_codec.is_none() {
+                meta.audio_codec = probe.audio_codec;
+            }
+            if meta.date_taken.is_none() {
+                meta.date_taken = probe.date_taken;
+            }
+            if meta.lat.is_none() {
+                meta.lat = probe.lat;
+            }
+            if meta.lon.is_none() {
+                meta.lon = probe.lon;
+            }
+        }
+        meta
+    } else {
+        match footos_core::read_metadata(path) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(path = %path_str, error = %e, "Import: metadata read failed");
+                return ProcessResult::Failed(path_str);
+            }
+        }
+    };
+
+    let thumb_path_str = if is_video {
+        extract_video_thumbnail_sync(path, thumb_dir)
+    } else {
+        footos_core::generate_thumbnail(path, config)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
+    };
+
+    let (file_size, mtime_ms) = file_stat(path);
+    ProcessResult::New(ProcessedPhoto {
+        path: path.to_path_buf(),
+        path_str,
+        hash,
+        metadata,
+        thumb_path_str,
+        file_size,
+        mtime_ms,
+        media_type: if is_video { MediaType::Video } else { MediaType::Photo },
+        video_path: None,
+    })
+}
+
+/// Import files into the index, batch by batch.
+///
+/// Per batch: hash in parallel, decide what is a duplicate, read metadata and
+/// make thumbnails in parallel for the rest, write them in one transaction,
+/// report progress.
+///
+/// A file whose content is already in the library under another path is a
+/// duplicate: it is counted and left alone on disk. (If that other path no
+/// longer exists the file was moved, and its row follows it.) Different
+/// photos are never treated as duplicates, however alike they look.
+///
+/// `update` rewrites the rows of files that are already indexed (they were
+/// modified on disk) instead of adding new ones.
+fn import_files(
+    emit: Emit,
+    index: &PhotoIndex,
+    thumb_dir: &str,
+    photos: Vec<std::path::PathBuf>,
+    update: bool,
+    import_start: std::time::Instant,
+) -> Result<ImportResultWithTiming, String> {
     let config = PhotoCoreConfig {
-        thumbnail_dir: thumb_dir.clone(),
+        thumbnail_dir: thumb_dir.to_string(),
         thumbnail_size: DEFAULT_THUMBNAIL_SIZE,
     };
     let total = photos.len();
-    tracing::info!(count = total, "Import: found photos to process");
-
-    let existing_paths: HashSet<String> = index
-        .list_previews()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|p| p.path)
-        .collect();
-
-    let mut result = ImportResult::default();
-
-    // If no photos found, return early
+    tracing::info!(count = total, update, "Import: files to consider");
     if total == 0 {
-        tracing::info!("Import: no photos to import");
         return Ok(ImportResultWithTiming {
-            total: total as u32,
             total_ms: import_start.elapsed().as_millis() as u64,
             ..Default::default()
         });
     }
 
-    // ── Phase 1 (Sequential): Filter already-imported photos ──
-    // DB lookups are fast (~0.01ms each) and SQLite is single-threaded anyway.
-    let phase1_start = std::time::Instant::now();
-    let mut new_photos: Vec<std::path::PathBuf> = Vec::with_capacity(total);
-    let mut skipped = 0usize;
-    for path in &photos {
-        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
-            break;
-        }
-        let path_str = path.to_string_lossy().to_string();
-        if existing_paths.contains(&path_str) {
-            skipped += 1;
-        } else {
-            new_photos.push(path.clone());
-        }
-    }
-    let new_count = new_photos.len();
-    let phase1_ms = phase1_start.elapsed().as_millis();
-    tracing::info!(
-        duration_ms = %phase1_ms,
-        new = new_count,
-        skipped = skipped,
-        "Import: Phase 1 (filter) complete"
-    );
-
-    // Emit initial progress (skipped photos accounted for)
-    {
-        use tauri::Emitter;
-        let _ = window.emit(
-            "import-progress",
-            serde_json::json!({
-                "current": skipped,
-                "total": total,
-                "success": 0,
-                "failure": 0,
-                "skipped": skipped,
-                "last_path": ""
-            }),
-        );
-    }
-
-    if IMPORT_CANCELLED.load(Ordering::SeqCst) {
-        use tauri::Emitter;
-        let _ = window.emit(
-            "import-cancelled",
-            serde_json::json!({
-                "current": skipped,
-                "total": total,
-                "success": 0,
-                "failure": 0
-            }),
-        );
-        return Ok(ImportResultWithTiming {
-            skipped: skipped as u32,
-            total: total as u32,
-            phase1_ms: phase1_ms as u64,
-            total_ms: import_start.elapsed().as_millis() as u64,
-            ..Default::default()
-        });
-    }
-
-    // ── Live Photo pairing detection ──
-    let live_pairs = footos_core::detect_live_photo_pairs(&new_photos);
-    let live_video_set: std::collections::HashSet<std::path::PathBuf> = live_pairs
-        .iter()
-        .map(|p| p.video_path.clone())
-        .collect();
-    let live_photo_map: std::collections::HashMap<std::path::PathBuf, std::path::PathBuf> =
-        live_pairs
-            .iter()
-            .map(|p| (p.image_path.clone(), p.video_path.clone()))
+    // ── Filter: what is already indexed (by path) ──
+    let filter_start = std::time::Instant::now();
+    let mut todo: Vec<std::path::PathBuf> = if update {
+        photos
+    } else {
+        let known: HashSet<String> = index
+            .path_stats()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| f.path)
             .collect();
+        photos
+            .into_iter()
+            .filter(|p| !known.contains(p.to_string_lossy().as_ref()))
+            .collect()
+    };
+    let skipped = total - todo.len();
+    let phase1_ms = filter_start.elapsed().as_millis() as u64;
 
-    tracing::info!(
-        pairs = live_pairs.len(),
-        "Import: Live Photo pairs detected"
-    );
-
-    // Remove Live Photo videos from processing list (they don't get indexed separately)
-    new_photos.retain(|p| !live_video_set.contains(p));
-    let new_count = new_photos.len();
-
-    // ── Phase 2 (Parallel): CPU+IO heavy work via rayon ──
-    // compute_hash (~50-200ms) + read_metadata (~10-50ms) +
-    // generate_thumbnail (~100-500ms) + fs::metadata (<1ms)
-    // All pure functions from footos_core — no DB access, no shared mutable state.
-    let phase2_start = std::time::Instant::now();
-    let processed_counter = AtomicUsize::new(0);
-    let window_clone = window.clone();
-
-    let thumb_dir_clone = thumb_dir.clone();
-    let processed: Vec<ProcessResult> = new_photos
-        .par_iter()
-        .map(|path| {
-            // Check cancellation early
-            if IMPORT_CANCELLED.load(Ordering::Relaxed) {
-                return ProcessResult::Cancelled;
-            }
-
-            let path_str = path.to_string_lossy().to_string();
-            let is_video = footos_core::is_supported_video(path);
-
-            // Compute hash (video uses content hash, photo uses perceptual hash)
-            let hash = if is_video {
-                footos_core::compute_video_hash(path)
-            } else {
-                footos_core::compute_hash(path)
-            };
-            let hash = match hash {
-                Ok(h) => h,
-                Err(e) => {
-                    tracing::error!(path = %path_str, error = %e, "Import: hash failed");
-                    return ProcessResult::Failed(path_str);
-                }
-            };
-
-            // Check cancellation between expensive steps
-            if IMPORT_CANCELLED.load(Ordering::Relaxed) {
-                return ProcessResult::Cancelled;
-            }
-
-            // Read metadata (video uses mp4 parser + ffprobe, photo uses EXIF)
-            let metadata = if is_video {
-                let mut meta = footos_core::read_video_metadata(path).unwrap_or_default();
-                // Always call ffprobe for videos:
-                // - Core mp4 crate doesn't extract GPS at all
-                // - Non-MP4 formats (MKV, AVI, WebM) need ffprobe for everything
-                if let Some(probe) = ffprobe_metadata(&path_str) {
-                    if meta.duration_ms.is_none() {
-                        meta.duration_ms = probe.duration_ms;
-                    }
-                    if meta.width == 0 && meta.height == 0 {
-                        meta.width = probe.width;
-                        meta.height = probe.height;
-                    }
-                    if meta.video_codec.is_none() {
-                        meta.video_codec = probe.video_codec;
-                    }
-                    if meta.audio_codec.is_none() {
-                        meta.audio_codec = probe.audio_codec;
-                    }
-                    if meta.date_taken.is_none() {
-                        meta.date_taken = probe.date_taken;
-                    }
-                    if meta.lat.is_none() {
-                        meta.lat = probe.lat;
-                    }
-                    if meta.lon.is_none() {
-                        meta.lon = probe.lon;
-                    }
-                }
-                meta
-            } else {
-                match footos_core::read_metadata(path) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::error!(path = %path_str, error = %e, "Import: metadata read failed");
-                        return ProcessResult::Failed(path_str);
-                    }
-                }
-            };
-
-            // Generate thumbnail (video uses FFmpeg CLI, photo uses image decode)
-            let thumb_path_str = if is_video {
-                extract_video_thumbnail_sync(path, &thumb_dir_clone)
-            } else {
-                footos_core::generate_thumbnail(path, &config)
-                    .ok()
-                    .map(|p| p.to_string_lossy().to_string())
-            };
-
-            // Get file size
-            let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-            let media_type = if is_video { MediaType::Video } else { MediaType::Photo };
-
-            // Emit progress every ~10 photos to avoid IPC flooding
-            let count = processed_counter.fetch_add(1, Ordering::Relaxed) + 1;
-            if count % 10 == 0 || count == new_count {
-                use tauri::Emitter;
-                let _ = window_clone.emit(
-                    "import-progress",
-                    serde_json::json!({
-                        "current": skipped + count,
-                        "total": total,
-                        "success": 0,
-                        "failure": 0,
-                        "skipped": skipped,
-                        "phase": "processing",
-                        "last_path": path_str
-                    }),
-                );
-            }
-
-            ProcessResult::New(ProcessedPhoto {
-                path: path.clone(),
-                path_str,
-                hash,
-                metadata,
-                thumb_path_str,
-                file_size,
-                media_type,
-                video_path: None,
-            })
-        })
+    // ── Live Photo pairs: the video belongs to its image, not to the library ──
+    let live_pairs = footos_core::detect_live_photo_pairs(&todo);
+    let live_videos: HashSet<std::path::PathBuf> =
+        live_pairs.iter().map(|p| p.video_path.clone()).collect();
+    let live_video_of: std::collections::HashMap<std::path::PathBuf, std::path::PathBuf> = live_pairs
+        .iter()
+        .map(|p| (p.image_path.clone(), p.video_path.clone()))
         .collect();
+    todo.retain(|p| !live_videos.contains(p));
 
-    let phase2_ms = phase2_start.elapsed().as_millis();
-    tracing::info!(
-        duration_ms = %phase2_ms,
-        count = processed.len(),
-        "Import: Phase 2 (parallel processing) complete"
-    );
-
-    // ── Phase 3 (Sequential): Deduplicate by hash + DB inserts in batched transactions ──
-    let phase3_start = std::time::Instant::now();
-    const BATCH_SIZE: usize = 100;
-    let mut batch_writes = 0usize;
-    let use_txn = index.begin_transaction().is_ok();
+    let app_photos_dir = photos_storage_dir(thumb_dir);
+    let mut result = ImportResultWithTiming {
+        skipped: skipped as u32,
+        total: total as u32,
+        phase1_ms,
+        ..Default::default()
+    };
+    let mut done = skipped + live_videos.len();
     let mut cancelled = false;
 
-    for (i, item) in processed.into_iter().enumerate() {
-        match item {
-            ProcessResult::Cancelled => {
-                cancelled = true;
-                break;
-            }
-            ProcessResult::Failed(_path_str) => {
-                result.failure += 1;
-            }
-            ProcessResult::New(photo) => {
-                // Deduplicate by hash (another photo with same content may already exist)
-                if index.exists_by_hash(&photo.hash).unwrap_or(false) {
-                    tracing::warn!(path = %photo.path_str, "Import: duplicate by hash, skipping");
-                    // Clean up copied file for single-file imports (iOS)
-                    let _ = std::fs::remove_file(&photo.path);
-                    result.duplicates += 1;
-                } else {
-                    // Check if this is a Live Photo image (has a paired video)
-                    let (final_media_type, final_video_path) =
-                        if let Some(vp) = live_photo_map.get(&photo.path) {
-                            (
-                                MediaType::LivePhoto,
-                                Some(vp.to_string_lossy().to_string()),
-                            )
-                        } else {
-                            (photo.media_type, photo.video_path.clone())
-                        };
+    let progress = |done: usize, r: &ImportResultWithTiming, last: &str| {
+        emit(
+            "import-progress",
+            serde_json::json!({
+                "current": done.min(total),
+                "total": total,
+                "success": r.success + r.updated + r.moved,
+                "failure": r.failure,
+                "duplicates": r.duplicates,
+                "skipped": skipped,
+                "phase": "importing",
+                "last_path": last,
+            }),
+        );
+    };
+    progress(done, &result, "");
 
-                    // Insert into DB with media type
-                    match index.insert_media(
-                        photo.path_str.clone(),
-                        photo.hash,
-                        photo.metadata,
-                        final_media_type,
-                        final_video_path,
-                    ) {
-                        Ok(_) => {
-                            let _ = index.update_thumb_info(
-                                photo.path_str,
-                                photo.thumb_path_str,
-                                photo.file_size,
-                            );
-                            result.success += 1;
-                            batch_writes += 1;
+    for batch in todo.chunks(IMPORT_BATCH) {
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            cancelled = true;
+            break;
+        }
+
+        // ── Hash (parallel, cheap: 128 KB per file) ──
+        let work_start = std::time::Instant::now();
+        let hashed: Vec<(&std::path::PathBuf, Option<String>)> = batch
+            .par_iter()
+            .map(|path| (path, footos_core::compute_content_hash(path).ok()))
+            .collect();
+
+        // ── Decide what is new (sequential: needs the index and this batch) ──
+        let mut in_batch: HashSet<String> = HashSet::new();
+        let mut keep: Vec<(&std::path::PathBuf, String)> = Vec::with_capacity(batch.len());
+        for (path, hash) in hashed {
+            let Some(hash) = hash else {
+                tracing::error!(path = %path.display(), "Import: cannot read file");
+                result.failure += 1;
+                continue;
+            };
+            if update {
+                keep.push((path, hash));
+                continue;
+            }
+            let existing = if in_batch.contains(&hash) {
+                Some((-1, String::new()))
+            } else {
+                index.find_by_hash(&hash).unwrap_or(None)
+            };
+            match existing {
+                None => {
+                    in_batch.insert(hash.clone());
+                    keep.push((path, hash));
+                }
+                Some((id, old_path)) => {
+                    let old_is_file = id >= 0
+                        && !old_path.contains("://")
+                        && !std::path::Path::new(&old_path).exists();
+                    if old_is_file {
+                        // Same content, and the indexed path is gone: the file
+                        // was moved or renamed. Its row follows it.
+                        let (_, mtime) = file_stat(path);
+                        let _ = index.move_path(id, &path.to_string_lossy(), mtime);
+                        result.moved += 1;
+                    } else {
+                        // A second copy of a file the library already has.
+                        // Only a copy the app made itself is cleaned up; the
+                        // user's files are never touched.
+                        if path.starts_with(&app_photos_dir) {
+                            let _ = std::fs::remove_file(path);
                         }
+                        result.duplicates += 1;
+                    }
+                }
+            }
+        }
+
+        // ── Metadata + thumbnails (parallel, the expensive part) ──
+        let processed: Vec<ProcessResult> = keep
+            .par_iter()
+            .map(|(path, hash)| {
+                if IMPORT_CANCELLED.load(Ordering::Relaxed) {
+                    return ProcessResult::Cancelled;
+                }
+                process_file(path, hash.clone(), &config, thumb_dir)
+            })
+            .collect();
+        result.phase2_ms += work_start.elapsed().as_millis() as u64;
+
+        // ── Write the batch in one transaction ──
+        let write_start = std::time::Instant::now();
+        let use_txn = index.begin_transaction().is_ok();
+        let mut last_path = String::new();
+        for item in processed {
+            match item {
+                ProcessResult::Cancelled => cancelled = true,
+                ProcessResult::Failed(_) => result.failure += 1,
+                ProcessResult::New(photo) => {
+                    let (media_type, video_path) = match live_video_of.get(&photo.path) {
+                        Some(video) => (
+                            MediaType::LivePhoto,
+                            Some(video.to_string_lossy().to_string()),
+                        ),
+                        None => (photo.media_type, photo.video_path.clone()),
+                    };
+                    let written = if update {
+                        index.update_file(
+                            &photo.path_str,
+                            &photo.hash,
+                            &photo.metadata,
+                            media_type,
+                            video_path.as_deref(),
+                            photo.thumb_path_str.as_deref(),
+                            photo.file_size,
+                            photo.mtime_ms,
+                        )
+                    } else {
+                        index.insert_file(
+                            &photo.path_str,
+                            &photo.hash,
+                            &photo.metadata,
+                            media_type,
+                            video_path.as_deref(),
+                            photo.thumb_path_str.as_deref(),
+                            photo.file_size,
+                            photo.mtime_ms,
+                        )
+                    };
+                    match written {
+                        Ok(true) if update => result.updated += 1,
+                        Ok(true) => result.success += 1,
+                        Ok(false) => result.skipped += 1,
                         Err(e) => {
-                            tracing::error!(error = %e, "Import: DB insert failed");
+                            tracing::error!(error = %e, "Import: DB write failed");
                             result.failure += 1;
                         }
                     }
+                    last_path = photo.path_str;
                 }
             }
         }
-
-        // Intermediate commit every BATCH_SIZE writes for crash safety
-        if use_txn && batch_writes >= BATCH_SIZE {
+        if use_txn {
             let _ = index.commit_transaction();
-            let _ = index.begin_transaction();
-            batch_writes = 0;
         }
+        result.phase3_ms += write_start.elapsed().as_millis() as u64;
 
-        // Phase 3 inserts are fast; emit every 20 to cut IPC overhead
-        if i == 0 || (i + 1) % 20 == 0 {
-            use tauri::Emitter;
-            let _ = window.emit(
-                "import-progress",
-                serde_json::json!({
-                    "current": skipped + i + 1,
-                    "total": total,
-                    "success": result.success,
-                    "failure": result.failure,
-                    "duplicates": result.duplicates,
-                    "skipped": skipped,
-                    "phase": "importing"
-                }),
-            );
+        done += batch.len();
+        progress(done, &result, &last_path);
+        if cancelled {
+            break;
         }
-    }
-
-    // Commit any remaining writes
-    if use_txn && batch_writes > 0 {
-        let _ = index.commit_transaction();
     }
 
     if cancelled {
-        use tauri::Emitter;
-        let _ = window.emit(
+        emit(
             "import-cancelled",
             serde_json::json!({
-                "current": skipped + result.success as usize + result.failure as usize + result.duplicates as usize,
+                "current": done.min(total),
                 "total": total,
                 "success": result.success,
                 "failure": result.failure
             }),
         );
+    } else {
+        progress(total, &result, "");
     }
 
-    let phase3_ms = phase3_start.elapsed().as_millis() as u64;
-    let total_ms = import_start.elapsed().as_millis() as u64;
-    let phase1_ms = phase1_ms as u64;
-    let phase2_ms = phase2_ms as u64;
-    tracing::info!(duration_ms = phase3_ms, "Import: Phase 3 (DB insert) complete");
-    tracing::info!(
-        total_ms,
-        phase1_ms,
-        phase2_ms,
-        phase3_ms,
-        "Import: all phases complete"
-    );
+    result.total_ms = import_start.elapsed().as_millis() as u64;
     tracing::info!(
         success = result.success,
+        updated = result.updated,
+        moved = result.moved,
         failure = result.failure,
         duplicates = result.duplicates,
-        skipped = skipped,
-        "Import: results"
+        skipped = result.skipped,
+        total_ms = result.total_ms,
+        "Import: done"
     );
-    {
-        use tauri::Emitter;
-        let _ = window.emit(
-            "import-progress",
-            serde_json::json!({
-                "current": total,
-                "total": total,
-                "success": result.success,
-                "failure": result.failure,
-                "duplicates": result.duplicates,
-                "skipped": skipped,
-                "phase": "importing"
-            }),
-        );
+    Ok(result)
+}
+
+#[derive(serde::Serialize, Default)]
+struct RescanSummary {
+    /// Folders scanned.
+    roots: u32,
+    /// Folders skipped because they could not be read (e.g. a drive that is
+    /// not connected). Nothing of theirs is touched.
+    offline: Vec<String>,
+    added: u32,
+    updated: u32,
+    moved: u32,
+    removed: u32,
+    duplicates: u32,
+    failure: u32,
+    total_ms: u64,
+}
+
+/// Bring the index in line with one remembered folder: add what is new,
+/// refresh what was modified, drop what is gone.
+fn rescan_root(
+    emit: Emit,
+    index: &PhotoIndex,
+    thumb_dir: &str,
+    root: &str,
+    summary: &mut RescanSummary,
+) -> Result<(), String> {
+    let root_path = std::path::Path::new(root);
+    // An unreadable folder is not an empty folder. Leave its photos alone.
+    if !root_path.is_dir() || std::fs::read_dir(root_path).is_err() {
+        summary.offline.push(root.to_string());
+        return Ok(());
     }
-    Ok(ImportResultWithTiming {
-        success: result.success,
-        failure: result.failure,
-        duplicates: result.duplicates,
-        skipped: skipped as u32,
-        total: total as u32,
-        total_ms,
-        phase1_ms,
-        phase2_ms,
-        phase3_ms,
-    })
+
+    let files = footos_core::scan_photos(root_path).map_err(|e| e.to_string())?;
+    let scanned: Vec<footos_core::FileStat> = files
+        .par_iter()
+        .map(|path| {
+            let (size, mtime_ms) = file_stat(path);
+            footos_core::FileStat {
+                path: path.to_string_lossy().to_string(),
+                size,
+                mtime_ms,
+            }
+        })
+        .collect();
+    let known = index.path_stats().map_err(|e| e.to_string())?;
+    let plan = footos_core::plan_rescan(root, &scanned, &known);
+    tracing::info!(
+        root,
+        on_disk = scanned.len(),
+        new = plan.new.len(),
+        changed = plan.changed.len(),
+        missing = plan.missing.len(),
+        backfill = plan.backfill.len(),
+        "Rescan: plan"
+    );
+
+    if !plan.backfill.is_empty() {
+        let use_txn = index.begin_transaction().is_ok();
+        for (id, size, mtime_ms) in &plan.backfill {
+            let _ = index.set_file_stat(*id, *size, *mtime_ms);
+        }
+        if use_txn {
+            let _ = index.commit_transaction();
+        }
+    }
+
+    // New files first: a file that was moved inside the folder shows up as
+    // "new" at its new path, and its existing row follows it there.
+    if !plan.new.is_empty() {
+        let paths = plan.new.iter().map(std::path::PathBuf::from).collect();
+        let r = import_files(emit, index, thumb_dir, paths, false, std::time::Instant::now())?;
+        summary.added += r.success;
+        summary.moved += r.moved;
+        summary.duplicates += r.duplicates;
+        summary.failure += r.failure;
+    }
+    if !plan.changed.is_empty() && !IMPORT_CANCELLED.load(Ordering::SeqCst) {
+        let paths = plan.changed.iter().map(std::path::PathBuf::from).collect();
+        let r = import_files(emit, index, thumb_dir, paths, true, std::time::Instant::now())?;
+        summary.updated += r.updated;
+        summary.failure += r.failure;
+    }
+
+    // Gone from disk. Check each row again: one that was just moved has a
+    // path that exists now.
+    if !plan.missing.is_empty() && !IMPORT_CANCELLED.load(Ordering::SeqCst) {
+        let mut gone = Vec::new();
+        for id in &plan.missing {
+            if let Ok(Some(photo)) = index.get_by_id(*id) {
+                if !std::path::Path::new(&photo.path).exists() {
+                    gone.push(*id);
+                }
+            }
+        }
+        if !gone.is_empty() {
+            let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(thumb_dir));
+            let spec = footos_core::ThumbnailSpec::default();
+            let deleted = index.delete_by_ids(gone).map_err(|e| e.to_string())?;
+            for photo in &deleted {
+                if let Ok(Some(thumb)) =
+                    thumbnailer.get_cached_path(std::path::Path::new(&photo.path), &spec)
+                {
+                    let _ = std::fs::remove_file(thumb);
+                }
+            }
+            summary.removed += deleted.len() as u32;
+        }
+    }
+
+    let _ = index.touch_root(root, now_ms());
+    summary.roots += 1;
+    Ok(())
+}
+
+/// Scan every remembered folder again and bring the library up to date.
+#[tauri::command]
+async fn rescan_library(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+) -> Result<RescanSummary, String> {
+    use tauri::Emitter;
+    let started = std::time::Instant::now();
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
+    IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+
+    let emit = |event: &str, payload: serde_json::Value| {
+        let _ = window.emit(event, payload);
+    };
+    let mut summary = RescanSummary::default();
+    for (root, _) in index.list_roots().map_err(|e| e.to_string())? {
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            break;
+        }
+        rescan_root(&emit, &index, &thumb_dir, &root, &mut summary)?;
+    }
+    summary.total_ms = started.elapsed().as_millis() as u64;
+    tracing::info!(
+        roots = summary.roots,
+        added = summary.added,
+        updated = summary.updated,
+        moved = summary.moved,
+        removed = summary.removed,
+        offline = summary.offline.len(),
+        total_ms = summary.total_ms,
+        "Rescan: done"
+    );
+    Ok(summary)
+}
+
+#[derive(serde::Serialize)]
+struct LibraryRoot {
+    path: String,
+    /// Milliseconds since the epoch; 0 if never scanned.
+    last_scan: i64,
+    /// The folder can be read right now.
+    available: bool,
+    /// Rows of the library that live in it.
+    photos: u32,
+}
+
+/// The folders the library is built from.
+#[tauri::command]
+async fn list_library_roots(state: tauri::State<'_, AppState>) -> Result<Vec<LibraryRoot>, String> {
+    let index = state.get_index()?;
+    let known = index.path_stats().map_err(|e| e.to_string())?;
+    Ok(index
+        .list_roots()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(path, last_scan)| LibraryRoot {
+            available: std::path::Path::new(&path).is_dir(),
+            photos: known
+                .iter()
+                .filter(|f| footos_core::is_under(&path, &f.path))
+                .count() as u32,
+            path,
+            last_scan,
+        })
+        .collect())
+}
+
+/// Stop following a folder. With `remove_photos` its photos leave the library
+/// too (rows and thumbnails only; files on disk are never touched).
+#[tauri::command]
+async fn remove_library_root(
+    state: tauri::State<'_, AppState>,
+    path: String,
+    remove_photos: bool,
+) -> Result<u32, String> {
+    let index = state.get_index()?;
+    let mut removed = 0u32;
+    if remove_photos {
+        let ids: Vec<i64> = index
+            .path_stats()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|f| footos_core::is_under(&path, &f.path))
+            .map(|f| f.id)
+            .collect();
+        let thumb_dir = state.get_thumb_dir()?;
+        let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
+        let spec = footos_core::ThumbnailSpec::default();
+        let deleted = index.delete_by_ids(ids).map_err(|e| e.to_string())?;
+        for photo in &deleted {
+            if let Ok(Some(thumb)) = thumbnailer.get_cached_path(std::path::Path::new(&photo.path), &spec) {
+                let _ = std::fs::remove_file(thumb);
+            }
+        }
+        removed = deleted.len() as u32;
+    }
+    index.remove_root(&path).map_err(|e| e.to_string())?;
+    Ok(removed)
 }
 
 /// Import an explicit list of files (iOS PhotoKit exports).
@@ -2035,6 +2264,9 @@ pub fn run() {
             init_app,
             import_photos,
             import_photo_paths,
+            rescan_library,
+            list_library_roots,
+            remove_library_root,
             upsert_ios_previews,
             remove_ios_assets,
             flush_photos_db,
@@ -2044,6 +2276,7 @@ pub fn run() {
             list_map_previews,
             query_map,
             geo_summary,
+            set_media_filter,
             query_timeline,
             query_album,
             query_album_in,
@@ -2051,6 +2284,7 @@ pub fn run() {
             photo_detail,
             photo_count,
             agent_test_enabled,
+            agent_test_import_dir,
             agent_test_report,
             list_ios_known_ids,
             clear_app_data,
@@ -2105,5 +2339,117 @@ async fn import_all_ios_photos(
     {
         let _ = (window, state);
         Err("This command is only available on iOS".to_string())
+    }
+}
+
+
+/// End-to-end import and rescan over real files.
+///
+/// Needs a fixture built by `scripts/agent-test/make-import-fixture.py`:
+///
+///     python3 scripts/agent-test/make-import-fixture.py /tmp/fx
+///     FOOTOS_IMPORT_FIXTURE=/tmp/fx cargo test import_fixture -- --nocapture
+///
+/// Without the variable the test does nothing.
+#[cfg(test)]
+mod import_fixture {
+    use super::*;
+
+    fn count_files(dir: &std::path::Path) -> usize {
+        footos_core::scan_photos(dir).map(|v| v.len()).unwrap_or(0)
+    }
+
+    #[test]
+    fn imports_and_rescans_real_files() {
+        let Ok(fixture) = std::env::var("FOOTOS_IMPORT_FIXTURE") else {
+            eprintln!("FOOTOS_IMPORT_FIXTURE not set, skipping");
+            return;
+        };
+        let expected: u32 = std::env::var("FOOTOS_IMPORT_EXPECTED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .expect("FOOTOS_IMPORT_EXPECTED");
+        let base = std::fs::canonicalize(&fixture).unwrap();
+        let lib = base.join("lib");
+        let root = lib.to_string_lossy().to_string();
+        let thumbs = base.join("thumbnails");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        let thumb_dir = thumbs.to_string_lossy().to_string();
+        let db = base.join("footos.db");
+        let _ = std::fs::remove_file(&db);
+        let index = PhotoIndex::open(db.to_string_lossy().to_string()).unwrap();
+        let emit = |_: &str, _: serde_json::Value| {};
+        let now = std::time::Instant::now;
+
+        // ── First import ──
+        let on_disk = count_files(&lib);
+        let files = footos_core::scan_photos(&lib).unwrap();
+        let r = import_files(&emit, &index, &thumb_dir, files.clone(), false, now()).unwrap();
+        eprintln!("first import: ok={} dup={} fail={} in {} ms", r.success, r.duplicates, r.failure, r.total_ms);
+        assert_eq!(r.failure, 0, "nothing should fail");
+        assert_eq!(r.success, expected, "every distinct file is in the library");
+        assert_eq!(r.duplicates, 1, "the byte-for-byte copy is the only duplicate");
+        assert_eq!(count_files(&lib), on_disk, "no file was deleted from disk");
+        assert_eq!(index.count().unwrap() as u32, expected);
+
+        // Lookalikes and the RAW next to its JPEG are separate rows.
+        for name in ["lookalike_a.jpg", "lookalike_b.jpg", "pair.jpg", "pair.dng"] {
+            let path = lib.join(name).to_string_lossy().to_string();
+            assert!(index.get_by_path(path).unwrap().is_some(), "{name} is in the library");
+        }
+        // Thumbnails were made.
+        let with_thumb = index.list().unwrap().iter().filter(|p| p.thumb_path.is_some()).count();
+        eprintln!("rows with thumbnail: {with_thumb}/{expected}");
+        assert!(with_thumb as u32 >= expected - 1);
+
+        // ── Importing the same folder again adds nothing ──
+        let r = import_files(&emit, &index, &thumb_dir, files, false, now()).unwrap();
+        assert_eq!((r.success, r.failure), (0, 0));
+        assert_eq!(index.count().unwrap() as u32, expected);
+
+        // ── Rescan with nothing changed ──
+        index.add_root(&root, now_ms()).unwrap();
+        let mut s = RescanSummary::default();
+        rescan_root(&emit, &index, &thumb_dir, &root, &mut s).unwrap();
+        assert_eq!((s.added, s.updated, s.removed, s.moved), (0, 0, 0, 0), "a second look changes nothing");
+
+        // ── Change the folder: modify, delete, add, move ──
+        let modified = lib.join("photo_01.jpg");
+        let mut bytes = std::fs::read(&modified).unwrap();
+        bytes.extend_from_slice(&[0u8; 4096]);
+        std::fs::write(&modified, bytes).unwrap();
+
+        std::fs::remove_file(lib.join("photo_02.jpg")).unwrap();
+
+        let mut added = std::fs::read(lib.join("photo_03.jpg")).unwrap();
+        added.extend_from_slice(b"another file");
+        std::fs::write(lib.join("brand_new.jpg"), added).unwrap();
+
+        let moved_from = lib.join("photo_04.jpg");
+        let moved_to = lib.join("sub").join("renamed_04.jpg");
+        let moved_id = index.get_by_path(moved_from.to_string_lossy().to_string()).unwrap().unwrap().id.id;
+        std::fs::rename(&moved_from, &moved_to).unwrap();
+
+        let mut s = RescanSummary::default();
+        rescan_root(&emit, &index, &thumb_dir, &root, &mut s).unwrap();
+        eprintln!("rescan: added={} updated={} moved={} removed={} dup={}", s.added, s.updated, s.moved, s.removed, s.duplicates);
+        assert_eq!(s.added, 1, "the new file");
+        assert_eq!(s.updated, 1, "the modified file");
+        assert_eq!(s.moved, 1, "the renamed file");
+        assert_eq!(s.removed, 1, "the deleted file");
+        assert_eq!(index.count().unwrap() as u32, expected, "one out, one in");
+        let after_move = index.get_by_path(moved_to.to_string_lossy().to_string()).unwrap().unwrap();
+        assert_eq!(after_move.id.id, moved_id, "the row followed the file");
+        assert!(index.get_by_path(lib.join("photo_02.jpg").to_string_lossy().to_string()).unwrap().is_none());
+
+        // ── The folder goes away (a drive that is not connected) ──
+        let parked = base.join("lib-offline");
+        std::fs::rename(&lib, &parked).unwrap();
+        let mut s = RescanSummary::default();
+        rescan_root(&emit, &index, &thumb_dir, &root, &mut s).unwrap();
+        std::fs::rename(&parked, &lib).unwrap();
+        assert_eq!(s.offline, vec![root.clone()]);
+        assert_eq!(s.removed, 0);
+        assert_eq!(index.count().unwrap() as u32, expected, "an unreadable folder loses nothing");
     }
 }

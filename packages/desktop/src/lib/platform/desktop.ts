@@ -128,6 +128,20 @@ class DesktopPlatformService implements PlatformService {
         }
     }
 
+    /** Bring the library up to date with the remembered folders. */
+    async rescanLibrary(): Promise<boolean> {
+        this.scanningCallbacks.forEach(cb => cb(true));
+        try {
+            const r: any = await invoke("rescan_library");
+            return (r.added + r.updated + r.moved + r.removed) > 0;
+        } catch (e) {
+            console.error("[Desktop] Rescan failed:", e);
+            return false;
+        } finally {
+            this.scanningCallbacks.forEach(cb => cb(false));
+        }
+    }
+
     private async importPaths(paths: string[]): Promise<void> {
         this.scanningCallbacks.forEach(cb => cb(true));
 

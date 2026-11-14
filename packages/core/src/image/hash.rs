@@ -46,6 +46,55 @@ fn compute_file_hash(path: &Path) -> Result<String, CoreError> {
     Ok(format!("file:{:016x}", hasher.finish()))
 }
 
+/// Identify a file by its content, for telling apart "the same file again"
+/// from "another photo".
+///
+/// FNV-1a (64 bit) over the file size, the first 64 KB and the last 64 KB.
+/// Copies of one file agree; different photos do not, since headers, embedded
+/// thumbnails and the compressed data at the end all differ. Reads at most
+/// 128 KB, so it stays fast on large RAW files and slow disks. The algorithm
+/// is fixed here (not `DefaultHasher`) because the value is stored.
+///
+/// Returns `"c:xxxxxxxxxxxxxxxx"`.
+pub fn compute_content_hash(path: &Path) -> Result<String, CoreError> {
+    use std::io::SeekFrom;
+
+    const CHUNK: usize = 64 * 1024;
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut file = std::fs::File::open(path).map_err(|_| CoreError::Io("open failed".into()))?;
+    let size = file
+        .metadata()
+        .map_err(|_| CoreError::Io("metadata failed".into()))?
+        .len();
+
+    let mut hash = FNV_OFFSET;
+    let mut feed = |bytes: &[u8]| {
+        for b in bytes {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    };
+    feed(&size.to_le_bytes());
+
+    let mut head = vec![0u8; CHUNK.min(size as usize)];
+    file.read_exact(&mut head)
+        .map_err(|_| CoreError::Io("read head failed".into()))?;
+    feed(&head);
+
+    if size > (CHUNK as u64) * 2 {
+        file.seek(SeekFrom::End(-(CHUNK as i64)))
+            .map_err(|_| CoreError::Io("seek tail failed".into()))?;
+        let mut tail = vec![0u8; CHUNK];
+        file.read_exact(&mut tail)
+            .map_err(|_| CoreError::Io("read tail failed".into()))?;
+        feed(&tail);
+    }
+
+    Ok(format!("c:{:016x}", hash))
+}
+
 /// Compute a content-based hash for video files.
 ///
 /// Does not perform perceptual hashing (video files are too large, decoding too slow).

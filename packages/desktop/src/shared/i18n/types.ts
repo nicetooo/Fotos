@@ -59,6 +59,7 @@ export interface Translations {
         refresh: string;
         importFolder: string;
         importFile: string;
+        rescan: string;
         importing: string;
         selectPhotos: string;
         noPhotosSelected: string;
@@ -138,6 +139,13 @@ export interface Translations {
         clearCache: string;
         clearAllData: string;
         clearCacheConfirm: string;
+        libraryFolders: string;
+        libraryFoldersHint: string;
+        noFolders: string;
+        folderOffline: string;
+        removeFolder: string;
+        removeFolderConfirm: string;
+        folderItems: string;
         about: string;
         techStack: string;
     };

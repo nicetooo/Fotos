@@ -90,11 +90,22 @@ fn generate_image_file(
         return Ok(());
     }
 
-    // No embedded thumbnail found - skip generation, use original image directly
-    // This avoids slow full image decode. Frontend will display original scaled down.
-    Err(ThumbnailError::DecodeError(
-        "No embedded thumbnail, use original".to_string(),
-    ))
+    // Step 2: no embedded thumbnail (screenshots, exports, PNG/WebP): decode
+    // and scale down. RAW files cannot be decoded here, so they stay without.
+    if is_raw_file(source) {
+        return Err(ThumbnailError::DecodeError(
+            "No embedded thumbnail in RAW file".to_string(),
+        ));
+    }
+    let img = image::open(source).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
+    let small = img.thumbnail(spec.width, spec.height);
+    let small = apply_orientation_to_image(small, orientation.unwrap_or(1));
+    let mut output = Vec::new();
+    image::DynamicImage::ImageRgb8(small.to_rgb8())
+        .write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Jpeg)
+        .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+    std::fs::write(dest, output).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+    Ok(())
 }
 
 /// Check if file is a RAW format based on extension

@@ -15,6 +15,8 @@ pub use types::{ImportResult, MediaType, PhotoId, PhotoInfo, PhotoMetadata, Phot
 pub use fs::scan::{is_supported_image, is_supported_video};
 pub use fs::scan_photos;
 pub use fs::{detect_live_photo_pairs, LivePhotoPair};
+pub use fs::{is_under, plan_rescan, FileStat, KnownFile, RescanPlan};
+pub use image::compute_content_hash;
 pub use image::{
     compute_hash, compute_video_hash, extract_raw_preview, ThumbnailError, ThumbnailSpec,
     Thumbnailer,

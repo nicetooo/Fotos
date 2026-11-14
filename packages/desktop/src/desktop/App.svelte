@@ -217,6 +217,16 @@
         if (showLibrary) pager.invalidate();
     }
 
+    let lastProgressRefresh = 0;
+
+    /** Check the remembered folders for new, changed and deleted files. */
+    async function handleRescan() {
+        if (!platformService?.rescanLibrary || isScanning) return;
+        importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
+        await platformService.rescanLibrary();
+        bumpRefresh();
+    }
+
     onMount(async () => {
         try {
             version = await invoke("get_core_version");
@@ -244,7 +254,11 @@
                     total: progress.total,
                     lastPath: progress.lastPath,
                 };
-                if (progress.current <= 5 || progress.current % 50 === 0) {
+                // Every batch is committed, so there is something new to
+                // show; once a second is plenty.
+                const now = performance.now();
+                if (now - lastProgressRefresh >= 1000) {
+                    lastProgressRefresh = now;
                     bumpRefresh();
                 }
             });
@@ -260,6 +274,8 @@
 
             // Agent self-test: only when launched with FOOTOS_AGENT_TEST (scripts/agent-test).
             const scenario = (await invoke("agent_test_enabled")) as string | null;
+            // Pick up what changed on disk since the last run.
+            if (!scenario) void handleRescan();
             if (scenario) {
                 const { runAgentTest } = await import("../shared/agent-test");
                 void runAgentTest(scenario, {
@@ -510,6 +526,51 @@
 
         showLibrary = false;
         restoreFilter();
+
+        // Import a folder of real files, rescan it, see it in Settings, remove it.
+        const importDir = (await invoke("agent_test_import_dir")) as string | null;
+        if (importDir) {
+            const before = await photoCount();
+            let progressEvents = 0;
+            const off = platformService.onImportProgress(() => { progressEvents++; });
+            const t0 = performance.now();
+            const first: any = await invoke("import_photos", { rootPath: importDir });
+            const importMs = Math.round(performance.now() - t0);
+            off();
+            const afterImport = await photoCount();
+            const again: any = await invoke("import_photos", { rootPath: importDir });
+            const roots: any[] = await invoke("list_library_roots");
+            const root = roots.find((r) => r.photos === first.success);
+            out.push({
+                name: "desktop:import-folder",
+                ok: first.success > 0 && first.failure === 0 && afterImport - before === first.success
+                    && again.success === 0 && !!root && root.available && progressEvents > 0,
+                detail: { importMs, success: first.success, duplicates: first.duplicates, failure: first.failure,
+                    added: afterImport - before, secondImport: again.success, roots: roots.length, progressEvents },
+            });
+
+            const rescan: any = await invoke("rescan_library");
+            out.push({
+                name: "desktop:rescan-unchanged",
+                ok: rescan.roots >= 1 && rescan.added + rescan.updated + rescan.moved + rescan.removed === 0
+                    && (await photoCount()) === afterImport,
+                detail: rescan,
+            });
+
+            showSettings = true;
+            const listed = await until(() => !!root && document.body.innerText.includes(root.path));
+            out.push({ name: "desktop:settings-folders", ok: listed, detail: { path: root?.path } });
+            showSettings = false;
+
+            const removed = root ? ((await invoke("remove_library_root", { path: root.path, removePhotos: true })) as number) : 0;
+            const afterRemove = await photoCount();
+            out.push({
+                name: "desktop:remove-folder",
+                ok: removed === first.success && afterRemove === before
+                    && ((await invoke("list_library_roots")) as any[]).length === roots.length - 1,
+                detail: { removed, before, afterRemove },
+            });
+        }
         return out;
     }
 
@@ -672,6 +733,14 @@
                         >
                             <i class="fa-solid fa-file-image w-4"></i>
                             {t.import.importFile}
+                        </button>
+                        <button
+                            onclick={() => { floatingImportMenuOpen = false; handleRescan(); }}
+                            disabled={isScanning}
+                            class="w-full px-3 py-2 text-left text-sm theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-rotate w-4"></i>
+                            {t.import.rescan}
                         </button>
                     </div>
                 {/if}
@@ -844,6 +913,14 @@
                                     <i class="fa-solid fa-file-image w-3"></i>
                                     {t.import.importFile}
                                 </button>
+                        <button
+                            onclick={() => { libraryImportMenuOpen = false; handleRescan(); }}
+                            disabled={isScanning}
+                            class="w-full px-3 py-1.5 text-left text-xs theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary flex items-center gap-2"
+                        >
+                            <i class="fa-solid fa-rotate w-3"></i>
+                            {t.import.rescan}
+                        </button>
                             </div>
                         {/if}
                     </div>
