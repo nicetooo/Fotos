@@ -39,6 +39,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Native photo viewer, shown above the WebView -->
+        <activity
+            android:name=".viewer.PhotoViewerActivity"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize"
+            android:exported="false"
+            android:theme="@style/Theme.Footos.Viewer" />
+
         <!-- FileProvider for sharing files -->
         <provider
             android:name="androidx.core.content.FileProvider"

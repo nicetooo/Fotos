@@ -13,7 +13,10 @@ export type {
     PlatformService,
     IOSPlatformService,
     AndroidPlatformService,
+    NativeViewerHost,
+    NativeViewerItem,
 } from "./types";
+export { nativeViewerOf } from "./types";
 
 // Context utilities
 export {

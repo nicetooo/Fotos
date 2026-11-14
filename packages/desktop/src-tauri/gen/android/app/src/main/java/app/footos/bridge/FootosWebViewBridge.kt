@@ -6,6 +6,7 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
+import app.footos.viewer.PhotoViewerActivity
 import org.json.JSONObject
 
 /**
@@ -42,7 +43,8 @@ class FootosWebViewBridge(
      */
     @JavascriptInterface
     fun postMessage(message: String) {
-        Log.d(TAG, "Received message: $message")
+        // Not the whole message: openViewer carries a long item list.
+        Log.d(TAG, "Received message: ${message.take(200)}")
 
         try {
             val json = JSONObject(message)
@@ -55,7 +57,7 @@ class FootosWebViewBridge(
             if (msgThumbDir.isNotEmpty()) thumbDir = msgThumbDir
 
             mainHandler.post {
-                handleCommand(command)
+                if (command == "openViewer") handleOpenViewer(json) else handleCommand(command)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse message: ${e.message}")
@@ -85,6 +87,27 @@ class FootosWebViewBridge(
     }
 
     // ==================== Command Handlers ====================
+
+    /** Show the native photo viewer on the items the web side lists. */
+    private fun handleOpenViewer(json: JSONObject) {
+        val array = json.optJSONArray("items") ?: return
+        val items = ArrayList<PhotoViewerActivity.Item>(array.length())
+        for (i in 0 until array.length()) {
+            val o = array.optJSONObject(i) ?: continue
+            items.add(
+                PhotoViewerActivity.Item(
+                    path = o.optString("path", ""),
+                    thumb = o.optString("thumb", ""),
+                    mediaType = o.optString("media_type", "photo"),
+                    dateTaken = o.optString("date_taken", ""),
+                )
+            )
+        }
+        PhotoViewerActivity.open(activity, items, json.optInt("index", 0)) { lastIndex ->
+            val script = "(function(){if(window.__handleNativeViewerClosed)window.__handleNativeViewerClosed($lastIndex);})()"
+            mainHandler.post { webView.evaluateJavascript(script, null) }
+        }
+    }
 
     private fun handleRequestImport() {
         Log.d(TAG, "Requesting photo import")

@@ -9,6 +9,7 @@
         setPlatformService,
         isIOSPlatform,
         isAndroidPlatform,
+        nativeViewerOf,
         type PlatformService,
         type IOSPlatformService,
         type AndroidPlatformService,
@@ -20,7 +21,7 @@
         type Theme,
         type ImportStatus,
     } from "../shared";
-    import { queryAlbum, queryAlbumIn, photoCount, albumItemToPhoto, type Bbox } from "../shared/query";
+    import { queryAlbum, queryAlbumIn, photoCount, albumItemToPhoto, type AlbumItem, type Bbox } from "../shared/query";
 
     // i18n
     import { createI18nState, type Locale } from "../shared/i18n";
@@ -28,6 +29,7 @@
     // Components
     import Settings from "./components/Settings.svelte";
     import PhotoViewer from "./components/PhotoViewer.svelte";
+    import AlbumGrid from "./components/AlbumGrid.svelte";
     import MapView from "./components/MapView.svelte";
 
     // Platform service received as prop from main.ts
@@ -142,6 +144,10 @@
     onMount(async () => {
         // Back button support: close modals on browser history navigation
         window.addEventListener('popstate', handlePopState);
+        // The native viewer reports where it was closed.
+        const onNativeViewerClosed = (index: number) => albumGridRef?.reveal(index);
+        (window as any).__handleIOSViewerClosed = onNativeViewerClosed;
+        (window as any).__handleNativeViewerClosed = onNativeViewerClosed;
 
         try {
             // Check if iOS platform for specific features
@@ -307,10 +313,11 @@
 
     async function openPreview(item: { id: number; path: string }) {
         try {
-            if (platformService.capabilities.nativePhotoViewer && iosPlatformService) {
+            const nativeViewer = nativeViewerOf(platformService);
+            if (nativeViewer) {
                 const w = await queryAlbum(item.id, NATIVE_ALBUM_RADIUS);
                 const index = w.items.findIndex((p) => p.id === item.id);
-                const opened = iosPlatformService.openNativeViewer(
+                const opened = nativeViewer.openNativeViewer(
                     w.items.map((p) => ({
                         path: p.path,
                         thumb: p.thumb,
@@ -332,38 +339,65 @@
         }
     }
 
-    // What the map shows can be a lot; the newest this many are enough to browse.
+    // What the map shows can be a lot; the grid holds the newest this many.
     const VIEWPORT_ALBUM_LIMIT = 1000;
 
-    /** Open the album of what is on the map now, starting at the newest photo. */
+    // The album grid (what is on the map), shown before any single photo.
+    let albumGrid = $state.raw<{ items: AlbumItem[]; total: number } | null>(null);
+    let albumGridRef = $state<{ reveal: (index: number) => void } | null>(null);
+
+    /** Open the album of what is on the map now as a grid. */
     async function openViewportAlbum(bbox: Bbox, startMs: number | null, endMs: number | null) {
         try {
             const w = await queryAlbumIn(bbox, startMs, endMs, VIEWPORT_ALBUM_LIMIT);
-            if (w.items.length === 0) return { native: false, count: 0 };
-            const last = w.items.length - 1;
-            if (platformService.capabilities.nativePhotoViewer && iosPlatformService) {
-                const opened = iosPlatformService.openNativeViewer(
-                    w.items.map((p) => ({
-                        path: p.path,
-                        thumb: p.thumb,
-                        media_type: p.media_type,
-                        date_taken: p.date_taken,
-                    })),
-                    last,
-                );
-                if (opened) return { native: true, count: w.items.length };
-            }
-            // A fixed list: start/total say there is nothing more to fetch, so
-            // browsing never swaps it for a window of the whole album.
-            viewerPhotos = w.items.map(albumItemToPhoto);
-            viewerStart = 0;
-            viewerTotal = viewerPhotos.length;
-            previewPhoto = viewerPhotos[last];
-            history.pushState({ modal: "preview" }, "");
-            return { native: false, count: w.items.length };
+            if (w.items.length === 0) return;
+            albumGrid = { items: w.items, total: w.total };
+            history.pushState({ modal: "album" }, "");
         } catch (e) {
             console.error("[App] Failed to open viewport album", e);
         }
+    }
+
+    /** A cell of the grid was tapped: open the viewer on it, over the grid. */
+    function openAlbumItem(index: number) {
+        const grid = albumGrid;
+        if (!grid) return;
+        const nativeViewer = nativeViewerOf(platformService);
+        if (nativeViewer) {
+            const opened = nativeViewer.openNativeViewer(
+                grid.items.map((p) => ({
+                    path: p.path,
+                    thumb: p.thumb,
+                    media_type: p.media_type,
+                    date_taken: p.date_taken,
+                })),
+                index,
+            );
+            if (opened) return;
+        }
+        // A fixed list: start/total say there is nothing more to fetch, so
+        // browsing never swaps it for a window of the whole album.
+        viewerPhotos = grid.items.map(albumItemToPhoto);
+        viewerStart = 0;
+        viewerTotal = viewerPhotos.length;
+        previewPhoto = viewerPhotos[index];
+        history.pushState({ modal: "preview" }, "");
+    }
+
+    function closeAlbum() {
+        if (!albumGrid) return;
+        albumGrid = null;
+        isClosingManually = true;
+        history.back();
+    }
+
+    /** Back in the grid, keep the photo that was on display in sight. */
+    function revealInAlbum() {
+        const grid = albumGrid;
+        const photo = previewPhoto;
+        if (!grid || !photo) return;
+        const index = grid.items.findIndex((p) => p.path === photo.path);
+        if (index >= 0) albumGridRef?.reveal(index);
     }
 
     /** Near the edge of the loaded window: fetch the next one around the current photo. */
@@ -432,6 +466,7 @@
 
     function closePreview() {
         if (!previewPhoto) return;
+        revealInAlbum();
         previewPhoto = null;
         viewerPhotos = [];
         isClosingManually = true;
@@ -463,8 +498,11 @@
         }
         // Hardware/system back button pressed: close topmost modal
         if (previewPhoto) {
+            revealInAlbum();
             previewPhoto = null;
             viewerPhotos = [];
+        } else if (albumGrid) {
+            albumGrid = null;
         } else if (showSettings) {
             showSettings = false;
         }
@@ -544,6 +582,18 @@
             </div>
         </div>
     </div>
+{/if}
+
+{#if albumGrid}
+    <AlbumGrid
+        bind:this={albumGridRef}
+        items={albumGrid.items}
+        total={albumGrid.total}
+        onOpen={openAlbumItem}
+        onClose={closeAlbum}
+        {t}
+        {locale}
+    />
 {/if}
 
 {#if previewPhoto}

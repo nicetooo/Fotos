@@ -102,6 +102,9 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.8.2")
     implementation("androidx.fragment:fragment-ktx:1.6.2")
 
+    // Native photo viewer: paging (RecyclerView for the filmstrip comes with it)
+    implementation("androidx.viewpager2:viewpager2:1.0.0")
+
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
 

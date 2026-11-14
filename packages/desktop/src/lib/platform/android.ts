@@ -16,6 +16,8 @@ import type {
     ImportResult,
     PermissionStatus,
     MapTileConfig,
+    NativeViewerItem,
+    NativeViewerHost,
 } from "./types";
 
 // Extend Window interface for Android bridge
@@ -36,7 +38,7 @@ type EventHandler = { event: string; handler: EventListener };
  * Mirrors iOS implementation pattern with WebKit MessageHandler replaced by
  * Android's @JavascriptInterface
  */
-class AndroidPlatformService implements PlatformService {
+class AndroidPlatformService implements PlatformService, NativeViewerHost {
     readonly platform = 'android' as const;
     readonly isMobile = true;
 
@@ -46,7 +48,7 @@ class AndroidPlatformService implements PlatformService {
         runtimePermissions: true,
         revealInFileManager: false,
         folderSelection: false,
-        nativePhotoViewer: false,
+        nativePhotoViewer: true,
     };
 
     private progressCallbacks = new Set<(p: ImportProgress) => void>();
@@ -388,6 +390,12 @@ class AndroidPlatformService implements PlatformService {
         return () => this.scanningCallbacks.delete(callback);
     }
 
+    openNativeViewer(items: NativeViewerItem[], index: number): boolean {
+        if (!window.AndroidWebViewInterface || items.length === 0) return false;
+        this.postMessage({ command: "openViewer", items, index });
+        return true;
+    }
+
     async openInSystemPlayer(path: string): Promise<void> {
         this.postMessage({ command: "openVideo", path });
     }
@@ -401,7 +409,7 @@ class AndroidPlatformService implements PlatformService {
 /**
  * Extended Android Platform Service with MediaStore sync support
  */
-export interface AndroidPlatformServiceExtended extends PlatformService {
+export interface AndroidPlatformServiceExtended extends PlatformService, NativeViewerHost {
     readonly hasMediaAccess: boolean;
     syncPhotosIfHasAccess(): Promise<void>;
     requestPermission(): Promise<void>;

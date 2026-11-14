@@ -15,7 +15,7 @@ export interface PlatformCapabilities {
     revealInFileManager: boolean;
     /** 支持文件夹选择 (Desktop: true, Mobile: false) */
     folderSelection: boolean;
-    /** 有原生照片查看器 (iOS: true)。为 true 时用 openNativeViewer，否则用 Web 查看器 */
+    /** 有原生照片查看器 (iOS、Android: true)。为 true 时用 openNativeViewer，否则用 Web 查看器 */
     nativePhotoViewer: boolean;
 }
 
@@ -96,8 +96,25 @@ export interface NativeViewerItem {
     date_taken: string;
 }
 
+/** 有原生查看器的平台实现这个接口（`capabilities.nativePhotoViewer` 为 true 时） */
+export interface NativeViewerHost {
+    /**
+     * 用原生查看器打开一组照片（时间顺序），index 为起始位置。
+     * 返回 false 表示原生桥不可用，调用方应退回 Web 查看器。
+     */
+    openNativeViewer(items: NativeViewerItem[], index: number): boolean;
+}
+
+/** 平台服务是否带原生查看器 */
+export function nativeViewerOf(service: PlatformService): NativeViewerHost | null {
+    const host = service as PlatformService & Partial<NativeViewerHost>;
+    return service.capabilities.nativePhotoViewer && typeof host.openNativeViewer === "function"
+        ? (host as NativeViewerHost)
+        : null;
+}
+
 /** iOS 扩展接口 */
-export interface IOSPlatformService extends PlatformService {
+export interface IOSPlatformService extends PlatformService, NativeViewerHost {
     /** 是否有完整相册访问权限 */
     readonly hasFullPhotoAccess: boolean;
 
@@ -119,18 +136,12 @@ export interface IOSPlatformService extends PlatformService {
     /** 视频/实况封面：屏幕尺寸静帧，比 256 缩略图清晰，也比整段视频快 */
     ensureViewerStill(path: string): Promise<string | null>;
 
-    /**
-     * 用原生查看器打开一组照片（时间顺序），index 为起始位置。
-     * 返回 false 表示原生桥不可用，调用方应退回 Web 查看器。
-     */
-    openNativeViewer(items: NativeViewerItem[], index: number): boolean;
-
     /** 实况配对视频，长按时播放 */
     ensureLiveVideo(path: string): Promise<string | null>;
 }
 
 /** Android 扩展接口 */
-export interface AndroidPlatformService extends PlatformService {
+export interface AndroidPlatformService extends PlatformService, NativeViewerHost {
     /** 是否有媒体访问权限 */
     readonly hasMediaAccess: boolean;
 
