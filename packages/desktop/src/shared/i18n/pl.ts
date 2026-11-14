@@ -31,6 +31,7 @@ export const pl: Translations = {
 
     import: {
         importPhotos: 'Importuj zdjęcia',
+        refresh: 'Refresh photos',
         importFolder: 'Importuj folder',
         importFile: 'Importuj plik',
         importing: 'Importowanie...',

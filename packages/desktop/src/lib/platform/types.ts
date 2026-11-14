@@ -144,6 +144,15 @@ export interface IOSPlatformService extends PlatformService, NativeViewerHost {
      */
     setAlbumMenuContext(items: NativeViewerItem[], titles: { copy: string; share: string; locate: string }): void;
 
+    /** 没有权限时用户点了导入：原生提示框的文案 */
+    setAccessDeniedTexts(texts: { title: string; message: string; settings: string; cancel: string }): void;
+
+    /** 原生同步发现库里有照片已不可见并清掉了对应的行 */
+    onLibraryChanged(callback: () => void): () => void;
+
+    /** 应用数据被清空后：丢掉内存里指向已删除文件的缓存，并清原生导出的文件 */
+    resetAfterClear(): void;
+
     /** 实况配对视频，长按时播放 */
     ensureLiveVideo(path: string): Promise<string | null>;
 }

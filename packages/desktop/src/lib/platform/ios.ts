@@ -51,6 +51,8 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
     private cachedLiveVideos = new Map<string, string>();
     private inflightExports = new Map<string, Promise<{ filePath: string; stillPath: string }>>();
     private knownIdentifiers: string[] = [];
+    private libraryChangedCallbacks = new Set<() => void>();
+    private deniedAlert: Record<string, string> | null = null;
 
     get hasFullPhotoAccess(): boolean {
         return this._hasFullAccess;
@@ -157,6 +159,21 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
             this.permissionCallbacks.forEach(cb => cb(this._hasFullAccess));
         });
 
+        // Assets the app can no longer see (deleted, or deselected under
+        // limited access): drop their rows, then let the UI refresh.
+        this.addListener('ios-assets-removed', (e: CustomEvent) => {
+            const ids: string[] = e.detail?.ids ?? [];
+            if (ids.length === 0) return;
+            const gone = new Set(ids);
+            this.knownIdentifiers = this.knownIdentifiers.filter((id) => !gone.has(id));
+            void invoke<number>("remove_ios_assets", { ids })
+                .then((removed) => {
+                    console.log("[iOS] Removed rows of missing assets:", removed);
+                    if (removed > 0) this.libraryChangedCallbacks.forEach(cb => cb());
+                })
+                .catch((err) => console.error("[iOS] remove_ios_assets failed", err));
+        });
+
         // iOS Swift 桥接就绪事件
         this.addListener('footos-bridge-ready', () => {
             console.log("[iOS] Swift bridge is ready");
@@ -256,7 +273,25 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         }
         this.exportFinished = false;
         this.importTotals = { success: 0, failure: 0, duplicates: 0 };
-        this.postNative({ command: "requestImport" });
+        this.postNative({ command: "requestImport", ...(this.deniedAlert ? { deniedAlert: this.deniedAlert } : {}) });
+    }
+
+    setAccessDeniedTexts(texts: { title: string; message: string; settings: string; cancel: string }): void {
+        this.deniedAlert = texts;
+    }
+
+    onLibraryChanged(callback: () => void): () => void {
+        this.libraryChangedCallbacks.add(callback);
+        return () => this.libraryChangedCallbacks.delete(callback);
+    }
+
+    resetAfterClear(): void {
+        this.knownIdentifiers = [];
+        this.cachedStills.clear();
+        this.cachedLiveVideos.clear();
+        this.inflightExports.clear();
+        this.pendingBatches = [];
+        this.postNative({ command: "clearCaches" });
     }
 
     async syncPhotosIfFullAccess(): Promise<void> {

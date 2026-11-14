@@ -31,6 +31,7 @@ export const ja: Translations = {
 
     import: {
         importPhotos: '写真をインポート',
+        refresh: '写真を更新',
         importFolder: 'フォルダをインポート',
         importFile: 'ファイルをインポート',
         importing: 'インポート中...',

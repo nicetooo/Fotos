@@ -31,6 +31,7 @@ export const tr: Translations = {
 
     import: {
         importPhotos: 'Fotoğraf içe aktar',
+        refresh: 'Refresh photos',
         importFolder: 'Klasör içe aktar',
         importFile: 'Dosya içe aktar',
         importing: 'İçe aktarılıyor...',

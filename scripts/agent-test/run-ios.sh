@@ -72,7 +72,9 @@ fi
 xcrun simctl install "$UDID" "$APP"
 
 # No permission dialogs: they would cover the UI and block the probe.
-xcrun simctl privacy "$UDID" grant photos "$BUNDLE_ID" || true
+# Photos is left alone: in agent test mode the app never touches the photo
+# library, and `simctl privacy grant photos` only gives add-only access, which
+# reads as "denied" and would upset manual permission tests on this simulator.
 xcrun simctl privacy "$UDID" grant location "$BUNDLE_ID" || true
 xcrun simctl spawn "$UDID" defaults write "$BUNDLE_ID" footos.networkAlertShown -bool YES
 

@@ -56,6 +56,7 @@ export interface Translations {
     // Import
     import: {
         importPhotos: string;
+        refresh: string;
         importFolder: string;
         importFile: string;
         importing: string;

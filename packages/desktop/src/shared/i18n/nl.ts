@@ -31,6 +31,7 @@ export const nl: Translations = {
 
     import: {
         importPhotos: 'Foto\'s importeren',
+        refresh: 'Refresh photos',
         importFolder: 'Map importeren',
         importFile: 'Bestand importeren',
         importing: 'Importeren...',

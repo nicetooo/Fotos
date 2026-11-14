@@ -83,8 +83,69 @@
             }
         });
         ro.observe(scroller);
-        return () => ro.disconnect();
+        // Swipe in from the left edge to go back, as system screens do. The
+        // listeners are not passive so the drag can keep the list from scrolling.
+        root.addEventListener("touchstart", edgeStart, { passive: true });
+        root.addEventListener("touchmove", edgeMove, { passive: false });
+        root.addEventListener("touchend", edgeEnd);
+        root.addEventListener("touchcancel", edgeEnd);
+        return () => {
+            ro.disconnect();
+            root.removeEventListener("touchstart", edgeStart);
+            root.removeEventListener("touchmove", edgeMove);
+            root.removeEventListener("touchend", edgeEnd);
+            root.removeEventListener("touchcancel", edgeEnd);
+        };
     });
+
+    // --- Edge swipe back -------------------------------------------------
+    const EDGE_WIDTH = 28;
+    let root: HTMLDivElement;
+    let swipeX = $state(0);
+    let swipeSettling = $state(false);
+    let edge: { x: number; y: number; t: number; active: boolean } | null = null;
+
+    function edgeStart(e: TouchEvent) {
+        edge = null;
+        if (e.touches.length !== 1 || menuIndex !== null) return;
+        const touch = e.touches[0];
+        if (touch.clientX > EDGE_WIDTH) return;
+        edge = { x: touch.clientX, y: touch.clientY, t: performance.now(), active: false };
+    }
+
+    function edgeMove(e: TouchEvent) {
+        if (!edge) return;
+        const touch = e.touches[0];
+        const dx = touch.clientX - edge.x;
+        const dy = touch.clientY - edge.y;
+        if (!edge.active) {
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+            // A mostly vertical drag from the edge is a scroll, not a swipe back.
+            if (dx <= 0 || Math.abs(dy) > Math.abs(dx)) {
+                edge = null;
+                return;
+            }
+            edge.active = true;
+            swipeSettling = false;
+            cancelPress();
+        }
+        e.preventDefault();
+        swipeX = Math.max(0, dx);
+    }
+
+    function edgeEnd() {
+        const gesture = edge;
+        edge = null;
+        if (!gesture?.active) return;
+        const speed = swipeX / Math.max(1, performance.now() - gesture.t); // px per ms
+        swipeSettling = true;
+        if (swipeX > width * 0.33 || speed > 0.5) {
+            swipeX = width;
+            setTimeout(onClose, 180);
+        } else {
+            swipeX = 0;
+        }
+    }
 
     function day(raw: string): string {
         const m = /^(\d{4})[-:](\d{2})[-:](\d{2})/.exec(raw || "");
@@ -172,7 +233,13 @@
     }
 </script>
 
-<div class="album" data-album-grid>
+<div
+    class="album"
+    class:settling={swipeSettling}
+    data-album-grid
+    bind:this={root}
+    style={swipeX > 0 ? `transform: translate3d(${swipeX}px, 0, 0)` : undefined}
+>
     <header>
         <button class="back" onclick={onClose} aria-label={t.common.close}>
             <i class="fa-solid fa-chevron-left"></i>
@@ -248,7 +315,11 @@
 </div>
 
 <style>
+    .album.settling {
+        transition: transform 0.18s ease-out;
+    }
     .album {
+        box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
         position: fixed;
         inset: 0;
         z-index: 3000;

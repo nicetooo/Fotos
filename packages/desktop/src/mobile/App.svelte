@@ -207,6 +207,8 @@
                 }
             });
 
+            iosPlatformService?.onLibraryChanged(() => bumpRefresh());
+
             platformService.onImportComplete((result) => {
                 console.log("[App] Import complete callback triggered:", result);
                 bumpRefresh();
@@ -214,7 +216,17 @@
             });
 
             // Listen for reload-photos event (e.g., after clear cache)
-            await listen("reload-photos", () => bumpRefresh());
+            await listen("reload-photos", () => {
+                bumpRefresh();
+                // The library was wiped. What the app shows is a cache of the
+                // photo library, so fill it again right away where access allows.
+                iosPlatformService?.resetAfterClear();
+                if (iosPlatformService) {
+                    void iosPlatformService.syncPhotosIfFullAccess();
+                } else {
+                    void androidPlatformService?.syncPhotosIfHasAccess();
+                }
+            });
 
             // DB is ready: let the map run its first viewport query.
             bumpRefresh();
@@ -252,6 +264,22 @@
 
                 androidPlatformService.syncPhotosIfHasAccess();
             }
+            // Photos taken while the app was in the background: pick them up
+            // when it comes back, since there is no button to ask for it.
+            if (!agentScenario) {
+                let lastForegroundSync = Date.now();
+                document.addEventListener("visibilitychange", () => {
+                    if (document.visibilityState !== "visible" || !hasFullAccess || isScanning) return;
+                    if (Date.now() - lastForegroundSync < 30_000) return;
+                    lastForegroundSync = Date.now();
+                    if (iosPlatformService) {
+                        void refreshKnownIosIds().then(() => iosPlatformService?.syncPhotosIfFullAccess());
+                    } else {
+                        void androidPlatformService?.syncPhotosIfHasAccess();
+                    }
+                });
+            }
+
             (window as any).__footosOpenPreview = async () => {
                 const w = await queryAlbum(null, 0);
                 if (w.items.length === 0) return false;
@@ -284,6 +312,29 @@
         };
     });
 
+    // A sync with nothing new finishes at once and shows nothing; keep the
+    // icon turning for a moment so the tap visibly did something.
+    let refreshing = $state(false);
+
+    /** Full access: look for photos added since the last sync. */
+    async function handleRefresh() {
+        if (refreshing || isScanning) return;
+        refreshing = true;
+        const minimum = new Promise((r) => setTimeout(r, 900));
+        try {
+            if (iosPlatformService) {
+                await refreshKnownIosIds();
+                await iosPlatformService.syncPhotosIfFullAccess();
+            } else {
+                await androidPlatformService?.syncPhotosIfHasAccess();
+            }
+        } catch (e) {
+            console.warn("[App] Refresh failed", e);
+        }
+        await minimum;
+        refreshing = false;
+    }
+
     async function refreshKnownIosIds() {
         if (!iosPlatformService) return;
         try {
@@ -299,6 +350,12 @@
             error = "";
             importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
             await refreshKnownIosIds();
+            iosPlatformService?.setAccessDeniedTexts({
+                title: t.permissions.deniedAccessTitle,
+                message: t.permissions.deniedAccessMessage,
+                settings: t.permissions.goToSettings,
+                cancel: t.common.cancel,
+            });
             await platformService.requestImport();
         } catch (e) {
             error = String(e);
@@ -558,13 +615,21 @@
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute left-4 z-[1001] flex flex-col gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">
+            <!-- Add photos while access is partial; with access to the whole
+                 library there is nothing to pick, so the same button re-syncs. -->
             <button
-                onclick={() => handleImport()}
-                disabled={isScanning}
+                onclick={() => (hasFullAccess ? handleRefresh() : handleImport())}
+                disabled={isScanning || refreshing}
+                data-import-button
                 class="w-12 h-12 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
-                title={t.import.importPhotos}
+                title={hasFullAccess ? t.import.refresh : t.import.importPhotos}
+                aria-label={hasFullAccess ? t.import.refresh : t.import.importPhotos}
             >
-                <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-lg"></i>
+                {#if isScanning || refreshing}
+                    <i class="fa-solid {hasFullAccess ? 'fa-rotate' : 'fa-spinner'} fa-spin text-lg"></i>
+                {:else}
+                    <i class="fa-solid {hasFullAccess ? 'fa-rotate' : 'fa-plus'} text-lg"></i>
+                {/if}
             </button>
 
             <!-- Settings button -->

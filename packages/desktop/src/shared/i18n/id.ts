@@ -31,6 +31,7 @@ export const id: Translations = {
 
     import: {
         importPhotos: 'Impor foto',
+        refresh: 'Refresh photos',
         importFolder: 'Impor folder',
         importFile: 'Impor file',
         importing: 'Mengimpor...',

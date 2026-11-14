@@ -31,6 +31,7 @@ export const zh: Translations = {
 
     import: {
         importPhotos: '导入照片',
+        refresh: '刷新照片',
         importFolder: '导入文件夹',
         importFile: '导入文件',
         importing: '正在导入...',

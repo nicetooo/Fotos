@@ -1262,6 +1262,29 @@ struct IosPreviewItem {
     duration_ms: Option<u64>,
 }
 
+/// Drop the rows of library assets the app can no longer see, with their
+/// thumbnails. Returns how many rows were removed.
+#[tauri::command]
+fn remove_ios_assets(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Result<u32, String> {
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
+    let mut removed = 0u32;
+    for id in ids {
+        let path = format!("ios-photo://{id}");
+        let Some(photo) = index.get_by_path(path).map_err(|e| e.to_string())? else {
+            continue;
+        };
+        if index.delete_by_id(photo.id.id).map_err(|e| e.to_string())?.is_some() {
+            removed += 1;
+            // The native side names the thumbnail after the asset identifier
+            // (PhotoLibraryBridge.m, safeIdForAsset).
+            let name = format!("{}.jpg", id.replace(['/', ':'], "_"));
+            let _ = std::fs::remove_file(std::path::Path::new(&thumb_dir).join(name));
+        }
+    }
+    Ok(removed)
+}
+
 /// Insert PhotoKit preview rows (no original file, no perceptual hash).
 #[tauri::command]
 fn upsert_ios_previews(
@@ -1290,6 +1313,8 @@ fn upsert_ios_previews(
             ..Default::default()
         };
         let hash = format!("ios-preview:{}", item.path);
+        let path = item.path.clone();
+        let thumb_path = item.thumb_path.clone();
         match index.insert_preview(
             item.path,
             hash,
@@ -1299,7 +1324,14 @@ fn upsert_ios_previews(
             item.file_size,
         ) {
             Ok(true) => result.success += 1,
-            Ok(false) => result.duplicates += 1,
+            Ok(false) => {
+                // Already known. A row that was stored without a thumbnail
+                // (it could not be produced at the time) gets it now.
+                if thumb_path.is_some() {
+                    let _ = index.update_thumb_info(path, thumb_path, item.file_size);
+                }
+                result.duplicates += 1;
+            }
             Err(e) => {
                 eprintln!("[footos] upsert insert failed: {e}");
                 result.failure += 1;
@@ -2004,6 +2036,7 @@ pub fn run() {
             import_photos,
             import_photo_paths,
             upsert_ios_previews,
+            remove_ios_assets,
             flush_photos_db,
             cancel_import,
             list_photos,

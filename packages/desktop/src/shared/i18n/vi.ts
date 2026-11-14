@@ -31,6 +31,7 @@ export const vi: Translations = {
 
     import: {
         importPhotos: 'Nhập ảnh',
+        refresh: 'Refresh photos',
         importFolder: 'Nhập thư mục',
         importFile: 'Nhập tệp',
         importing: 'Đang nhập...',

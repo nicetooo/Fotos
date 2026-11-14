@@ -31,6 +31,7 @@ export const ru: Translations = {
 
     import: {
         importPhotos: 'Импорт фото',
+        refresh: 'Refresh photos',
         importFolder: 'Импорт папки',
         importFile: 'Импорт файла',
         importing: 'Импорт...',

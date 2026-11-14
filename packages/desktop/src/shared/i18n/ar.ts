@@ -31,6 +31,7 @@ export const ar: Translations = {
 
     import: {
         importPhotos: 'استيراد الصور',
+        refresh: 'Refresh photos',
         importFolder: 'استيراد مجلد',
         importFile: 'استيراد ملف',
         importing: 'جاري الاستيراد...',

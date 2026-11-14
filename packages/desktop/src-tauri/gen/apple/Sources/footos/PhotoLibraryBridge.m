@@ -48,6 +48,8 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
 @property (nonatomic, strong) CLLocationManager *locationManager;
 @property (nonatomic, assign) BOOL awaitingLocationForSync;
 @property (nonatomic, copy) NSSet<NSString *> *knownLocalIds;
+/// Wording for the alert shown when the user asks for photos without access.
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *deniedAlertTexts;
 - (void)handOffPaths:(NSArray<NSString *> *)paths;
 - (void)handOffPaths:(NSArray<NSString *> *)paths completion:(void (^)(void))completion;
 - (void)handOffPaths:(NSArray<NSString *> *)paths attempt:(NSUInteger)attempt completion:(void (^)(void))completion;
@@ -71,8 +73,11 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
                               thumbPath:(NSString *)thumbPath
                                fileSize:(unsigned long long)fileSize;
 - (void)writePreviewThumbnailForAsset:(PHAsset *)asset toPath:(NSString *)thumbPath fileSize:(unsigned long long *)fileSize;
+- (UIImage *)previewImageForAsset:(PHAsset *)asset deliveryMode:(PHImageRequestOptionsDeliveryMode)deliveryMode network:(BOOL)network;
 - (NSString *)writeViewerStillForAsset:(PHAsset *)asset toDirectory:(NSString *)exportDir;
 - (void)emitViewerStill:(NSString *)path identifier:(NSString *)identifier;
+- (void)presentAccessDeniedAlert;
+- (void)clearExportCaches;
 - (NSInteger)albumIndexForURL:(NSURL *)url;
 - (UIContextMenuConfiguration *)albumMenuForIndex:(NSInteger)index;
 - (void)albumMenuAction:(NSString *)action index:(NSInteger)index;
@@ -302,6 +307,13 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
               self.dbPath ?: @"");
     }
 
+    if ([body[@"deniedAlert"] isKindOfClass:[NSDictionary class]]) {
+        self.deniedAlertTexts = body[@"deniedAlert"];
+    }
+    if ([command isEqualToString:@"clearCaches"]) {
+        [self clearExportCaches];
+        return;
+    }
     if ([command isEqualToString:@"albumMenu"]) {
         self.albumMenuItems = [body[@"items"] isKindOfClass:[NSArray class]] ? body[@"items"] : @[];
         self.albumMenuTitles = [body[@"titles"] isKindOfClass:[NSDictionary class]] ? body[@"titles"] : @{};
@@ -393,11 +405,21 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
     }
     if (status == PHAuthorizationStatusLimited) {
         [self emitEvent:@"ios-permission-granted" detail:@{@"type": @"limited"}];
-        if (presentLimitedPicker) {
-            UIViewController *vc = [self topViewController];
-            if (vc) {
-                [[PHPhotoLibrary sharedPhotoLibrary] presentLimitedLibraryPickerFromViewController:vc];
+        UIViewController *vc = presentLimitedPicker ? [self topViewController] : nil;
+        if (vc) {
+            // Sync once the user has finished choosing, so the new selection
+            // is what gets synced.
+            __weak typeof(self) weakSelf = self;
+            if (@available(iOS 15, *)) {
+                [[PHPhotoLibrary sharedPhotoLibrary] presentLimitedLibraryPickerFromViewController:vc
+                                                                                completionHandler:^(NSArray<NSString *> *added) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [weakSelf requestLocationThenSync];
+                    });
+                }];
+                return;
             }
+            [[PHPhotoLibrary sharedPhotoLibrary] presentLimitedLibraryPickerFromViewController:vc];
         }
         [self requestLocationThenSync];
         return;
@@ -405,6 +427,59 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
     [self emitEvent:@"ios-permission-denied" detail:@{
         @"message": @"相册权限未授予。请在设置中允许访问所有照片。"
     }];
+    // The user asked for photos (tapped the button) and the app may not ask
+    // again: say why nothing happens and offer the way to the system settings.
+    // Not on the automatic sync at launch.
+    if (presentLimitedPicker) {
+        [self presentAccessDeniedAlert];
+    }
+}
+
+- (void)presentAccessDeniedAlert {
+    UIViewController *vc = [self topViewController];
+    if (!vc || [vc isKindOfClass:[UIAlertController class]]) {
+        return;
+    }
+    NSDictionary<NSString *, NSString *> *texts = self.deniedAlertTexts ?: @{};
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:texts[@"title"] ?: @"无法访问照片"
+                         message:texts[@"message"] ?: @"请在设置中允许足迹相册访问您的照片库。"
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:texts[@"cancel"] ?: @"取消"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    UIAlertAction *open = [UIAlertAction actionWithTitle:texts[@"settings"] ?: @"前往设置"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^(UIAlertAction *action) {
+        NSURL *url = [NSURL URLWithString:UIApplicationOpenSettingsURLString];
+        if (url) {
+            [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+        }
+    }];
+    [alert addAction:open];
+    alert.preferredAction = open;
+    [vc presentViewController:alert animated:YES completion:nil];
+}
+
+/// Files exported for viewing and sharing. They are caches of library
+/// assets, so "clear data" removes them too.
+- (void)clearExportCaches {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray<NSString *> *dirs = [NSMutableArray arrayWithArray:@[
+        [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-live"],
+        [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-share"],
+        [NSTemporaryDirectory() stringByAppendingPathComponent:@"footos-originals"],
+    ]];
+    if (self.thumbDir.length > 0) {
+        [dirs addObject:[[self.thumbDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Photos"]];
+    }
+    for (NSString *dir in dirs) {
+        for (NSString *name in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+            [fm removeItemAtPath:[dir stringByAppendingPathComponent:name] error:nil];
+        }
+    }
+    self.knownLocalIds = [NSSet set];
+    NSLog(@"[footos] export caches cleared");
 }
 
 - (void)requestLocationThenSync {
@@ -486,15 +561,44 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
                   (unsigned long)pending.count,
                   (unsigned long)assets.count);
         } else {
+            NSUInteger repaired = 0;
             for (PHAsset *asset in assets) {
                 if (![known containsObject:asset.localIdentifier]) {
                     [pending addObject:asset];
+                    continue;
                 }
+                // Known, but its thumbnail never made it to disk: try again.
+                NSString *thumbPath = [thumbDir stringByAppendingPathComponent:
+                                       [NSString stringWithFormat:@"%@.jpg", [self safeIdForAsset:asset]]];
+                if (![[NSFileManager defaultManager] fileExistsAtPath:thumbPath]) {
+                    [pending addObject:asset];
+                    repaired += 1;
+                }
+            }
+            if (repaired > 0) {
+                NSLog(@"[footos] %lu known assets have no thumbnail, retrying", (unsigned long)repaired);
             }
             NSLog(@"[footos] Incremental preview sync: %lu new / %lu total (jsKnown=%lu)",
                   (unsigned long)pending.count,
                   (unsigned long)assets.count,
                   (unsigned long)known.count);
+        }
+
+        // Rows whose asset the app can no longer see (deleted from the library,
+        // or deselected under limited access) would stay on the map as dots
+        // that cannot be opened. Tell the web side to drop them.
+        if (known.count > 0) {
+            NSMutableSet<NSString *> *gone = [known mutableCopy];
+            for (PHAsset *asset in assets) {
+                [gone removeObject:asset.localIdentifier];
+            }
+            if (gone.count > 0) {
+                NSArray<NSString *> *ids = gone.allObjects;
+                NSLog(@"[footos] %lu known assets are gone", (unsigned long)ids.count);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self emitEvent:@"ios-assets-removed" detail:@{@"ids": ids}];
+                });
+            }
         }
 
         if (pending.count == 0) {
@@ -586,12 +690,15 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
     });
 }
 
-- (void)writePreviewThumbnailForAsset:(PHAsset *)asset toPath:(NSString *)thumbPath fileSize:(unsigned long long *)fileSize {
+/// One synchronous thumbnail request. `nil` when nothing matching is available.
+- (UIImage *)previewImageForAsset:(PHAsset *)asset
+                     deliveryMode:(PHImageRequestOptionsDeliveryMode)deliveryMode
+                          network:(BOOL)network {
     PHImageRequestOptions *opts = [[PHImageRequestOptions alloc] init];
     opts.synchronous = YES;
-    opts.networkAccessAllowed = NO;
+    opts.networkAccessAllowed = network;
     opts.resizeMode = PHImageRequestOptionsResizeModeFast;
-    opts.deliveryMode = PHImageRequestOptionsDeliveryModeFastFormat;
+    opts.deliveryMode = deliveryMode;
 
     __block UIImage *image = nil;
     [[PHImageManager defaultManager] requestImageForAsset:asset
@@ -600,9 +707,27 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
                                                   options:opts
                                             resultHandler:^(UIImage *result, NSDictionary *info) {
         (void)info;
-        image = result;
+        if (result) {
+            image = result;
+        }
     }];
+    return image;
+}
+
+- (void)writePreviewThumbnailForAsset:(PHAsset *)asset toPath:(NSString *)thumbPath fileSize:(unsigned long long *)fileSize {
+    // The library's ready-made thumbnail is the fast path. It can be missing
+    // (error 3303: a freshly added asset, or one whose thumbnail the system has
+    // not generated), which used to leave the item without a picture for good.
+    // Fall back to rendering from the local original, then to the network.
+    UIImage *image = [self previewImageForAsset:asset deliveryMode:PHImageRequestOptionsDeliveryModeFastFormat network:NO];
     if (!image) {
+        image = [self previewImageForAsset:asset deliveryMode:PHImageRequestOptionsDeliveryModeHighQualityFormat network:NO];
+    }
+    if (!image) {
+        image = [self previewImageForAsset:asset deliveryMode:PHImageRequestOptionsDeliveryModeHighQualityFormat network:YES];
+    }
+    if (!image) {
+        NSLog(@"[footos] no thumbnail for asset %@", asset.localIdentifier);
         return;
     }
     NSData *data = UIImageJPEGRepresentation(image, 0.82);
@@ -1141,6 +1266,7 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
 }
 
 - (void)emitStatus:(PHAuthorizationStatus)status {
+    NSLog(@"[footos] photo authorization status %ld", (long)status);
     [self emitEvent:@"ios-permission-status" detail:@{@"status": @(status)}];
 }
 

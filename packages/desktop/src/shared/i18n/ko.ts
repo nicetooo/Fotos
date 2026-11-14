@@ -31,6 +31,7 @@ export const ko: Translations = {
 
     import: {
         importPhotos: '사진 가져오기',
+        refresh: '사진 새로고침',
         importFolder: '폴더 가져오기',
         importFile: '파일 가져오기',
         importing: '가져오는 중...',

@@ -31,6 +31,7 @@ export const th: Translations = {
 
     import: {
         importPhotos: 'นำเข้ารูปภาพ',
+        refresh: 'Refresh photos',
         importFolder: 'นำเข้าโฟลเดอร์',
         importFile: 'นำเข้าไฟล์',
         importing: 'กำลังนำเข้า...',
