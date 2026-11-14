@@ -20,12 +20,17 @@
         type Theme,
         type ImportStatus,
         formatFileSize,
-        groupPhotos,
-        sortPhotos,
-        getRawFileSize,
     } from "../shared";
-
-    type MediaFilter = 'all' | 'photo' | 'video' | 'live_photo';
+    import {
+        queryAlbum,
+        photoDetail,
+        photoCount,
+        albumItemToPhoto,
+        type AlbumWindow,
+        type LibraryItem,
+        type MediaFilter,
+    } from "../shared/query";
+    import { LibraryPager, type LibraryCounts } from "./library-pager";
 
     // i18n
     import { createI18nState, type Locale } from "../shared/i18n";
@@ -60,13 +65,34 @@
     });
     let isScanning = $state(false);
     let error = $state("");
-    // Raw: a deep reactive proxy over every photo makes each property read expensive.
-    let photos = $state.raw<PhotoInfo[]>([]);
     let dbPath = $state("");
     let thumbDir = $state("");
-    let uniqueTs = $state(Date.now());
-    let previewPhoto = $state<PhotoInfo | null>(null);
-    let previewPhotoList = $state<PhotoInfo[] | null>(null);
+
+    // The frontend holds no photo list. `refreshKey` tells the map the library
+    // changed; the drawer pages through the list while it is open.
+    let refreshKey = $state(0);
+    let libraryCount = $state(0);
+
+    let libraryVersion = $state(0);
+    let libraryCounts = $state<LibraryCounts>({ total: 0, groupedTotal: 0, filesTotal: 0 });
+    let libraryLoaded = $state(false);
+    const pager = new LibraryPager(() => {
+        libraryCounts = pager.counts;
+        libraryLoaded = pager.loaded;
+        libraryVersion++;
+    });
+
+    // Viewer. From the drawer it walks the drawer's order; from the map it
+    // walks a window of the time-ordered album.
+    type PreviewSource =
+        | { kind: 'library'; index: number }
+        | { kind: 'album'; window: AlbumWindow; pos: number };
+    let previewPhoto = $state<LibraryItem | null>(null);
+    let previewSource = $state.raw<PreviewSource | null>(null);
+    let previewSeq = 0;
+
+    const ALBUM_RADIUS = 300;
+    const ALBUM_EDGE = 60;
 
     // Sort state with localStorage persistence
     const SORT_BY_KEY = "footos-sort-by";
@@ -178,18 +204,18 @@
         theme === "system" ? (systemPrefersDark ? "dark" : "light") : theme
     );
 
-    // Group RAW+JPEG pairs
-    let groupedPhotos = $derived(groupPhotos(photos));
+    // The drawer queries only while it is open.
+    $effect(() => {
+        if (!showLibrary) return;
+        pager.setParams(sortBy, sortOrder === "desc", mediaFilter);
+    });
 
-    // Filter by media type
-    let filteredPhotos = $derived(
-        mediaFilter === 'all'
-            ? groupedPhotos
-            : groupedPhotos.filter(p => (p.media_type || 'photo') === mediaFilter)
-    );
-
-    // Sort photos
-    let sortedPhotos = $derived(sortPhotos(filteredPhotos, sortBy, sortOrder));
+    /** The library changed: tell the map, and the drawer if it is open. */
+    function bumpRefresh() {
+        refreshKey++;
+        photoCount().then((n) => { libraryCount = n; }).catch(() => {});
+        if (showLibrary) pager.invalidate();
+    }
 
     onMount(async () => {
         try {
@@ -219,18 +245,38 @@
                     lastPath: progress.lastPath,
                 };
                 if (progress.current <= 5 || progress.current % 50 === 0) {
-                    loadPhotos();
+                    bumpRefresh();
                 }
             });
 
             platformService.onImportComplete(() => {
-                loadPhotos();
+                bumpRefresh();
             });
 
             // Listen for reload-photos event (e.g., after clear cache)
-            await listen("reload-photos", () => loadPhotos());
+            await listen("reload-photos", () => bumpRefresh());
 
-            await loadPhotos();
+            bumpRefresh();
+
+            // Agent self-test: only when launched with FOOTOS_AGENT_TEST (scripts/agent-test).
+            const scenario = (await invoke("agent_test_enabled")) as string | null;
+            if (scenario) {
+                const { runAgentTest } = await import("../shared/agent-test");
+                void runAgentTest(scenario, {
+                    getMap: () => (window as any).__footosMap ?? null,
+                    getMapStats: () => (window as any).__footosMapStats?.() ?? {},
+                    openPreview: async () => {
+                        const w = await queryAlbum(null, 0);
+                        if (w.items.length === 0) return false;
+                        await openFromMap(w.items[0]);
+                        const src = previewSource;
+                        return { external: true, count: src?.kind === 'album' ? src.window.items.length : 0 };
+                    },
+                    closePreview,
+                    bootMarks: () => ({}),
+                    extraSteps: agentDesktopSteps,
+                });
+            }
         } catch (e) {
             error = t.errors.initFailed + ": " + e;
         }
@@ -240,23 +286,13 @@
         };
     });
 
-    async function loadPhotos() {
-        if (!dbPath) return;
-        try {
-            photos = await invoke("list_photos");
-            uniqueTs = Date.now();
-        } catch (e) {
-            console.error("Failed to list photos", e);
-        }
-    }
-
     async function handleScan(mode: "folder" | "file" = "folder") {
         if (!platformService?.requestScan) return;
         try {
             error = "";
             importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
             await platformService.requestScan(mode);
-            await loadPhotos();
+            bumpRefresh();
         } catch (e) {
             error = String(e);
         }
@@ -283,32 +319,198 @@
         }
     }
 
-    function openPreview(photo: PhotoInfo, customList?: PhotoInfo[]) {
+    function openFromLibrary(photo: PhotoInfo, index: number) {
+        previewSeq++;
         previewPhoto = photo;
-        previewPhotoList = customList || null;
+        previewSource = { kind: 'library', index };
+    }
+
+    /** Open an item picked on the map, with the time-ordered album around it. */
+    async function openFromMap(item: { id: number; path: string }) {
+        const seq = ++previewSeq;
+        try {
+            const [detail, window] = await Promise.all([
+                photoDetail(item.id),
+                queryAlbum(item.id, ALBUM_RADIUS),
+            ]);
+            if (seq !== previewSeq) return;
+            const pos = window.items.findIndex((p) => p.id === item.id);
+            if (pos < 0) return;
+            previewPhoto = detail ?? albumItemToPhoto(window.items[pos]);
+            previewSource = { kind: 'album', window, pos };
+        } catch (e) {
+            console.error("Failed to open preview", e);
+        }
     }
 
     function closePreview() {
+        previewSeq++;
         previewPhoto = null;
-        previewPhotoList = null;
+        previewSource = null;
     }
 
-    // Get the photo list to use for navigation
-    let navigationPhotos = $derived(previewPhotoList || sortedPhotos);
+    // Position of the photo on display, for the "3 / 120" label.
+    let previewPosition = $derived.by(() => {
+        const src = previewSource;
+        if (!src) return { index: 0, total: 0 };
+        if (src.kind === 'library') return { index: src.index, total: libraryCounts.total };
+        return { index: src.window.start + src.pos, total: src.window.total };
+    });
 
-    function navigatePreview(direction: "prev" | "next") {
-        if (!previewPhoto) return;
-        const photoList = navigationPhotos;
-        const currentIndex = photoList.findIndex(p => p.path === previewPhoto!.path);
-        if (currentIndex === -1) return;
+    async function navigatePreview(direction: "prev" | "next") {
+        const src = previewSource;
+        if (!previewPhoto || !src) return;
+        const step = direction === "prev" ? -1 : 1;
+        const seq = ++previewSeq;
 
-        let newIndex: number;
-        if (direction === "prev") {
-            newIndex = currentIndex > 0 ? currentIndex - 1 : photoList.length - 1;
-        } else {
-            newIndex = currentIndex < photoList.length - 1 ? currentIndex + 1 : 0;
+        if (src.kind === 'library') {
+            const total = libraryCounts.total;
+            if (total === 0) return;
+            const index = (src.index + step + total) % total;
+            const item = await pager.item(index);
+            if (seq !== previewSeq || !item) return;
+            previewPhoto = item;
+            previewSource = { kind: 'library', index };
+            return;
         }
-        previewPhoto = photoList[newIndex];
+
+        let { window, pos } = src;
+        const shownId = previewPhoto.id.id;
+        // A RAW next to its JPEG is two rows in the album but one photo: step over it.
+        for (;;) {
+            pos += step;
+            const item = window.items[pos];
+            if (!item) return;
+            const detail = await photoDetail(item.id).catch(() => null);
+            if (seq !== previewSeq) return;
+            const photo = detail ?? albumItemToPhoto(item);
+            if (photo.id.id === shownId) continue;
+            previewPhoto = photo;
+            previewSource = { kind: 'album', window, pos };
+            break;
+        }
+
+        // Near the edge of the window: fetch a new one centred on this photo.
+        const end = window.start + window.items.length;
+        const nearStart = pos < ALBUM_EDGE && window.start > 0;
+        const nearEnd = pos >= window.items.length - ALBUM_EDGE && end < window.total;
+        if (nearStart || nearEnd) {
+            const centerId = window.items[pos].id;
+            const next = await queryAlbum(centerId, ALBUM_RADIUS).catch(() => null);
+            if (!next || seq !== previewSeq) return;
+            const nextPos = next.items.findIndex((p) => p.id === centerId);
+            if (nextPos >= 0) previewSource = { kind: 'album', window: next, pos: nextPos };
+        }
+    }
+
+    /** Desktop-only checks for the agent self-test: timeline, drawer paging, viewer. */
+    async function agentDesktopSteps() {
+        const out: { name: string; ok: boolean; detail?: unknown }[] = [];
+        let restoreFilter = () => {};
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const until = async (check: () => boolean, ms = 5000) => {
+            const end = performance.now() + ms;
+            while (performance.now() < end) {
+                if (check()) return true;
+                await sleep(50);
+            }
+            return check();
+        };
+
+        // Timeline is on screen and has drawn something.
+        {
+            const canvas = document.querySelector<HTMLCanvasElement>(".timeline-container canvas");
+            let painted = 0;
+            if (canvas && canvas.width > 0) {
+                const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, 1).data;
+                for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++;
+            }
+            out.push({
+                name: "desktop:timeline",
+                ok: painted > 0,
+                detail: { canvasWidth: canvas?.width ?? 0, paintedColumns: painted },
+            });
+        }
+
+        // Drawer: first page, a far page, a re-sort.
+        {
+            // Saved drawer settings must not decide what the check sees.
+            const savedFilter = mediaFilter;
+            mediaFilter = "all";
+            const t0 = performance.now();
+            showLibrary = true;
+            const ready = await until(() => libraryLoaded && libraryCounts.total > 0);
+            const firstMs = Math.round(performance.now() - t0);
+            await sleep(200);
+            const cells = document.querySelectorAll("button[title] img").length;
+            const total = libraryCounts.total;
+            const t1 = performance.now();
+            const last = await pager.item(total - 1);
+            const farMs = Math.round(performance.now() - t1);
+            const before = sortBy;
+            const t2 = performance.now();
+            sortBy = "name";
+            await sleep(0);
+            const a = await pager.item(0);
+            const b = await pager.item(1);
+            const sortMs = Math.round(performance.now() - t2);
+            const name = (p?: PhotoInfo) => (p?.path.split("/").pop() || "").toLowerCase();
+            const sorted = sortOrder === "desc" ? name(a) >= name(b) : name(a) <= name(b);
+            sortBy = before;
+            await sleep(0);
+            await pager.item(0);
+            restoreFilter = () => { mediaFilter = savedFilter; };
+            out.push({
+                name: "desktop:library",
+                ok: ready && cells > 0 && !!last && sorted && total === libraryCounts.groupedTotal,
+                detail: { total, files: libraryCounts.filesTotal, firstPageMs: firstMs, farPageMs: farMs, resortMs: sortMs, cellsRendered: cells },
+            });
+        }
+
+        // Viewer from the drawer: step forward, wrap backward.
+        {
+            const first = await pager.item(0);
+            let ok = false;
+            let detail: unknown = "no items";
+            if (first) {
+                openFromLibrary(first, 0);
+                await navigatePreview("next");
+                await navigatePreview("next");
+                const at2 = previewPosition.index;
+                await navigatePreview("prev");
+                await navigatePreview("prev");
+                await navigatePreview("prev");
+                const wrapped = previewPosition.index;
+                ok = at2 === 2 && wrapped === libraryCounts.total - 1 && !!previewPhoto;
+                detail = { afterTwoNext: at2, afterThreePrev: wrapped, total: libraryCounts.total };
+                closePreview();
+            }
+            out.push({ name: "desktop:viewer-library", ok, detail });
+        }
+
+        // Viewer from the map: walk the time-ordered album.
+        {
+            const w = await queryAlbum(null, 0);
+            let ok = false;
+            let detail: unknown = "no items";
+            if (w.total > 0) {
+                const mid = await queryAlbum(null, 0);
+                await openFromMap(mid.items[0]);
+                const startIndex = previewPosition.index;
+                const t0 = performance.now();
+                // The album opens on its newest item, so walk back in time.
+                for (let i = 0; i < 5; i++) await navigatePreview("prev");
+                const stepMs = Math.round((performance.now() - t0) / 5);
+                ok = previewPosition.index === startIndex - 5 && previewPosition.total === w.total;
+                detail = { start: startIndex, end: previewPosition.index, total: previewPosition.total, msPerStep: stepMs };
+                closePreview();
+            }
+            out.push({ name: "desktop:viewer-album", ok, detail });
+        }
+
+        showLibrary = false;
+        restoreFilter();
+        return out;
     }
 
     // Delete state
@@ -317,16 +519,29 @@
     let deleteIncludeRaw = $state(true);
     let isDeleting = $state(false);
 
-    async function handleDeletePhoto(photo: PhotoInfo, mode: 'app' | 'complete', includeRaw: boolean = true) {
+    async function handleDeletePhoto(photo: LibraryItem, mode: 'app' | 'complete', includeRaw: boolean = true) {
         if (!photo.id) return;
+        const src = previewSource;
 
         isDeleting = true;
         try {
             const ids = [photo.id.id];
-            if (includeRaw && photo.hasRaw && photo.rawPath) {
-                const rawPhoto = photos.find(p => p.path === photo.rawPath);
-                if (rawPhoto?.id) {
-                    ids.push(rawPhoto.id.id);
+            if (includeRaw && photo.hasRaw && photo.rawId != null) {
+                ids.push(photo.rawId);
+            }
+
+            // Where to go afterwards, decided before the rows disappear.
+            let neighbour: { id: number; path: string } | null = null;
+            if (src?.kind === 'album') {
+                const gone = new Set(ids);
+                const { items } = src.window;
+                for (let d = 1; d < items.length && !neighbour; d++) {
+                    for (const candidate of [items[src.pos + d], items[src.pos - d]]) {
+                        if (candidate && !gone.has(candidate.id)) {
+                            neighbour = { id: candidate.id, path: candidate.path };
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -334,29 +549,33 @@
             const result = await invoke(command, { ids });
             console.log('Delete result:', result);
 
-            const currentList = navigationPhotos;
-            const currentIndex = currentList.findIndex(p => p.path === photo.path);
-            const nextPhoto = currentIndex < currentList.length - 1
-                ? currentList[currentIndex + 1]
-                : (currentIndex > 0 ? currentList[currentIndex - 1] : null);
-            const nextPhotoPath = nextPhoto?.path;
+            refreshKey++;
+            photoCount().then((n) => { libraryCount = n; }).catch(() => {});
 
-            await loadPhotos();
-            previewPhotoList = null;
-
-            if (nextPhotoPath) {
-                const foundPhoto = sortedPhotos.find(p => p.path === nextPhotoPath);
-                if (foundPhoto) {
-                    previewPhoto = foundPhoto;
-                } else if (sortedPhotos.length > 0) {
-                    previewPhoto = sortedPhotos[0];
-                } else {
+            if (src?.kind === 'library') {
+                // The list closes up, so the same index now holds the next photo.
+                pager.reset();
+                const seq = ++previewSeq;
+                const first = await pager.item(0);
+                const total = pager.counts.total;
+                if (seq !== previewSeq) return;
+                if (total === 0 || !first) {
                     closePreview();
+                } else {
+                    const index = Math.min(src.index, total - 1);
+                    const item = await pager.item(index);
+                    if (seq !== previewSeq) return;
+                    if (item) {
+                        previewPhoto = item;
+                        previewSource = { kind: 'library', index };
+                    } else {
+                        closePreview();
+                    }
                 }
-            } else if (sortedPhotos.length > 0) {
-                previewPhoto = sortedPhotos[0];
             } else {
-                closePreview();
+                if (showLibrary) pager.reset();
+                if (neighbour) await openFromMap(neighbour);
+                else closePreview();
             }
         } catch (e) {
             console.error('Delete failed:', e);
@@ -417,7 +636,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView photos={groupedPhotos} onOpenPreview={openPreview} theme={effectiveTheme} {t} {locale} />
+        <MapView {refreshKey} {libraryCount} onOpenPreview={openFromMap} theme={effectiveTheme} {t} {locale} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
@@ -490,11 +709,11 @@
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-images theme-text-muted text-sm"></i>
                         <span class="theme-text-primary font-medium">
-                            {sortedPhotos.length} {t.nav.photos}
-                            {#if mediaFilter !== 'all' && sortedPhotos.length !== groupedPhotos.length}
-                                <span class="theme-text-muted text-xs">/ {groupedPhotos.length}</span>
-                            {:else if sortedPhotos.length !== photos.length}
-                                <span class="theme-text-muted text-xs">({photos.length} {t.nav.files})</span>
+                            {libraryCounts.total} {t.nav.photos}
+                            {#if mediaFilter !== 'all' && libraryCounts.total !== libraryCounts.groupedTotal}
+                                <span class="theme-text-muted text-xs">/ {libraryCounts.groupedTotal}</span>
+                            {:else if libraryCounts.total !== libraryCounts.filesTotal}
+                                <span class="theme-text-muted text-xs">({libraryCounts.filesTotal} {t.nav.files})</span>
                             {/if}
                         </span>
                     </div>
@@ -631,12 +850,14 @@
                 </div>
 
                 <!-- Photo Grid (Virtual Scrolling) -->
-                {#if sortedPhotos.length > 0}
+                {#if libraryCounts.total > 0}
                     <VirtualPhotoGrid
-                        photos={sortedPhotos}
-                        onPhotoClick={openPreview}
+                        total={libraryCounts.total}
+                        getItem={(index) => pager.peek(index)}
+                        version={libraryVersion}
+                        onPhotoClick={openFromLibrary}
                     />
-                {:else if !isScanning}
+                {:else if !isScanning && libraryLoaded}
                     <div class="flex-1 flex flex-col items-center justify-center text-white/50 py-12">
                         <i class="fa-solid fa-images text-2xl mb-3"></i>
                         <p class="text-sm">{t.library.noPhotos}</p>
@@ -722,7 +943,6 @@
 {/if}
 
 {#if previewPhoto}
-    {@const currentIndex = navigationPhotos.findIndex(p => p.path === previewPhoto.path)}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
         class="fixed inset-0 z-50 bg-black/90"
@@ -731,7 +951,7 @@
         <!-- Top bar -->
         <div class="absolute top-0 left-0 right-64 h-12 flex items-center justify-between px-4 z-20 theme-bg-overlay">
             <div class="flex items-center gap-3">
-                <span class="text-xs theme-text-muted">{currentIndex + 1} / {navigationPhotos.length}</span>
+                <span class="text-xs theme-text-muted">{previewPosition.index + 1} / {previewPosition.total}</span>
                 <span class="text-sm theme-text-secondary truncate">
                     {previewPhoto.path.split("/").pop()}
                 </span>
@@ -811,9 +1031,8 @@
                     <p class="theme-text-primary">
                         {formatFileSize(previewPhoto.file_size)}
                         {#if previewPhoto.hasRaw}
-                            {@const rawSize = getRawFileSize(previewPhoto, photos)}
-                            {#if rawSize > 0}
-                                <span class="text-amber-500 ml-2">+ {formatFileSize(rawSize)} RAW</span>
+                            {#if previewPhoto.rawSize}
+                                <span class="text-amber-500 ml-2">+ {formatFileSize(previewPhoto.rawSize)} RAW</span>
                             {/if}
                         {/if}
                     </p>

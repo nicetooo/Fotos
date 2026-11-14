@@ -126,6 +126,7 @@ export const vi: Translations = {
 
     map: {
         showAllPhotos: 'Hiển thị tất cả ảnh',
+        openAlbum: 'Browse photos in view',
         boxSelect: 'Chọn vùng',
         noGeotaggedPhotos: 'Không có ảnh có vị trí',
         noGeotaggedPhotosDesc: 'Không có ảnh nào được nhập có dữ liệu GPS.',

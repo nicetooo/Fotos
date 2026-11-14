@@ -46,6 +46,7 @@ class AndroidPlatformService implements PlatformService {
         runtimePermissions: true,
         revealInFileManager: false,
         folderSelection: false,
+        nativePhotoViewer: false,
     };
 
     private progressCallbacks = new Set<(p: ImportProgress) => void>();

@@ -1,79 +1,55 @@
 <script lang="ts">
-    import type { Translations } from "../../shared/i18n/types";
+    import { untrack } from "svelte";
+    import type { Translations, Locale } from "../../shared/i18n/types";
+    import { columnCounts, windowCounts } from "../../shared/utils/timeline-index";
 
+    /**
+     * Desktop timeline over a sorted Float64Array of wall-clock timestamps.
+     *
+     * Data flows one way. `stamps` is what the map currently shows; changing it
+     * never reports a time range. Only user input (drag, wheel, duration
+     * buttons, a box selection handed in as `externalTimeRange`) does, at most
+     * once per frame. A selection that covers everything again reports
+     * `(null, null)`, which clears the filter.
+     */
     let {
-        photos,
+        stamps,
+        mapConstrained = false,
         externalTimeRange,
-        mapViewTimeRange,
         onTimeRangeChange,
         onExternalRangeConsumed,
-        onMapRangeConsumed,
         onShowAll,
-        t
+        t,
+        locale = 'en' as Locale,
     } = $props<{
-        photos: any[];
-        externalTimeRange?: { start: Date; end: Date } | null;
-        mapViewTimeRange?: { start: Date; end: Date } | null;
-        onTimeRangeChange: (start: Date, end: Date) => void;
+        stamps: Float64Array;
+        mapConstrained?: boolean;
+        externalTimeRange?: { startMs: number; endMs: number } | null;
+        onTimeRangeChange: (startMs: number | null, endMs: number | null) => void;
         onExternalRangeConsumed?: () => void;
-        onMapRangeConsumed?: () => void;
         onShowAll?: () => void;
         t: Translations;
+        locale?: Locale;
     }>();
 
-    // Parse date string to milliseconds (0 = invalid/missing)
-    function parseDateToMs(dateStr: string | null | undefined): number {
-        if (!dateStr) return 0;
-        const cleaned = dateStr.replace(/"/g, '').trim();
-        const ts = new Date(cleaned.replace(' ', 'T')).getTime();
-        return isNaN(ts) ? 0 : ts;
-    }
+    // Full range of the data on display.
+    let rangeMin = $derived(stamps.length > 0 ? stamps[0] : 0);
+    let rangeMax = $derived(stamps.length > 0 ? stamps[stamps.length - 1] : 0);
 
-    // Pre-parsed dates as milliseconds array — ONE O(n) pass, shared by all derived
-    let parsedDatesMs = $derived.by(() => {
-        return photos.map((p: any) => parseDateToMs(p.metadata?.date_taken));
-    });
-
-    // Get time range from all photos (reads parsedDatesMs, no string parsing)
-    let fullTimeRange = $derived.by(() => {
-        let minMs = Infinity, maxMs = -Infinity;
-        for (const ms of parsedDatesMs) {
-            if (ms === 0) continue;
-            if (ms < minMs) minMs = ms;
-            if (ms > maxMs) maxMs = ms;
-        }
-        if (minMs === Infinity) {
-            const now = Date.now();
-            return { min: new Date(now), max: new Date(now) };
-        }
-        return { min: new Date(minMs), max: new Date(maxMs) };
-    });
-
-    // Display time range (can be constrained by map view)
-    let displayTimeRange = $state<{ min: Date; max: Date } | null>(null);
-
-    // Actual time range used for display (map range or full range)
-    let timeRange = $derived(displayTimeRange ?? fullTimeRange);
-
-    // Is showing constrained range from map?
-    let isMapConstrained = $derived(displayTimeRange !== null);
-
-    // === Layer 1: Range selection (iPhone-style handles) ===
+    // === Layer 1: range selection (handles on the overview) ===
     let leftPercent = $state(0);
     let rightPercent = $state(100);
 
-    // Is zoomed in (has a selection)?
     let isZoomed = $derived(leftPercent > 0 || rightPercent < 100);
 
-    // Selected time range in milliseconds
     let selectedRange = $derived.by(() => {
-        const total = timeRange.max.getTime() - timeRange.min.getTime();
-        const startMs = timeRange.min.getTime() + (leftPercent / 100) * total;
-        const endMs = timeRange.min.getTime() + (rightPercent / 100) * total;
+        const total = rangeMax - rangeMin;
+        const startMs = rangeMin + (leftPercent / 100) * total;
+        const endMs = rangeMin + (rightPercent / 100) * total;
         return { startMs, endMs, durationMs: endMs - startMs };
     });
 
-    // === Layer 2: Fixed-width window slider (inside zoomed view) ===
+    // === Layer 2: fixed-width window inside the selected range ===
     let durationOptions = $derived([
         { label: '1h', value: 60 * 60 * 1000 },
         { label: '6h', value: 6 * 60 * 60 * 1000 },
@@ -82,128 +58,112 @@
         { label: '30d', value: 30 * 24 * 60 * 60 * 1000 },
         { label: t.timeline.all, value: 0 },
     ]);
+    let selectedDuration = $state(0); // 0 = the whole selected range
+    let windowPosition = $state(0);   // 0-100 within the selected range
 
-    // Default to "All"
-    let selectedDuration = $state(0);
-
-    let windowPosition = $state(0); // 0-100 percentage within selected range
-
-    // Reset selection and duration when photos change (e.g., after import)
-    let prevPhotosLength = $state(0);
-    $effect(() => {
-        const len = photos.length;
-        if (len !== prevPhotosLength && prevPhotosLength > 0) {
-            // Reset to full range when photos change
-            leftPercent = 0;
-            rightPercent = 100;
-            windowPosition = 0;
-            selectedDuration = 0; // Reset to "All"
-            displayTimeRange = null;
-        }
-        prevPhotosLength = len;
-    });
-
-    // Reset duration to "All" when overview selection changes
-    let prevLeft = $state(0);
-    let prevRight = $state(100);
-    $effect(() => {
-        const l = leftPercent;
-        const r = rightPercent;
-        if (l !== prevLeft || r !== prevRight) {
-            if (prevLeft !== 0 || prevRight !== 100) {
-                // Overview selection changed, reset to All
-                selectedDuration = 0;
-                windowPosition = 0;
-            }
-            prevLeft = l;
-            prevRight = r;
-        }
-    });
-
-    // Handle external time range (from map box selection)
-    $effect(() => {
-        if (!externalTimeRange) return;
-
-        const totalMs = timeRange.max.getTime() - timeRange.min.getTime();
-        if (totalMs === 0) return;
-
-        const startMs = externalTimeRange.start.getTime();
-        const endMs = externalTimeRange.end.getTime();
-
-        // Convert to percentages
-        let newLeft = ((startMs - timeRange.min.getTime()) / totalMs) * 100;
-        let newRight = ((endMs - timeRange.min.getTime()) / totalMs) * 100;
-
-        // Clamp to valid range
-        newLeft = Math.max(0, Math.min(100, newLeft));
-        newRight = Math.max(0, Math.min(100, newRight));
-
-        // Ensure minimum width
-        if (newRight - newLeft < 1) {
-            const center = (newLeft + newRight) / 2;
-            newLeft = Math.max(0, center - 0.5);
-            newRight = Math.min(100, center + 0.5);
-        }
-
-        leftPercent = newLeft;
-        rightPercent = newRight;
-        windowPosition = 0;
-
-        // Notify parent that we consumed the external range
-        onExternalRangeConsumed?.();
-    });
-
-    // Handle map view time range (continuous sync from map pan/zoom)
-    // This changes the TOTAL displayed timeline range, not the selection
-    $effect(() => {
-        if (!mapViewTimeRange) return;
-
-        // Use exact time range from map, no padding
-        displayTimeRange = {
-            min: mapViewTimeRange.start,
-            max: mapViewTimeRange.end
-        };
-
-        // Reset selection to full range when map constrains the view
-        leftPercent = 0;
-        rightPercent = 100;
-    });
-
-    // Actual viewing window (what photos to show)
+    /** The time window on display. */
     let viewWindow = $derived.by(() => {
         if (!isZoomed || selectedDuration === 0) {
-            // Show full selected range
-            return {
-                start: new Date(selectedRange.startMs),
-                end: new Date(selectedRange.endMs)
-            };
+            return { startMs: selectedRange.startMs, endMs: selectedRange.endMs };
         }
-
-        // Fixed window within selected range
         const windowMs = Math.min(selectedDuration, selectedRange.durationMs);
-        const maxOffset = selectedRange.durationMs - windowMs;
-        const offset = (windowPosition / 100) * maxOffset;
-
+        const offset = (windowPosition / 100) * (selectedRange.durationMs - windowMs);
         return {
-            start: new Date(selectedRange.startMs + offset),
-            end: new Date(selectedRange.startMs + offset + windowMs)
+            startMs: selectedRange.startMs + offset,
+            endMs: selectedRange.startMs + offset + windowMs,
         };
     });
 
-    // Notify parent
+    // === Reporting: user input only, once per frame ===
+    let userActive = false;
+    let reportRaf = 0;
+
+    function userChanged() {
+        userActive = true;
+        if (reportRaf) return;
+        reportRaf = requestAnimationFrame(() => {
+            reportRaf = 0;
+            if (!isZoomed) {
+                userActive = false;
+                onTimeRangeChange(null, null);
+            } else {
+                onTimeRangeChange(viewWindow.startMs, viewWindow.endMs);
+            }
+        });
+    }
+
+    function setSelection(left: number, right: number) {
+        leftPercent = left;
+        rightPercent = right;
+        // A new overview selection starts over in the zoomed layer.
+        selectedDuration = 0;
+        windowPosition = 0;
+        userChanged();
+    }
+
+    /** Percent selection covering `[startMs, endMs]` in the current range (at least 1% wide). */
+    function percentsFor(startMs: number, endMs: number): [number, number] {
+        const total = rangeMax - rangeMin;
+        if (total <= 0) return [0, 100];
+        let left = Math.max(0, Math.min(100, ((startMs - rangeMin) / total) * 100));
+        let right = Math.max(0, Math.min(100, ((endMs - rangeMin) / total) * 100));
+        if (right - left < 1) {
+            const center = Math.max(0.5, Math.min(99.5, (left + right) / 2));
+            left = center - 0.5;
+            right = center + 0.5;
+        }
+        return [left, right];
+    }
+
+    // New data. Without a user selection the timeline simply shows all of it;
+    // with one, keep the selected time span (the percentages move, the times do not).
+    let lastStamps: Float64Array | null = null;
+    let lastSelection = { startMs: 0, endMs: 0 };
     $effect(() => {
-        onTimeRangeChange(viewWindow.start, viewWindow.end);
+        const sel = selectedRange;
+        untrack(() => { lastSelection = { startMs: sel.startMs, endMs: sel.endMs }; });
+    });
+    $effect.pre(() => {
+        const current = stamps;
+        if (current === lastStamps) return;
+        const first = lastStamps === null;
+        lastStamps = current;
+        if (first) return;
+        untrack(() => {
+            if (userActive && isZoomed) {
+                const [l, r] = percentsFor(lastSelection.startMs, lastSelection.endMs);
+                leftPercent = l;
+                rightPercent = r;
+            } else {
+                leftPercent = 0;
+                rightPercent = 100;
+                windowPosition = 0;
+                selectedDuration = 0;
+            }
+        });
     });
 
-    // === Dragging state ===
+    // A box drawn on the map arrives as a time range to select.
+    $effect(() => {
+        const ext = externalTimeRange;
+        if (!ext) return;
+        untrack(() => {
+            const [l, r] = percentsFor(ext.startMs, ext.endMs);
+            setSelection(l, r);
+            onExternalRangeConsumed?.();
+        });
+    });
+
+    // === Dragging ===
     type DragMode = 'none' | 'left' | 'right' | 'middle' | 'window';
     let dragMode = $state<DragMode>('none');
     let sliderTrack: HTMLDivElement;
-    let zoomedTrack: HTMLDivElement;
+    let zoomedTrack: HTMLDivElement | undefined = $state();
     let dragStartX = 0;
     let dragStartLeft = 0;
     let dragStartRight = 0;
     let dragStartWindow = 0;
+    let dragTrackWidth = 1;
 
     function handleMouseDown(e: MouseEvent, mode: DragMode) {
         e.preventDefault();
@@ -213,49 +173,29 @@
         dragStartLeft = leftPercent;
         dragStartRight = rightPercent;
         dragStartWindow = windowPosition;
-
-        // User is interacting with timeline - stop map sync
-        onMapRangeConsumed?.();
+        const track = mode === 'window' ? zoomedTrack : sliderTrack;
+        dragTrackWidth = Math.max(1, track?.getBoundingClientRect().width ?? 1);
     }
 
     function handleMouseMove(e: MouseEvent) {
         if (dragMode === 'none') return;
+        const deltaPercent = ((e.clientX - dragStartX) / dragTrackWidth) * 100;
 
-        if (dragMode === 'window' && zoomedTrack) {
-            // Drag fixed window in zoomed view (1:1 mouse tracking)
-            const rect = zoomedTrack.getBoundingClientRect();
-            const deltaPercent = ((e.clientX - dragStartX) / rect.width) * 100;
-            // Convert to windowPosition space (compensate for window size)
+        if (dragMode === 'window') {
             const maxMovement = 100 - windowWidthPercent;
-            if (maxMovement > 0) {
-                const deltaWindowPos = (deltaPercent / maxMovement) * 100;
-                let newPos = dragStartWindow + deltaWindowPos;
-                windowPosition = Math.max(0, Math.min(100, newPos));
-            }
-        } else if (sliderTrack) {
-            // Drag handles in overview
-            const rect = sliderTrack.getBoundingClientRect();
-            const deltaPercent = ((e.clientX - dragStartX) / rect.width) * 100;
-
-            if (dragMode === 'left') {
-                let newLeft = dragStartLeft + deltaPercent;
-                newLeft = Math.max(0, Math.min(newLeft, rightPercent - 1));
-                leftPercent = newLeft;
-            } else if (dragMode === 'right') {
-                let newRight = dragStartRight + deltaPercent;
-                newRight = Math.max(leftPercent + 1, Math.min(newRight, 100));
-                rightPercent = newRight;
-            } else if (dragMode === 'middle') {
-                const width = dragStartRight - dragStartLeft;
-                let newLeft = dragStartLeft + deltaPercent;
-                let newRight = dragStartRight + deltaPercent;
-
-                if (newLeft < 0) { newLeft = 0; newRight = width; }
-                if (newRight > 100) { newRight = 100; newLeft = 100 - width; }
-
-                leftPercent = newLeft;
-                rightPercent = newRight;
-            }
+            if (maxMovement <= 0) return;
+            windowPosition = Math.max(0, Math.min(100, dragStartWindow + (deltaPercent / maxMovement) * 100));
+            userChanged();
+        } else if (dragMode === 'left') {
+            setSelection(Math.max(0, Math.min(dragStartLeft + deltaPercent, rightPercent - 1)), rightPercent);
+        } else if (dragMode === 'right') {
+            setSelection(leftPercent, Math.max(leftPercent + 1, Math.min(dragStartRight + deltaPercent, 100)));
+        } else if (dragMode === 'middle') {
+            const width = dragStartRight - dragStartLeft;
+            let newLeft = dragStartLeft + deltaPercent;
+            if (newLeft < 0) newLeft = 0;
+            if (newLeft + width > 100) newLeft = 100 - width;
+            setSelection(newLeft, newLeft + width);
         }
     }
 
@@ -263,272 +203,163 @@
         dragMode = 'none';
     }
 
-    // === Mouse wheel handlers ===
+    // === Mouse wheel ===
     function handleOverviewWheel(e: WheelEvent) {
         e.preventDefault();
-
-        // User is interacting with timeline - stop map sync
-        onMapRangeConsumed?.();
-
-        // Get mouse position relative to track
         const rect = sliderTrack.getBoundingClientRect();
         const mousePercent = ((e.clientX - rect.left) / rect.width) * 100;
-
-        // Determine zoom direction (negative deltaY = scroll up = zoom in)
         const zoomIn = e.deltaY < 0;
-        const zoomAmount = 1; // percentage change per scroll (reduced for smoother control)
+        const zoomAmount = 1;
 
         const currentWidth = rightPercent - leftPercent;
         const center = (leftPercent + rightPercent) / 2;
 
         if (zoomIn) {
-            // Zoom in: shrink selection, center towards mouse position
-            if (currentWidth <= 5) return; // minimum 5% selection
-
-            // Bias center towards mouse position
-            const bias = 0.3;
-            const newCenter = center + (mousePercent - center) * bias;
+            if (currentWidth <= 5) return;
+            const newCenter = center + (mousePercent - center) * 0.3;
             const newWidth = Math.max(5, currentWidth - zoomAmount * 2);
-
-            leftPercent = Math.max(0, newCenter - newWidth / 2);
-            rightPercent = Math.min(100, newCenter + newWidth / 2);
-
-            // Adjust if hitting boundaries
-            if (leftPercent === 0) rightPercent = newWidth;
-            if (rightPercent === 100) leftPercent = 100 - newWidth;
+            let left = Math.max(0, newCenter - newWidth / 2);
+            let right = Math.min(100, newCenter + newWidth / 2);
+            if (left === 0) right = newWidth;
+            if (right === 100) left = 100 - newWidth;
+            setSelection(left, right);
         } else {
-            // Zoom out: expand selection
             if (currentWidth >= 100) return;
-
             const newWidth = Math.min(100, currentWidth + zoomAmount * 2);
             const expand = (newWidth - currentWidth) / 2;
-
-            leftPercent = Math.max(0, leftPercent - expand);
-            rightPercent = Math.min(100, rightPercent + expand);
-
-            // Reset if near full range
-            if (rightPercent - leftPercent >= 98) {
-                leftPercent = 0;
-                rightPercent = 100;
+            let left = Math.max(0, leftPercent - expand);
+            let right = Math.min(100, rightPercent + expand);
+            if (right - left >= 98) {
+                left = 0;
+                right = 100;
             }
+            setSelection(left, right);
         }
     }
 
     function handleZoomedWheel(e: WheelEvent) {
         e.preventDefault();
-
-        // User is interacting with timeline - stop map sync
-        onMapRangeConsumed?.();
-
-        if (selectedDuration === 0) return; // "All" mode, no window to move
-
-        // Scroll to move window position (low sensitivity)
+        if (selectedDuration === 0) return;
         const delta = e.deltaY > 0 ? 0.3 : -0.3;
         windowPosition = Math.max(0, Math.min(100, windowPosition + delta));
+        userChanged();
     }
 
-    // === Helpers ===
-    function formatDate(date: Date): string {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    }
-
-    function formatDateShort(date: Date): string {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
-    }
-
-    function formatDateTime(date: Date): string {
-        return `${formatDate(date)} ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
-    }
-
-    function formatDateTimeShort(date: Date): string {
-        return `${formatDateShort(date)} ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    function pickDuration(value: number) {
+        selectedDuration = value;
+        if (value === 0) windowPosition = 0;
+        userChanged();
     }
 
     function resetSelection() {
         leftPercent = 0;
         rightPercent = 100;
         windowPosition = 0;
-        displayTimeRange = null; // Reset to full photo range
-        onMapRangeConsumed?.(); // Stop map sync
-        onShowAll?.(); // Tell map to show all photos
+        selectedDuration = 0;
+        userChanged();
+        onShowAll?.();
     }
 
-    // Count photos in view window (reads parsedDatesMs, no string parsing)
-    let photosInWindow = $derived.by(() => {
-        const startMs = viewWindow.start.getTime();
-        const endMs = viewWindow.end.getTime();
-        let count = 0;
-        for (const ms of parsedDatesMs) {
-            if (ms !== 0 && ms >= startMs && ms <= endMs) count++;
-        }
-        return count;
-    });
+    // === Formatting (wall-clock ms: format as UTC) ===
+    function formatDate(ms: number): string {
+        return new Date(ms).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    }
 
-    // Photo positions for overview (percentage 0-100, reads parsedDatesMs)
-    let photoPositions = $derived.by(() => {
-        const minMs = timeRange.min.getTime();
-        const totalMs = timeRange.max.getTime() - minMs;
-        if (totalMs === 0) return [];
+    function formatDateTime(ms: number): string {
+        return `${formatDate(ms)} ${new Date(ms).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}`;
+    }
 
-        const positions: number[] = [];
-        for (const ms of parsedDatesMs) {
-            if (ms === 0) continue;
-            positions.push(((ms - minMs) / totalMs) * 100);
-        }
-        return positions;
-    });
+    let photosInWindow = $derived(windowCounts(stamps, viewWindow.startMs, viewWindow.endMs).inside);
 
-    // Photo positions for zoomed view (only selected range, reads parsedDatesMs)
-    let zoomedPhotoPositions = $derived.by(() => {
-        if (!isZoomed) return [];
-        const { startMs, endMs, durationMs } = selectedRange;
-        if (durationMs === 0) return [];
-
-        const positions: number[] = [];
-        for (const ms of parsedDatesMs) {
-            if (ms === 0 || ms < startMs || ms > endMs) continue;
-            positions.push(((ms - startMs) / durationMs) * 100);
-        }
-        return positions;
-    });
-
-    // Window width percentage in zoomed view
     let windowWidthPercent = $derived.by(() => {
         if (selectedDuration === 0 || selectedRange.durationMs === 0) return 100;
         return Math.min(100, (selectedDuration / selectedRange.durationMs) * 100);
     });
 
-    // Window left position in zoomed view
-    let windowLeftPercent = $derived.by(() => {
-        const width = windowWidthPercent;
-        return (windowPosition / 100) * (100 - width);
-    });
+    let windowLeftPercent = $derived((windowPosition / 100) * (100 - windowWidthPercent));
 
-    // Canvas refs
-    let overviewCanvas: HTMLCanvasElement;
-    let zoomedCanvas: HTMLCanvasElement;
+    // === Canvases ===
+    let overviewCanvas: HTMLCanvasElement | undefined = $state();
+    let zoomedCanvas: HTMLCanvasElement | undefined = $state();
+    let overviewSize = $state({ w: 0, h: 0 });
+    let zoomedSize = $state({ w: 0, h: 0 });
 
-    // Get accent color from CSS variable
-    function getAccentColor(): string {
-        if (typeof document === 'undefined') return '#fbbf24';
+    function trackSize(node: HTMLElement, set: (w: number, h: number) => void) {
+        const ro = new ResizeObserver((entries) => {
+            const r = entries[0]?.contentRect;
+            if (r) set(Math.floor(r.width), Math.floor(r.height));
+        });
+        ro.observe(node);
+        return { destroy: () => ro.disconnect() };
+    }
+
+    function accentColor(): string {
         return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#fbbf24';
     }
 
-    // Draw photo lines on canvas
-    function drawPhotoLines(canvas: HTMLCanvasElement | undefined, positions: number[]) {
-        if (!canvas) return;
+    /** One 1px line per pixel column that has photos; busier columns are more opaque. */
+    function drawColumns(
+        canvas: HTMLCanvasElement | undefined,
+        size: { w: number; h: number },
+        data: Float64Array,
+        startMs: number,
+        endMs: number,
+    ) {
+        if (!canvas || size.w <= 0 || size.h <= 0) return;
+        const dpr = window.devicePixelRatio || 1;
+        const bw = Math.round(size.w * dpr);
+        const bh = Math.round(size.h * dpr);
+        if (canvas.width !== bw) canvas.width = bw;
+        if (canvas.height !== bh) canvas.height = bh;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
-
-        const rect = canvas.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
-
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        ctx.scale(dpr, dpr);
-
-        ctx.clearRect(0, 0, rect.width, rect.height);
-        ctx.strokeStyle = getAccentColor();
-        ctx.globalAlpha = 0.7;
-        ctx.lineWidth = 1;
-
-        ctx.beginPath();
-        for (const pos of positions) {
-            const x = Math.round((pos / 100) * rect.width) + 0.5;
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, rect.height);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, size.w, size.h);
+        ctx.fillStyle = accentColor();
+        const counts = columnCounts(data, startMs, endMs, size.w);
+        for (let x = 0; x < counts.length; x++) {
+            const c = counts[x];
+            if (c === 0) continue;
+            ctx.globalAlpha = Math.min(1, 0.4 + 0.15 * Math.log2(c));
+            ctx.fillRect(x, 0, 1, size.h);
         }
-        ctx.stroke();
+        ctx.globalAlpha = 1;
     }
 
-    // Resize observers and animation frame IDs for debouncing
-    let overviewResizeObserver: ResizeObserver | null = null;
-    let zoomedResizeObserver: ResizeObserver | null = null;
-    let overviewRafId: number | null = null;
-    let zoomedRafId: number | null = null;
-
-    // Debounced draw functions to prevent flickering
-    function scheduleOverviewDraw(canvas: HTMLCanvasElement, positions: number[]) {
-        if (overviewRafId !== null) {
-            cancelAnimationFrame(overviewRafId);
-        }
-        overviewRafId = requestAnimationFrame(() => {
-            drawPhotoLines(canvas, positions);
-            overviewRafId = null;
-        });
-    }
-
-    function scheduleZoomedDraw(canvas: HTMLCanvasElement, positions: number[]) {
-        if (zoomedRafId !== null) {
-            cancelAnimationFrame(zoomedRafId);
-        }
-        zoomedRafId = requestAnimationFrame(() => {
-            drawPhotoLines(canvas, positions);
-            zoomedRafId = null;
-        });
-    }
-
-    // Redraw overview canvas when data or size changes
+    // Overview: redraw only when the data or its size changes.
     $effect(() => {
-        const positions = photoPositions;
-        const canvas = overviewCanvas;
-        if (!canvas) return;
-
-        scheduleOverviewDraw(canvas, positions);
-
-        overviewResizeObserver?.disconnect();
-        overviewResizeObserver = new ResizeObserver(() => {
-            scheduleOverviewDraw(canvas, photoPositions);
-        });
-        overviewResizeObserver.observe(canvas);
-
-        return () => {
-            overviewResizeObserver?.disconnect();
-            if (overviewRafId !== null) {
-                cancelAnimationFrame(overviewRafId);
-            }
-        };
+        drawColumns(overviewCanvas, overviewSize, stamps, rangeMin, rangeMax);
     });
 
-    // Redraw zoomed canvas when data or size changes
+    // Zoomed layer: follows the selected range, at most once per frame.
+    let zoomedRaf = 0;
     $effect(() => {
-        const positions = zoomedPhotoPositions;
         const canvas = zoomedCanvas;
+        const size = zoomedSize;
+        const data = stamps;
+        const { startMs, endMs } = selectedRange;
         if (!canvas) return;
-
-        scheduleZoomedDraw(canvas, positions);
-
-        zoomedResizeObserver?.disconnect();
-        zoomedResizeObserver = new ResizeObserver(() => {
-            scheduleZoomedDraw(canvas, zoomedPhotoPositions);
-        });
-        zoomedResizeObserver.observe(canvas);
-
-        return () => {
-            zoomedResizeObserver?.disconnect();
-            if (zoomedRafId !== null) {
-                cancelAnimationFrame(zoomedRafId);
-            }
-        };
+        cancelAnimationFrame(zoomedRaf);
+        zoomedRaf = requestAnimationFrame(() => drawColumns(canvas, size, data, startMs, endMs));
+        return () => cancelAnimationFrame(zoomedRaf);
     });
 </script>
 
-<svelte:window on:mousemove={handleMouseMove} on:mouseup={handleMouseUp} />
+<svelte:window onmousemove={handleMouseMove} onmouseup={handleMouseUp} />
 
 <div class="timeline-container theme-bg-overlay backdrop-blur-sm px-4 py-3">
     <!-- Header -->
     <div class="flex items-center justify-between mb-2">
         <div class="text-xs theme-text-secondary">
-            {formatDateTime(viewWindow.start)} - {formatDateTime(viewWindow.end)}
+            {formatDateTime(viewWindow.startMs)} - {formatDateTime(viewWindow.endMs)}
         </div>
         <div class="flex items-center gap-2">
             <span class="text-xs theme-text-secondary">
-                {photosInWindow}/{photos.length}
+                {photosInWindow}/{stamps.length}
             </span>
-            {#if isZoomed || isMapConstrained}
+            {#if isZoomed || mapConstrained}
                 <button onclick={resetSelection} class="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)]">
-                    {isMapConstrained ? t.timeline.all : t.timeline.reset}
+                    {mapConstrained && !isZoomed ? t.timeline.all : t.timeline.reset}
                 </button>
             {/if}
         </div>
@@ -543,7 +374,7 @@
                 <div class="flex gap-1">
                     {#each durationOptions as option}
                         <button
-                            onclick={() => { selectedDuration = option.value; if (option.value === 0) windowPosition = 0; }}
+                            onclick={() => pickDuration(option.value)}
                             class="px-2 py-0.5 text-[10px] rounded transition-colors
                                 {selectedDuration === option.value
                                     ? 'bg-[var(--accent)] text-black'
@@ -559,7 +390,7 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div bind:this={zoomedTrack} class="relative h-10 theme-bg-secondary rounded-lg overflow-hidden" onwheel={handleZoomedWheel}>
                 <!-- Photo lines (canvas) -->
-                <canvas bind:this={zoomedCanvas} class="absolute inset-0 w-full h-full"></canvas>
+                <canvas bind:this={zoomedCanvas} use:trackSize={(w, h) => { zoomedSize = { w, h }; }} class="absolute inset-0 w-full h-full"></canvas>
 
                 <!-- Fixed window (draggable) -->
                 {#if selectedDuration !== 0}
@@ -579,8 +410,8 @@
 
             <!-- Zoomed range labels -->
             <div class="flex justify-between text-[10px] theme-text-muted mt-1">
-                <span>{formatDate(new Date(selectedRange.startMs))}</span>
-                <span>{formatDate(new Date(selectedRange.endMs))}</span>
+                <span>{formatDate(selectedRange.startMs)}</span>
+                <span>{formatDate(selectedRange.endMs)}</span>
             </div>
         </div>
     {/if}
@@ -594,7 +425,7 @@
             class="absolute inset-0 theme-bg-primary rounded overflow-hidden"
         >
             <!-- Photo lines (canvas) -->
-            <canvas bind:this={overviewCanvas} class="absolute inset-0 w-full h-full"></canvas>
+            <canvas bind:this={overviewCanvas} use:trackSize={(w, h) => { overviewSize = { w, h }; }} class="absolute inset-0 w-full h-full"></canvas>
 
             <!-- Dimmed areas -->
             <div class="absolute top-0 bottom-0 left-0 bg-black/50 dark:bg-black/70" style="width: {leftPercent}%"></div>
@@ -635,11 +466,11 @@
 
     <!-- Full range labels -->
     <div class="flex justify-between text-[10px] theme-text-muted mt-1 mx-2">
-        <span>{formatDate(timeRange.min)}</span>
-        {#if isMapConstrained}
+        <span>{formatDate(rangeMin)}</span>
+        {#if mapConstrained}
             <span class="text-[var(--accent)]">Map View</span>
         {/if}
-        <span>{formatDate(timeRange.max)}</span>
+        <span>{formatDate(rangeMax)}</span>
     </div>
 </div>
 

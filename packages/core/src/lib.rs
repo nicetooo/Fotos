@@ -21,6 +21,7 @@ pub use image::{
 };
 pub use index::PhotoIndex;
 pub use metadata::{read_date_taken, read_metadata, read_video_metadata};
+pub use query::library::{LibraryItem, LibrarySort, LibraryView};
 pub use query::{parse_date_ms, AlbumItem, AlbumWindow, Bbox, GeoIndex, MapFeature, MapQueryResult};
 
 uniffi::setup_scaffolding!();

@@ -24,3 +24,6 @@ uniffi = { version = "0.28", features = ["tokio"] }
 
 [build-dependencies]
 uniffi = { version = "0.28", features = ["build"] }
+
+[dev-dependencies]
+serde_json = "1"

@@ -126,6 +126,7 @@ export const zh: Translations = {
 
     map: {
         showAllPhotos: '显示所有照片',
+        openAlbum: '浏览当前区域的照片',
         boxSelect: '框选照片',
         noGeotaggedPhotos: '没有地理位置照片',
         noGeotaggedPhotosDesc: '您导入的照片中没有包含 GPS 数据的照片。',

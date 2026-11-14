@@ -1,4 +1,5 @@
 #import "PhotoLibraryBridge.h"
+#import "FootosPhotoViewer.h"
 
 #import <CoreLocation/CoreLocation.h>
 #import <Network/Network.h>
@@ -265,6 +266,20 @@ static NSString * const kFootosNetworkAlertShownKey = @"footos.networkAlertShown
               self.dbPath ?: @"");
     }
 
+    if ([command isEqualToString:@"openViewer"]) {
+        NSArray *items = [body[@"items"] isKindOfClass:[NSArray class]] ? body[@"items"] : @[];
+        NSInteger index = [body[@"index"] respondsToSelector:@selector(integerValue)] ? [body[@"index"] integerValue] : 0;
+        UIViewController *presenter = [self topViewController];
+        if (presenter && items.count > 0) {
+            __weak typeof(self) weakSelf = self;
+            [FootosPhotoViewer presentFrom:presenter items:items index:index onDismiss:^(NSInteger lastIndex) {
+                [weakSelf eval:[NSString stringWithFormat:
+                    @"(function(){if(window.__handleIOSViewerClosed)window.__handleIOSViewerClosed(%ld);})()",
+                    (long)lastIndex]];
+            }];
+        }
+        return;
+    }
     if ([command isEqualToString:@"checkStatus"]) {
         [self emitStatus:[self currentStatus]];
         return;

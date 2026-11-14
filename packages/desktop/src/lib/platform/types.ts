@@ -15,6 +15,8 @@ export interface PlatformCapabilities {
     revealInFileManager: boolean;
     /** 支持文件夹选择 (Desktop: true, Mobile: false) */
     folderSelection: boolean;
+    /** 有原生照片查看器 (iOS: true)。为 true 时用 openNativeViewer，否则用 Web 查看器 */
+    nativePhotoViewer: boolean;
 }
 
 /** 导入结果 */
@@ -85,6 +87,15 @@ export interface PlatformService {
     openInSystemPlayer?(path: string): Promise<void>;
 }
 
+/** 原生查看器的一项 */
+export interface NativeViewerItem {
+    /** `ios-photo://<localIdentifier>` 或本地文件路径 */
+    path: string;
+    thumb: string;
+    media_type: string;
+    date_taken: string;
+}
+
 /** iOS 扩展接口 */
 export interface IOSPlatformService extends PlatformService {
     /** 是否有完整相册访问权限 */
@@ -107,6 +118,12 @@ export interface IOSPlatformService extends PlatformService {
 
     /** 视频/实况封面：屏幕尺寸静帧，比 256 缩略图清晰，也比整段视频快 */
     ensureViewerStill(path: string): Promise<string | null>;
+
+    /**
+     * 用原生查看器打开一组照片（时间顺序），index 为起始位置。
+     * 返回 false 表示原生桥不可用，调用方应退回 Web 查看器。
+     */
+    openNativeViewer(items: NativeViewerItem[], index: number): boolean;
 
     /** 实况配对视频，长按时播放 */
     ensureLiveVideo(path: string): Promise<string | null>;

@@ -1,4 +1,4 @@
-use footos_core::{AlbumWindow, Bbox, GeoIndex, MapFeature, PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE, MediaType};
+use footos_core::{AlbumWindow, Bbox, GeoIndex, LibraryItem, LibrarySort, LibraryView, MapFeature, PhotoCoreConfig, PhotoIndex, ImportResult, PhotoInfo, PhotoPreview, DEFAULT_THUMBNAIL_SIZE, MediaType};
 use tauri::Manager;
 use rayon::prelude::*;
 use std::collections::HashSet;
@@ -22,8 +22,14 @@ struct AppState {
     thumb_dir: Mutex<String>,
     /// Cached query index, keyed by (connection generation, DB change counter).
     geo: Mutex<Option<((u64, i64), Arc<GeoIndex>)>>,
+    /// Cached library list (desktop drawer), same key as `geo`.
+    library: Mutex<Option<((u64, i64), Arc<LibraryView>)>>,
+    /// The order last asked for, so paging through it does not re-sort.
+    library_order: Mutex<Option<(LibraryOrderKey, Arc<Vec<u32>>)>>,
     generation: std::sync::atomic::AtomicU64,
 }
+
+type LibraryOrderKey = ((u64, i64), LibrarySort, bool, Option<MediaType>);
 
 impl AppState {
     fn new() -> Self {
@@ -32,6 +38,8 @@ impl AppState {
             db_path: Mutex::new(String::new()),
             thumb_dir: Mutex::new(String::new()),
             geo: Mutex::new(None),
+            library: Mutex::new(None),
+            library_order: Mutex::new(None),
             generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -61,6 +69,48 @@ impl AppState {
         tracing::info!(rows = geo.len(), ms = started.elapsed().as_millis() as u64, "geo index rebuilt");
         *cached = Some((key, geo.clone()));
         Ok((geo, version))
+    }
+
+    /// The grouped library list, rebuilt lazily whenever the DB has changed.
+    fn library(&self) -> Result<((u64, i64), Arc<LibraryView>), String> {
+        let index = self.get_index()?;
+        let generation = self.generation.load(Ordering::SeqCst);
+        let key = (generation, index.change_counter().map_err(|e| e.to_string())?);
+        let mut cached = self.library.lock().map_err(|e| e.to_string())?;
+        if let Some((k, view)) = cached.as_ref() {
+            if *k == key {
+                return Ok((key, view.clone()));
+            }
+        }
+        let started = std::time::Instant::now();
+        let photos = load_photos_backfilled(&index, &self.get_thumb_dir()?)?;
+        let view = Arc::new(LibraryView::build(photos));
+        // Backfilling writes to the DB, so read the counter again: the cache
+        // key must describe the state the view was built from.
+        let key = (generation, index.change_counter().map_err(|e| e.to_string())?);
+        tracing::info!(rows = view.files(), ms = started.elapsed().as_millis() as u64, "library view rebuilt");
+        *cached = Some((key, view.clone()));
+        Ok((key, view))
+    }
+
+    /// Display order for the library list; the last one asked for is cached.
+    fn library_order(
+        &self,
+        sort: LibrarySort,
+        descending: bool,
+        filter: Option<MediaType>,
+    ) -> Result<(Arc<LibraryView>, Arc<Vec<u32>>), String> {
+        let (view_key, view) = self.library()?;
+        let key: LibraryOrderKey = (view_key, sort, descending, filter);
+        let mut cached = self.library_order.lock().map_err(|e| e.to_string())?;
+        if let Some((k, order)) = cached.as_ref() {
+            if *k == key {
+                return Ok((view, order.clone()));
+            }
+        }
+        let order = Arc::new(view.order(sort, descending, filter));
+        *cached = Some((key, order.clone()));
+        Ok((view, order))
     }
 
     /// Initialize (or re-initialize) the database connection and store paths.
@@ -141,6 +191,8 @@ impl AppState {
     fn reset_index(&self) -> Result<(), String> {
         self.generation.fetch_add(1, Ordering::SeqCst);
         *self.geo.lock().map_err(|e| e.to_string())? = None;
+        *self.library.lock().map_err(|e| e.to_string())? = None;
+        *self.library_order.lock().map_err(|e| e.to_string())? = None;
         *self.index.lock().map_err(|e| e.to_string())? = None;
         Ok(())
     }
@@ -393,6 +445,19 @@ async fn query_album(
     Ok(geo.album_window(center_id, radius.min(5_000)))
 }
 
+/// The time-ordered album of what the map shows: inside `bbox` and the time filter.
+#[tauri::command]
+async fn query_album_in(
+    app: tauri::AppHandle,
+    bbox: Bbox,
+    start_ms: Option<f64>,
+    end_ms: Option<f64>,
+    limit: u32,
+) -> Result<AlbumWindow, String> {
+    let (geo, _) = app.state::<AppState>().geo()?;
+    Ok(geo.album_in(bbox, start_ms.map(|v| v as i64), end_ms.map(|v| v as i64), limit.min(5_000)))
+}
+
 /// Agent test mode: set by launching with the `FOOTOS_AGENT_TEST` environment
 /// variable (see `scripts/agent-test`). Returns its value, or `None` in normal runs.
 #[tauri::command]
@@ -442,60 +507,114 @@ async fn list_ios_known_ids(app: tauri::AppHandle) -> Result<Vec<String>, String
     .map_err(|e| e.to_string())?
 }
 
+/// Every row, with missing thumbnail paths and file sizes filled in (and
+/// written back so the next read finds them).
+fn load_photos_backfilled(index: &PhotoIndex, thumb_dir: &str) -> Result<Vec<PhotoInfo>, String> {
+    let mut photos = index.list().map_err(|e| {
+        tracing::error!(error = %e, "list photos: query failed");
+        e.to_string()
+    })?;
+
+    let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(thumb_dir));
+    let spec = footos_core::ThumbnailSpec::default();
+    let mut backfill_count = 0u32;
+    let use_txn = index.begin_transaction().is_ok();
+    for photo in &mut photos {
+        if photo.thumb_path.is_some() && photo.file_size > 0 {
+            continue;
+        }
+        // Virtual library URIs have no local file to stat.
+        if photo.path.starts_with("ios-photo://") || photo.path.starts_with("content://") {
+            continue;
+        }
+
+        let source_path = std::path::Path::new(&photo.path);
+        let mut changed = false;
+        if photo.thumb_path.is_none() {
+            if let Ok(Some(path)) = thumbnailer.get_cached_path(source_path, &spec) {
+                photo.thumb_path = Some(path.to_string_lossy().to_string());
+                changed = true;
+            }
+        }
+        if photo.file_size == 0 {
+            if let Ok(metadata) = std::fs::metadata(source_path) {
+                photo.file_size = metadata.len();
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = index.update_thumb_info(
+                photo.path.clone(),
+                photo.thumb_path.clone(),
+                photo.file_size,
+            );
+            backfill_count += 1;
+        }
+    }
+    if use_txn {
+        let _ = index.commit_transaction();
+    }
+    eprintln!("[footos] list photos {} rows backfill={backfill_count}", photos.len());
+    Ok(photos)
+}
+
 #[tauri::command]
 async fn list_photos(app: tauri::AppHandle) -> Result<Vec<PhotoInfo>, String> {
-    tracing::trace!("list_photos: called");
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let index = state.get_index()?;
-        let thumb_dir = state.get_thumb_dir()?;
+        load_photos_backfilled(&index, &state.get_thumb_dir()?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-        let mut photos = index.list().map_err(|e| {
-            tracing::error!(error = %e, "list_photos: query failed");
-            e.to_string()
-        })?;
+#[derive(serde::Serialize)]
+struct LibraryPage {
+    /// Entries matching the filter.
+    total: u32,
+    /// Entries after RAW+JPEG grouping, before the filter.
+    grouped_total: u32,
+    /// Rows in the database.
+    files_total: u32,
+    offset: u32,
+    items: Vec<LibraryItem>,
+}
 
-        let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(&thumb_dir));
-        let spec = footos_core::ThumbnailSpec::default();
-        let mut backfill_count = 0u32;
-        let use_txn = index.begin_transaction().is_ok();
-        for photo in &mut photos {
-            if photo.thumb_path.is_some() && photo.file_size > 0 {
-                continue;
-            }
-            // Virtual library URIs have no local file to stat.
-            if photo.path.starts_with("ios-photo://") || photo.path.starts_with("content://") {
-                continue;
-            }
+/// One page of the library list, grouped, filtered and sorted in Rust.
+#[tauri::command]
+async fn query_library(
+    app: tauri::AppHandle,
+    sort_by: LibrarySort,
+    descending: bool,
+    media_filter: Option<MediaType>,
+    offset: u32,
+    limit: u32,
+) -> Result<LibraryPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let (view, order) = state.library_order(sort_by, descending, media_filter)?;
+        let from = (offset as usize).min(order.len());
+        let to = (from + limit.min(1_000) as usize).min(order.len());
+        Ok(LibraryPage {
+            total: order.len() as u32,
+            grouped_total: view.len() as u32,
+            files_total: view.files() as u32,
+            offset: from as u32,
+            items: order[from..to].iter().filter_map(|&i| view.get(i).cloned()).collect(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-            let source_path = std::path::Path::new(&photo.path);
-            if photo.thumb_path.is_none() {
-                if let Ok(Some(path)) = thumbnailer.get_cached_path(source_path, &spec) {
-                    photo.thumb_path = Some(path.to_string_lossy().to_string());
-                }
-            }
-            if photo.file_size == 0 {
-                if let Ok(metadata) = std::fs::metadata(source_path) {
-                    photo.file_size = metadata.len();
-                }
-            }
-            if photo.thumb_path.is_some() || photo.file_size > 0 {
-                let _ = index.update_thumb_info(
-                    photo.path.clone(),
-                    photo.thumb_path.clone(),
-                    photo.file_size,
-                );
-                backfill_count += 1;
-            }
-        }
-        if use_txn && backfill_count > 0 {
-            let _ = index.commit_transaction();
-        }
-        eprintln!(
-            "[footos] list_photos {} rows backfill={backfill_count}",
-            photos.len()
-        );
-        Ok(photos)
+/// Full details of one item, as the library list would show it (a paired RAW
+/// row resolves to its JPEG).
+#[tauri::command]
+async fn photo_detail(app: tauri::AppHandle, id: i64) -> Result<Option<LibraryItem>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_, view) = app.state::<AppState>().library()?;
+        Ok(view.by_id(id).cloned())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1894,6 +2013,9 @@ pub fn run() {
             geo_summary,
             query_timeline,
             query_album,
+            query_album_in,
+            query_library,
+            photo_detail,
             photo_count,
             agent_test_enabled,
             agent_test_report,

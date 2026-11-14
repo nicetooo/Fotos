@@ -120,6 +120,10 @@ cd packages/core && cargo test            # Rust 测试
 cd packages/desktop && pnpm test          # 前端测试（vitest）
 cd packages/desktop && pnpm tauri build   # 构建发布
 
+# Agent 自测（合成数据，不碰真实照片库）
+./scripts/agent-test/run-ios.sh           # iOS 模拟器
+./scripts/agent-test/run-desktop.sh       # 桌面端，数据目录在 scripts/agent-test/out/desktop/home
+
 # iOS 开发（模拟器，默认 iPhone 14 Pro）
 cd packages/desktop
 pnpm tauri ios dev "iPhone 14 Pro"
@@ -289,12 +293,18 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 
 ### 按需加载（前端不持有照片库）
 
-- 移动端 `App.svelte` 不保存照片列表。地图、时间轴、查看器各自向 Rust 查询当前需要的那一部分
+- 移动端和桌面端的 `App.svelte` 都不保存照片列表。地图、时间轴、查看器、图库抽屉各自向 Rust 查询当前需要的那一部分
 - 查看器：`query_album(center_id, radius)` 取时间顺序相册里当前照片前后各 300 张的窗口；浏览到距边缘 60 张以内时，停顿 500ms 后以当前照片为中心重新取
+- 地图右下角控件从上到下：显示所有照片、放大/缩小/指北、「浏览当前区域照片」（单独在最下面）。后者：`query_album_in(视口 bbox, 时间过滤, limit=1000)` 取视口内按时间排序的照片（超出时保留最新的），从最新一张打开查看器；这份列表是固定的，浏览时不换成全库窗口
 - 库发生变化（导入进度、删除、清空）时只递增 `refreshKey`，由地图重新查询；Rust 侧 `AppState::geo()` 按 DB 变更计数惰性重建内存索引
 - 只在照片**第一次出现**时自动 `fitBounds`；后续导入不得抢镜头
 - ❌ 禁止通过 invoke 返回全量照片对象（iOS WKWebView 上 5k+ 对象约 8s）。需要批量数值时用 `tauri::ipc::Response` 返回原始字节
-- 桌面端的图库抽屉仍然用 `list_photos` 全量加载，桌面端时间轴仍是旧实现（尚未迁移）
+- 桌面端与移动端共用同一套地图/时间轴数据流（`query_map` 单飞、`query_timeline`、单向同步）。桌面端特有的部分：
+  - **图库抽屉**：RAW+JPEG 分组、媒体类型过滤、排序都在 Rust（`core/src/query/library.rs` 的 `LibraryView`）。前端用 `query_library(sort_by, descending, media_filter, offset, limit)` 按页取（`desktop/library-pager.ts`，每页 200，最多缓存 30 页），抽屉关闭时不查询
+  - **RAW 配对规则**：同目录 + 同文件名（不含扩展名）。只看文件名会把不同目录的同名文件配成一对
+  - **查看器**：从抽屉打开按抽屉顺序翻；从地图打开走 `query_album` 窗口。单张详情用 `photo_detail(id)`（RAW 行解析到它所属的 JPEG）
+  - **框选**：`query_timeline(框 bbox)` 取首尾时间交给时间轴，不在前端遍历照片
+- ❌ 禁止在前端调用 `list_photos`（命令保留但没有调用方）
 
 ### 精细时间轴边缘堆叠
 

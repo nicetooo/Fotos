@@ -20,6 +20,7 @@
 		F8DB54D93BF2E1863E897E1D /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 754807A182CCEB708272091A /* WebKit.framework */; };
 		FCE945A259B8DE9F2DB2C21A /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3C5F59F097E9A423B9468EA2 /* LaunchScreen.storyboard */; };
 		A1B2C3D4E5F60718293A4B01 /* PhotoLibraryBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */; };
+		A1B2C3D4E5F60718293A4C01 /* FootosPhotoViewer.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C02 /* FootosPhotoViewer.m */; };
 		A1B2C3D4E5F60718293A4B03 /* Photos.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B04 /* Photos.framework */; };
 		A1B2C3D4E5F60718293A4B06 /* PhotosUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B07 /* PhotosUI.framework */; };
 		A1B2C3D4E5F60718293A4B09 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B08 /* Network.framework */; };
@@ -34,7 +35,9 @@
 		5DDAC4B2817DB3087D4FB3E6 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		754807A182CCEB708272091A /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PhotoLibraryBridge.m; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4C02 /* FootosPhotoViewer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FootosPhotoViewer.m; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B05 /* PhotoLibraryBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PhotoLibraryBridge.h; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4C05 /* FootosPhotoViewer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FootosPhotoViewer.h; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B04 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
 		A1B2C3D4E5F60718293A4B07 /* PhotosUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PhotosUI.framework; path = System/Library/Frameworks/PhotosUI.framework; sourceTree = SDKROOT; };
 		A1B2C3D4E5F60718293A4B08 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
@@ -165,7 +168,9 @@
 			children = (
 				813D781A90AA13FEA681DA0F /* main.mm */,
 				A1B2C3D4E5F60718293A4B05 /* PhotoLibraryBridge.h */,
+				A1B2C3D4E5F60718293A4C05 /* FootosPhotoViewer.h */,
 				A1B2C3D4E5F60718293A4B02 /* PhotoLibraryBridge.m */,
+				A1B2C3D4E5F60718293A4C02 /* FootosPhotoViewer.m */,
 				C759D25BA82D99E92B87B39A /* bindings */,
 			);
 			path = footos;
@@ -266,6 +271,7 @@
 			files = (
 				B2420FCD73C6EBF096244639 /* main.mm in Sources */,
 				A1B2C3D4E5F60718293A4B01 /* PhotoLibraryBridge.m in Sources */,
+				A1B2C3D4E5F60718293A4C01 /* FootosPhotoViewer.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

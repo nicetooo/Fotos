@@ -38,6 +38,7 @@ class DesktopPlatformService implements PlatformService {
         runtimePermissions: false,
         revealInFileManager: true,
         folderSelection: true,
+        nativePhotoViewer: false,
     };
 
     private progressCallbacks = new Set<(p: ImportProgress) => void>();

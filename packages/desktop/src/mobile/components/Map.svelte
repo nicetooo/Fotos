@@ -22,6 +22,7 @@
     let {
         refreshKey = 0,
         libraryCount = 0,
+        onOpenAlbum,
         onOpenPreview,
         theme = "dark",
         tileConfig,
@@ -31,6 +32,8 @@
     } = $props<{
         /** Bump to re-query after the library changed (import progress, delete, clear). */
         refreshKey?: number;
+        /** Open the album of what is on the map now (viewport + time filter). */
+        onOpenAlbum?: (bbox: Bbox, startMs: number | null, endMs: number | null) => void;
         /** Rows in the library, geotagged or not (for the "no GPS" hint). */
         libraryCount?: number;
         onOpenPreview?: (item: { id: number; path: string }) => void;
@@ -88,7 +91,15 @@
         return `${formatDate(a)} - ${formatDate(b)}`;
     }
 
-    let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd));
+    // The pill at the top: the range the user picked, or else the span of
+    // what is in view (the timeline's data). Display only; it filters nothing.
+    let timeRangeDisplay = $derived.by(() => {
+        if (timeFilterStart !== null && timeFilterEnd !== null) {
+            return formatTimeRange(timeFilterStart, timeFilterEnd);
+        }
+        if (timelineStamps.length === 0) return '';
+        return formatTimeRange(timelineStamps[0], timelineStamps[timelineStamps.length - 1]);
+    });
 
     function getThumbnailUrl(path: string): string {
         return convertFileSrc(path);
@@ -548,6 +559,16 @@
         }
     }
 
+    function handleOpenAlbum() {
+        if (!map) return;
+        const b = map.getBounds();
+        onOpenAlbum?.(
+            paddedBbox(b.getWest(), b.getSouth(), b.getEast(), b.getNorth(), 0),
+            timeFilterStart,
+            timeFilterEnd,
+        );
+    }
+
     function handleShowAllPhotos() {
         fitAll(false);
     }
@@ -669,25 +690,38 @@
     function setupMapControls() {
         if (!map) return;
 
-        class ShowAllControl {
+        /** A control group holding one icon button. */
+        class ButtonControl {
             _container: HTMLDivElement | undefined;
-            _button: HTMLButtonElement | undefined;
+            icon: string;
+            label: string;
+            action: () => void;
+            marker?: string;
+
+            constructor(icon: string, label: string, action: () => void, marker?: string) {
+                this.icon = icon;
+                this.label = label;
+                this.action = action;
+                this.marker = marker;
+            }
 
             onAdd() {
                 this._container = document.createElement('div');
                 this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
 
-                this._button = document.createElement('button');
-                this._button.type = 'button';
-                this._button.className = 'maplibregl-ctrl-show-all';
-                this._button.title = t.map.showAllPhotos;
-                this._button.innerHTML = '<i class="fa-solid fa-expand"></i>';
-                this._button.onclick = (e) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'maplibregl-ctrl-show-all';
+                button.title = this.label;
+                button.setAttribute('aria-label', this.label);
+                if (this.marker) button.dataset[this.marker] = '';
+                button.innerHTML = `<i class="fa-solid ${this.icon}"></i>`;
+                button.onclick = (e) => {
                     e.stopPropagation();
-                    handleShowAllPhotos();
+                    this.action();
                 };
 
-                this._container.appendChild(this._button);
+                this._container.appendChild(button);
                 return this._container;
             }
 
@@ -696,9 +730,11 @@
             }
         }
 
-        const showAllControl = new ShowAllControl();
-        map.addControl(showAllControl as any, 'bottom-right');
+        // Bottom-right stacks upward: the first control added sits lowest.
+        // Top to bottom: show all, zoom/compass, album of what is in view.
+        map.addControl(new ButtonControl('fa-images', t.map.openAlbum, handleOpenAlbum, 'openAlbum') as any, 'bottom-right');
         map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+        map.addControl(new ButtonControl('fa-expand', t.map.showAllPhotos, handleShowAllPhotos) as any, 'bottom-right');
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
 
         resizeObserver = new ResizeObserver(() => {

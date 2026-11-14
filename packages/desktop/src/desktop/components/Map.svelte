@@ -1,17 +1,29 @@
 <script lang="ts">
-    import { onMount, onDestroy } from "svelte";
+    import { onMount, onDestroy, untrack } from "svelte";
     import maplibregl from "maplibre-gl";
     import "maplibre-gl/dist/maplibre-gl.css";
     import { convertFileSrc } from "@tauri-apps/api/core";
     import TimelineSlider from "./TimelineSlider.svelte";
     import { baseMapStyle } from "../../shared/map-style";
-    import { queryMap, paddedBbox, abbreviateCount, type MapFeature } from "../../shared/query";
+    import {
+        queryMap,
+        geoSummary,
+        queryTimeline,
+        photoDetail,
+        paddedBbox,
+        abbreviateCount,
+        type Bbox,
+        type MapFeature,
+    } from "../../shared/query";
     import type { Translations } from "../../shared/i18n/types";
     import type { Locale } from "../../shared/i18n/types";
 
-    let { photos, onOpenPreview, theme = "dark", tileConfig, t, locale = 'en' as Locale } = $props<{
-        photos: any[];
-        onOpenPreview?: (photo: any, visiblePhotos: any[]) => void;
+    let { refreshKey = 0, libraryCount = 0, onOpenPreview, theme = "dark", tileConfig, t, locale = 'en' as Locale } = $props<{
+        /** Bumped whenever the library changes (import progress, delete, clear). */
+        refreshKey?: number;
+        /** Items in the whole library, geotagged or not. */
+        libraryCount?: number;
+        onOpenPreview?: (item: { id: number; path: string }) => void;
         theme?: "dark" | "light";
         tileConfig?: { tiles: string[]; tileSize: number };
         t: Translations;
@@ -23,18 +35,26 @@
     let mapLoaded = $state(false);
     let isReady = $state(false);
 
-    // Time filter state
-    let timeFilterStart = $state<Date | null>(null);
-    let timeFilterEnd = $state<Date | null>(null);
+    // Geotagged items in the library (from the last query).
+    let total = $state(0);
+    let summaryLoaded = $state(false);
+    let hasGeotaggedPhotos = $derived(total > 0);
+
+    // Time filter (wall-clock ms). Set only by the user through the timeline;
+    // map movement never writes it, so there is no map <-> timeline loop to guard.
+    let timeFilterStart = $state<number | null>(null);
+    let timeFilterEnd = $state<number | null>(null);
+
+    // Sorted timestamps the timeline draws. Follows the map viewport until the
+    // user picks a time range; then it stays put until the range is cleared.
+    let timelineStamps = $state.raw<Float64Array>(new Float64Array(0));
+    let mapConstrained = $state(false);
 
     // Box selection state
     let isBoxSelectMode = $state(false);
     let isDrawingBox = $state(false);
     let boxStart: { x: number; y: number } | null = null;
     let selectionBox: HTMLDivElement | null = null;
-
-    // Sync mode: prevent circular updates
-    let syncSource = $state<'map' | 'timeline' | null>(null);
 
     // Hover popup
     let hoverPopup: maplibregl.Popup | null = null;
@@ -50,90 +70,39 @@
     function handleDragStart() { isDragging = true; hideHoverPopup(); }
     function handleDragEnd() { isDragging = false; }
 
-    // All photos data (for lookups and timeline)
-    let allPhotosData: any[] = [];
-    // Photo lookup by path
-    let photoByPath: Map<string, any> = new Map();
-    // Pre-parsed dates by path
-    let dateByPath: Map<string, Date> = new Map();
-
-    // Parse date from photo metadata
-    function parsePhotoDate(dateStr: string | null): Date | null {
-        if (!dateStr) return null;
-        const cleaned = dateStr.replace(/"/g, '').trim();
-        const date = new Date(cleaned.replace(' ', 'T'));
-        return isNaN(date.getTime()) ? null : date;
-    }
-
-    // Geotagged photos (reactive)
-    let geotaggedPhotos = $derived(photos.filter((p: any) => p.metadata?.lat && p.metadata?.lon));
-    let hasGeotaggedPhotos = $derived(geotaggedPhotos.length > 0);
-
-    function handleTimeRangeChange(start: Date, end: Date) {
-        if (syncSource === 'map') {
-            syncSource = null;
-            return;
-        }
-        // Skip if values haven't changed (prevents redundant Effect C → setData)
-        const startMs = start.getTime();
-        const endMs = end.getTime();
-        if (timeFilterStart && timeFilterEnd &&
-            timeFilterStart.getTime() === startMs &&
-            timeFilterEnd.getTime() === endMs) {
-            return;
-        }
-        syncSource = 'timeline';
+    function handleTimeRangeChange(start: number | null, end: number | null) {
+        if (start === timeFilterStart && end === timeFilterEnd) return;
         timeFilterStart = start;
         timeFilterEnd = end;
-        setTimeout(() => {
-            syncSource = null;
-        }, 100);
+        refresh();
+        if (start === null) scheduleTimelineSync();
     }
 
-    // Format time range for display
-    function formatTimeRange(start: Date | null, end: Date | null, short: boolean = false): string {
-        if (!start || !end) return '';
-        const sameDay = start.toDateString() === end.toDateString();
+    function formatTimeRange(start: number | null, end: number | null): string {
+        if (start === null || end === null) return '';
+        const a = new Date(start);
+        const b = new Date(end);
+        const sameDay = a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
         const formatDate = (d: Date) => d.toLocaleDateString(locale, {
-            month: 'short',
-            day: 'numeric',
-            year: short ? '2-digit' : 'numeric'
+            month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC'
         });
         const formatTime = (d: Date) => d.toLocaleTimeString(locale, {
-            hour: short ? 'numeric' : '2-digit',
-            minute: '2-digit'
+            hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
         });
         if (sameDay) {
-            return `${formatDate(start)} ${formatTime(start)} - ${formatTime(end)}`;
+            return `${formatDate(a)} ${formatTime(a)} - ${formatTime(b)}`;
         }
-        return `${formatDate(start)} - ${formatDate(end)}`;
+        return `${formatDate(a)} - ${formatDate(b)}`;
     }
 
-    let timeRangeDisplay = $derived(formatTimeRange(timeFilterStart, timeFilterEnd, false));
-
-    // Photos with markers for TimelineSlider
-    let photosWithMarkers = $state.raw<any[]>([]);
-
-    // Get visible photos sorted by time for navigation
-    let visiblePhotosSorted = $derived.by(() => {
-        const start = timeFilterStart;
-        const end = timeFilterEnd;
-
-        const visible: { photo: any; date: Date }[] = [];
-        for (const photo of geotaggedPhotos) {
-            const date = dateByPath.get(photo.path) || parsePhotoDate(photo.metadata?.date_taken);
-            if (!date) continue;
-            if (start && end) {
-                if (date >= start && date <= end) {
-                    visible.push({ photo, date });
-                }
-            } else {
-                visible.push({ photo, date });
-            }
+    // The pill at the top: the range the user picked, or else the span of
+    // what is in view (the timeline's data). Display only; it filters nothing.
+    let timeRangeDisplay = $derived.by(() => {
+        if (timeFilterStart !== null && timeFilterEnd !== null) {
+            return formatTimeRange(timeFilterStart, timeFilterEnd);
         }
-
-        visible.sort((a, b) => a.date.getTime() - b.date.getTime());
-        return visible.map(v => v.photo);
+        if (timelineStamps.length === 0) return '';
+        return formatTimeRange(timelineStamps[0], timelineStamps[timelineStamps.length - 1]);
     });
 
     function getThumbnailUrl(path: string): string {
@@ -143,9 +112,6 @@
     // ============================================================
     // GeoJSON Clustering Implementation
     // ============================================================
-
-    // Track previous photo count to detect add vs remove
-    let prevPhotoCount = 0;
 
     const SOURCE_ID = 'photos-source';
     const CLUSTER_LAYER_ID = 'photo-clusters';
@@ -320,18 +286,57 @@
     // ============================================================
 
     let querySeq = 0;
+    let lastVersion = '';
+
+    // Counters for the agent self-test (shared/agent-test.ts).
+    const stats = { queries: 0, setData: 0, lastQueryMs: 0 };
+
+    // One query at a time. Requests that arrive meanwhile collapse into a
+    // single follow-up, so a fast drag never queues up stale work.
+    let queryInFlight = false;
+    let queryQueued = false;
 
     /** Ask Rust for the clusters in (a padded) viewport and draw them. */
     async function refresh() {
+        if (queryInFlight) {
+            queryQueued = true;
+            return;
+        }
+        queryInFlight = true;
+        try {
+            await runQuery();
+        } finally {
+            queryInFlight = false;
+            if (queryQueued) {
+                queryQueued = false;
+                refresh();
+            }
+        }
+    }
+
+    async function runQuery() {
         const m = map;
         if (!m || !mapLoaded) return;
         const seq = ++querySeq;
         const b = m.getBounds();
         const bbox = paddedBbox(b.getWest(), b.getSouth(), b.getEast(), b.getNorth());
         try {
-            const res = await queryMap(bbox, m.getZoom(), wallMs(timeFilterStart), wallMs(timeFilterEnd));
+            const t0 = performance.now();
+            const res = await queryMap(bbox, m.getZoom(), timeFilterStart, timeFilterEnd);
+            stats.queries++;
+            stats.lastQueryMs = Math.round((performance.now() - t0) * 10) / 10;
             if (seq !== querySeq || map !== m) return;
+            const becameNonEmpty = total === 0 && res.total > 0;
+            total = res.total;
+            summaryLoaded = true;
             applyFeatures(res.features);
+            if (res.version !== lastVersion) {
+                lastVersion = res.version;
+                // Library changed. Frame everything only the first time photos
+                // appear; later imports must not steal the camera.
+                if (becameNonEmpty) fitAll(true);
+                loadStamps(timelineBbox);
+            }
         } catch (e) {
             console.error("[Map] query_map failed", e);
         }
@@ -360,6 +365,7 @@
                     label: abbreviateCount(f.count),
                     id: f.id,
                     path: f.path,
+                    thumb: f.thumb,
                     imageId,
                     w: f.bounds[0],
                     s: f.bounds[1],
@@ -371,6 +377,7 @@
         currentImageIds = ids;
         if (fingerprint === lastFingerprint) return;
         lastFingerprint = fingerprint;
+        stats.setData++;
         source.setData({ type: 'FeatureCollection', features: out });
     }
 
@@ -399,6 +406,41 @@
 
     function handleMoveEnd() {
         refresh();
+        scheduleTimelineSync();
+    }
+
+    // ============================================================
+    // Timeline data
+    // ============================================================
+
+    let timelineBbox: Bbox | null = null;
+    let stampSeq = 0;
+    let timelineSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+    async function loadStamps(bbox: Bbox | null) {
+        const seq = ++stampSeq;
+        try {
+            const stamps = await queryTimeline(bbox);
+            if (seq !== stampSeq) return;
+            // An empty viewport keeps the previous timeline instead of blanking it.
+            if (stamps.length === 0 && bbox !== null && timelineStamps.length > 0) return;
+            timelineBbox = bbox;
+            timelineStamps = stamps;
+            mapConstrained = bbox !== null && stamps.length < total;
+        } catch (e) {
+            console.error("[Map] query_timeline failed", e);
+        }
+    }
+
+    /** After the map settles, show the timeline of what is in view (unless the user set a range). */
+    function scheduleTimelineSync() {
+        if (timelineSyncTimer) clearTimeout(timelineSyncTimer);
+        timelineSyncTimer = setTimeout(() => {
+            timelineSyncTimer = null;
+            if (!map || timeFilterStart !== null) return;
+            const b = map.getBounds();
+            loadStamps(paddedBbox(b.getWest(), b.getSouth(), b.getEast(), b.getNorth(), 0));
+        }, 300);
     }
 
     // ============================================================
@@ -503,79 +545,23 @@
         evictUnusedImages();
     }
 
-    /**
-     * Local Date -> wall-clock ms (what the Rust index stores): the clock
-     * reading as if it were UTC.
-     */
-    function wallMs(d: Date | null): number | null {
-        if (!d) return null;
-        return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds());
-    }
-
     // ============================================================
-    // Photo Initialization
+    // Camera
     // ============================================================
 
-    /**
-     * Initialize photo data and update the GeoJSON source.
-     */
-    function initializePhotos(photos: any[]) {
-        if (!map || !mapLoaded) return;
-
-        if (photos.length === prevPhotoCount && photos.length > 0) return;
-
-        const isInitialLoad = prevPhotoCount === 0;
-        const isAddingPhotos = photos.length > prevPhotoCount;
-
-        // Build lookup caches
-        allPhotosData = photos;
-        photoByPath.clear();
-        dateByPath.clear();
-        for (const photo of photos) {
-            photoByPath.set(photo.path, photo);
-            // A RAW+JPEG pair is one entry here but two rows in the index.
-            if (photo.rawPath) photoByPath.set(photo.rawPath, photo);
-            const date = parsePhotoDate(photo.metadata?.date_taken);
-            if (date) dateByPath.set(photo.path, date);
-        }
-
-        refresh();
-
-        if (photos.length > 0 && (isInitialLoad || isAddingPhotos)) {
-            fitBoundsToPhotos(photos, isInitialLoad);
-        }
-
-        prevPhotoCount = photos.length;
-        photosWithMarkers = photos;
-    }
-
-    /**
-     * Fit map bounds to show all geotagged photos.
-     */
-    function fitBoundsToPhotos(photos: any[], delay: boolean = false) {
-        if (!map) return;
-
-        const bounds = new maplibregl.LngLatBounds();
-        let hasPoints = false;
-        for (const photo of photos) {
-            const lat = photo.metadata?.lat;
-            const lon = photo.metadata?.lon;
-            if (lat && lon) {
-                bounds.extend([lon, lat]);
-                hasPoints = true;
-            }
-        }
-
-        if (!hasPoints) return;
-
-        const doFit = () => {
-            map?.fitBounds(bounds, { padding: 100, maxZoom: 15 });
-        };
-
-        if (delay) {
-            setTimeout(doFit, 150);
-        } else {
-            doFit();
+    /** Frame every geotagged item. */
+    async function fitAll(delay: boolean = false) {
+        try {
+            const summary = await geoSummary();
+            if (!map || !summary.extent) return;
+            const [w, s, e, n] = summary.extent;
+            const doFit = () => {
+                map?.fitBounds([[w, s], [e, n]], { padding: 100, maxZoom: 15 });
+            };
+            if (delay) setTimeout(doFit, 150);
+            else doFit();
+        } catch (e) {
+            console.error("[Map] geo_summary failed", e);
         }
     }
 
@@ -631,10 +617,7 @@
             return;
         }
 
-        const photo = photoByPath.get(p.path);
-        if (photo && onOpenPreview) {
-            onOpenPreview(photo, visiblePhotosSorted);
-        }
+        onOpenPreview?.({ id: p.id, path: p.path });
     }
 
     /**
@@ -687,27 +670,20 @@
         });
     }
 
-    function showHoverPopup(feature: maplibregl.GeoJSONFeature) {
-        if (!map || !hoverPopup) return;
+    function escapeHtml(text: string): string {
+        return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    }
 
-        const path = feature.properties?.path;
-        hoveredPhotoPath = path;
-
-        const photo = photoByPath.get(path);
-        if (!photo) return;
-
-        const coords = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
-        const thumbPath = photo.thumb_path || photo.path;
-        const url = getThumbnailUrl(thumbPath);
-        const originalUrl = getThumbnailUrl(photo.path);
-        const filename = photo.path.split('/').pop() || '';
-        const dateTaken = photo.metadata?.date_taken?.replace(/"/g, '') || '';
-        const rawBadge = photo.hasRaw ? '<div class="popup-raw-badge">RAW</div>' : '';
-        const dateInfo = dateTaken ? `<div class="popup-date">${dateTaken}</div>` : '';
-
-        const html = `
+    function popupHtml(path: string, thumb: string, date: string, hasRaw: boolean): string {
+        const filename = escapeHtml(path.split('/').pop() || '');
+        const img = document.createElement('img');
+        img.src = getThumbnailUrl(thumb || path);
+        img.alt = filename;
+        const dateInfo = date ? `<div class="popup-date">${escapeHtml(date)}</div>` : '';
+        const rawBadge = hasRaw ? '<div class="popup-raw-badge">RAW</div>' : '';
+        return `
             <div class="photo-popup">
-                <img src="${url}" alt="${filename}" onerror="this.onerror=null; this.src='${originalUrl}';" />
+                ${img.outerHTML}
                 <div class="popup-info">
                     <div class="popup-filename">${filename}</div>
                     ${dateInfo}
@@ -715,8 +691,24 @@
                 ${rawBadge}
             </div>
         `;
+    }
 
-        hoverPopup.setLngLat(coords).setHTML(html).addTo(map);
+    function showHoverPopup(feature: maplibregl.GeoJSONFeature) {
+        if (!map || !hoverPopup) return;
+        const props = feature.properties as any;
+        const path: string = props?.path;
+        if (!path) return;
+        hoveredPhotoPath = path;
+
+        // Thumbnail and name come with the feature; date and RAW badge follow.
+        const coords = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
+        hoverPopup.setLngLat(coords).setHTML(popupHtml(path, props.thumb, '', false)).addTo(map);
+
+        photoDetail(props.id).then((detail) => {
+            if (!detail || hoveredPhotoPath !== path || !hoverPopup) return;
+            const date = detail.metadata?.date_taken?.replace(/"/g, '') || '';
+            hoverPopup.setHTML(popupHtml(path, props.thumb, date, !!detail.hasRaw));
+        }).catch(() => {});
     }
 
     function hideHoverPopup() {
@@ -726,74 +718,8 @@
         }
     }
 
-    // ============================================================
-    // Map ↔ Timeline Sync
-    // ============================================================
-
-    /**
-     * Get time range of photos visible in current map bounds.
-     */
-    function getVisiblePhotosTimeRange(): { start: Date; end: Date; photos: any[] } | null {
-        if (!map || allPhotosData.length === 0) return null;
-
-        const bounds = map.getBounds();
-        const visibleDates: Date[] = [];
-        const visiblePhotos: any[] = [];
-
-        for (const photo of allPhotosData) {
-            const lat = photo.metadata?.lat;
-            const lon = photo.metadata?.lon;
-            if (!lat || !lon) continue;
-
-            if (bounds.contains(new maplibregl.LngLat(lon, lat))) {
-                visiblePhotos.push(photo);
-                const date = dateByPath.get(photo.path);
-                if (date) visibleDates.push(date);
-            }
-        }
-
-        if (visibleDates.length === 0) return null;
-
-        visibleDates.sort((a, b) => a.getTime() - b.getTime());
-        return {
-            start: visibleDates[0],
-            end: visibleDates[visibleDates.length - 1],
-            photos: visiblePhotos
-        };
-    }
-
-    // Debounce timer for map move → timeline sync
-    let mapMoveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    function handleMapMove() {
-        if (syncSource === 'timeline') return;
-
-        if (mapMoveDebounceTimer) clearTimeout(mapMoveDebounceTimer);
-        mapMoveDebounceTimer = setTimeout(() => {
-            mapMoveDebounceTimer = null;
-            if (syncSource === 'timeline') return;
-
-            const result = getVisiblePhotosTimeRange();
-            if (result) {
-                syncSource = 'map';
-                mapVisibleTimeRange = { start: result.start, end: result.end };
-                mapVisiblePhotos = result.photos;
-                setTimeout(() => {
-                    syncSource = null;
-                }, 100);
-            }
-        }, 300);
-    }
-
-    // Time range from map view (for timeline sync)
-    let mapVisibleTimeRange = $state<{ start: Date; end: Date } | null>(null);
-    let mapVisiblePhotos = $state.raw<any[] | null>(null);
-    let timelinePhotos = $derived(mapVisiblePhotos ?? photosWithMarkers);
-
-    // Fit map to show all photos
     function handleShowAllPhotos() {
-        if (!map || allPhotosData.length === 0) return;
-        fitBoundsToPhotos(allPhotosData, false);
+        fitAll(false);
     }
 
     // ============================================================
@@ -820,6 +746,16 @@
         });
 
         setupMapControls();
+
+        (window as any).__footosMap = map;
+        (window as any).__footosSetTimeFilter = handleTimeRangeChange;
+        (window as any).__footosMapStats = () => ({
+            ...stats,
+            total,
+            features: currentFeatures.length,
+            stamps: timelineStamps.length,
+            atlasImages: loadedImages.size,
+        });
     });
 
     function setupMapControls() {
@@ -958,21 +894,22 @@
                 if (!mapLoaded) onMapReady();
             });
         }
-
-        // Map move → timeline sync (outside of onMapReady since it uses moveend)
-        map.on('moveend', handleMapMove);
     }
 
     onDestroy(() => {
+        delete (window as any).__footosMap;
+        delete (window as any).__footosMapStats;
+        delete (window as any).__footosSetTimeFilter;
         loadedImages.clear();
         loadingImages.clear();
         thumbDataCache.clear();
-        photoByPath.clear();
-        dateByPath.clear();
-
-        if (mapMoveDebounceTimer) {
-            clearTimeout(mapMoveDebounceTimer);
-            mapMoveDebounceTimer = null;
+        if (timelineSyncTimer) {
+            clearTimeout(timelineSyncTimer);
+            timelineSyncTimer = null;
+        }
+        if (moveTimer) {
+            clearTimeout(moveTimer);
+            moveTimer = null;
         }
         if (resizeObserver) {
             resizeObserver.disconnect();
@@ -1016,7 +953,6 @@
             map.off('move', handleMove);
             map.off('moveend', handleMoveEnd);
             map.off('styleimagemissing', handleMissingImage);
-            map.off('moveend', handleMapMove);
             map.off('movestart', handleDragStart);
             map.off('moveend', handleDragEnd);
 
@@ -1039,7 +975,6 @@
                 mapRef.on('move', handleMove);
                 mapRef.on('moveend', handleMoveEnd);
                 mapRef.on('styleimagemissing', handleMissingImage);
-                mapRef.on('moveend', handleMapMove);
                 mapRef.on('movestart', handleDragStart);
                 mapRef.on('moveend', handleDragEnd);
             }
@@ -1049,30 +984,18 @@
         }
     });
 
-    // Update map data when photos change
+    // Library changed (import progress, delete, clear): query again.
     $effect(() => {
-        const currentMap = map;
-        const geo = geotaggedPhotos;
-        const loaded = mapLoaded;
-
-        if (!currentMap || !loaded) return;
-
-        initializePhotos(geo);
-    });
-
-    // Time filter changed: ask for the viewport again.
-    $effect(() => {
-        timeFilterStart;
-        timeFilterEnd;
+        refreshKey;
         if (!mapLoaded) return;
-        refresh();
+        untrack(() => refresh());
     });
 
     // ============================================================
     // Box Selection (Desktop only)
     // ============================================================
 
-    let boxSelectedTimeRange = $state<{ start: Date; end: Date } | null>(null);
+    let boxSelectedTimeRange = $state<{ startMs: number; endMs: number } | null>(null);
 
     function toggleBoxSelectMode() {
         isBoxSelectMode = !isBoxSelectMode;
@@ -1143,27 +1066,18 @@
         const ne = map.unproject([Math.max(boxStart.x, endX), Math.min(boxStart.y, endY)]);
         const bounds = new maplibregl.LngLatBounds(sw, ne);
 
-        // Find photos within bounds using allPhotosData (no DOM markers)
-        const photosInBounds: Date[] = [];
-        for (const photo of allPhotosData) {
-            const lat = photo.metadata?.lat;
-            const lon = photo.metadata?.lon;
-            if (!lat || !lon) continue;
-            if (bounds.contains(new maplibregl.LngLat(lon, lat))) {
-                const date = dateByPath.get(photo.path);
-                if (date) photosInBounds.push(date);
-            }
-        }
-
-        if (photosInBounds.length > 0) {
-            photosInBounds.sort((a, b) => a.getTime() - b.getTime());
-            boxSelectedTimeRange = {
-                start: photosInBounds[0],
-                end: photosInBounds[photosInBounds.length - 1]
-            };
-
-            map.fitBounds(bounds, { padding: 100, animate: true });
-        }
+        // Time span of what is inside the box, straight from the index.
+        const boxMap = map;
+        queryTimeline({
+            west: bounds.getWest(),
+            south: bounds.getSouth(),
+            east: bounds.getEast(),
+            north: bounds.getNorth(),
+        }).then((stamps) => {
+            if (stamps.length === 0 || map !== boxMap) return;
+            boxSelectedTimeRange = { startMs: stamps[0], endMs: stamps[stamps.length - 1] };
+            boxMap.fitBounds(bounds, { padding: 100, animate: true });
+        }).catch((e) => console.error("[Map] box select failed", e));
 
         // Cleanup
         cleanupBoxSelection();
@@ -1200,7 +1114,7 @@
         {/if}
 
         <!-- No geotagged photos message -->
-        {#if photos.length > 0 && !hasGeotaggedPhotos}
+        {#if summaryLoaded && libraryCount > 0 && !hasGeotaggedPhotos}
             <div class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-[1000] pointer-events-none">
                 <div class="text-center p-6 theme-bg-secondary rounded-2xl border theme-border shadow-xl">
                     <i class="fa-solid fa-location-slash text-4xl theme-text-muted mb-4"></i>
@@ -1215,16 +1129,16 @@
     <!-- Timeline slider -->
     {#if hasGeotaggedPhotos}
         <div class="flex-shrink-0 min-h-[120px]">
-            {#if map && isReady && photosWithMarkers.length > 0}
+            {#if map && isReady && timelineStamps.length > 0}
                 <TimelineSlider
-                    photos={timelinePhotos}
+                    stamps={timelineStamps}
+                    {mapConstrained}
                     externalTimeRange={boxSelectedTimeRange}
-                    mapViewTimeRange={mapVisibleTimeRange}
                     onTimeRangeChange={handleTimeRangeChange}
                     onExternalRangeConsumed={() => { boxSelectedTimeRange = null; }}
-                    onMapRangeConsumed={() => { mapVisibleTimeRange = null; }}
                     onShowAll={handleShowAllPhotos}
                     {t}
+                    {locale}
                 />
             {/if}
         </div>

@@ -38,6 +38,8 @@ export interface AgentTestHooks {
     openPreview: () => Promise<unknown>;
     closePreview: () => void;
     bootMarks: () => Record<string, number>;
+    /** Platform-specific checks run after the common ones. */
+    extraSteps?: () => Promise<{ name: string; ok: boolean; detail?: unknown }[]>;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -251,16 +253,35 @@ export async function runAgentTest(scenario: string, hooks: AgentTestHooks): Pro
         // 6. Viewer opens on an album window.
         await step("viewer-open", async () => {
             const t0 = performance.now();
-            const result = await hooks.openPreview();
+            const result = (await hooks.openPreview()) as
+                | { native?: boolean; external?: boolean; count?: number }
+                | false;
+            if (result && result.external) {
+                // The host has its own viewer and reports what it opened.
+                const ms = Math.round(performance.now() - t0);
+                await sleep(300);
+                return { ok: (result.count ?? 0) > 0, detail: { native: false, openMs: ms, items: result.count } };
+            }
+            if (result && result.native) {
+                // Native viewer: it lives outside the WebView, so it is checked
+                // from the simulator screenshot and gestures, not from the DOM.
+                const ms = Math.round(performance.now() - t0);
+                await sleep(1200);
+                return { ok: (result.count ?? 0) > 0, detail: { native: true, handoffMs: ms, items: result.count } };
+            }
             const shown = await waitFor(() => !!document.querySelector("[data-photo-viewer]"), 5000);
             const ms = Math.round(performance.now() - t0);
             const thumbs = document.querySelectorAll("[data-strip-index]").length;
             await sleep(800);
-            return { ok: shown && thumbs > 0, detail: { openMs: ms, stripThumbs: thumbs, result } };
+            return { ok: shown && thumbs > 0, detail: { native: false, openMs: ms, stripThumbs: thumbs } };
         });
         if (scenario !== "keep-viewer") {
             hooks.closePreview();
             await sleep(400);
+        }
+
+        if (hooks.extraSteps) {
+            for (const extra of await hooks.extraSteps()) steps.push(extra);
         }
     } catch (e) {
         errors.push("probe aborted: " + String(e));

@@ -10,6 +10,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { PhotoInfo, SortBy } from "./types";
 
 export interface Bbox {
     west: number;
@@ -95,6 +96,57 @@ export function queryAlbum(centerId: number | null, radius: number): Promise<Alb
     return invoke("query_album", { centerId, radius });
 }
 
+/** The time-ordered album of what is inside `bbox` and the time range; the newest `limit` when more match. */
+export function queryAlbumIn(
+    bbox: Bbox,
+    startMs: number | null,
+    endMs: number | null,
+    limit: number,
+): Promise<AlbumWindow> {
+    return invoke("query_album_in", { bbox, startMs, endMs, limit });
+}
+
+export type MediaFilter = "all" | "photo" | "video" | "live_photo";
+
+/** A library entry: a file with its paired RAW folded in. */
+export interface LibraryItem extends PhotoInfo {
+    rawId?: number | null;
+    rawSize?: number;
+}
+
+export interface LibraryPage {
+    /** Entries matching the filter. */
+    total: number;
+    /** Entries after RAW+JPEG grouping, before the filter. */
+    grouped_total: number;
+    /** Rows in the database. */
+    files_total: number;
+    offset: number;
+    items: LibraryItem[];
+}
+
+/** One page of the library list; grouping, filtering and sorting happen in Rust. */
+export function queryLibrary(
+    sortBy: SortBy,
+    descending: boolean,
+    mediaFilter: MediaFilter,
+    offset: number,
+    limit: number,
+): Promise<LibraryPage> {
+    return invoke("query_library", {
+        sortBy,
+        descending,
+        mediaFilter: mediaFilter === "all" ? null : mediaFilter,
+        offset,
+        limit,
+    });
+}
+
+/** Full details of one item (a paired RAW row resolves to its JPEG). */
+export function photoDetail(id: number): Promise<LibraryItem | null> {
+    return invoke("photo_detail", { id });
+}
+
 export function photoCount(): Promise<number> {
     return invoke("photo_count");
 }
@@ -127,14 +179,14 @@ export function paddedBbox(
 }
 
 /** Shape the album item the way the viewers expect a photo. */
-export function albumItemToPhoto(item: AlbumItem) {
+export function albumItemToPhoto(item: AlbumItem): PhotoInfo {
     return {
         id: { id: item.id },
         path: item.path,
         thumb_path: item.thumb,
         hash: "",
         file_size: 0,
-        media_type: item.media_type || "photo",
+        media_type: (item.media_type || "photo") as PhotoInfo["media_type"],
         metadata: {
             lat: item.lat,
             lon: item.lon,

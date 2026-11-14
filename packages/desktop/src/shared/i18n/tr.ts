@@ -126,6 +126,7 @@ export const tr: Translations = {
 
     map: {
         showAllPhotos: 'Tüm fotoğrafları göster',
+        openAlbum: 'Browse photos in view',
         boxSelect: 'Alan seçimi',
         noGeotaggedPhotos: 'Konum bilgili fotoğraf yok',
         noGeotaggedPhotosDesc: 'İçe aktarılan fotoğrafların hiçbirinde GPS verisi bulunmuyor.',

@@ -126,6 +126,7 @@ export const id: Translations = {
 
     map: {
         showAllPhotos: 'Tampilkan semua foto',
+        openAlbum: 'Browse photos in view',
         boxSelect: 'Pilih area',
         noGeotaggedPhotos: 'Tidak ada foto berlokasi',
         noGeotaggedPhotosDesc: 'Tidak ada foto yang diimpor mengandung data GPS.',

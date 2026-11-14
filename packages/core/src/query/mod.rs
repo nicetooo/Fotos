@@ -6,6 +6,8 @@
 //!
 //! Pure data + pure functions: no global state, no I/O, no platform code.
 
+pub mod library;
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -448,6 +450,36 @@ impl GeoIndex {
         AlbumWindow { start: start as u32, total: total as u32, items }
     }
 
+    /// The time-ordered album of what is inside `bbox` (and the time range, if
+    /// any; undated items always pass, as on the map). At most `limit` items:
+    /// when more match, the newest are kept. `total` is how many matched.
+    pub fn album_in(
+        &self,
+        bbox: Bbox,
+        start_ms: Option<i64>,
+        end_ms: Option<i64>,
+        limit: u32,
+    ) -> AlbumWindow {
+        let (lo, hi) = self.dated_range(start_ms, end_ms);
+        let filtered = start_ms.is_some() || end_ms.is_some();
+        let ranges: [(usize, usize); 2] = if filtered {
+            [(0, self.undated), (lo, hi)]
+        } else {
+            [(0, self.len()), (0, 0)]
+        };
+        let mut hits: Vec<usize> = Vec::new();
+        for (from, to) in ranges {
+            hits.extend((from..to).filter(|&i| bbox.contains(self.lat[i], self.lon[i])));
+        }
+        let total = hits.len();
+        let start = total.saturating_sub(limit as usize);
+        AlbumWindow {
+            start: start as u32,
+            total: total as u32,
+            items: hits[start..].iter().map(|&i| self.album_item(i)).collect(),
+        }
+    }
+
     fn album_item(&self, i: usize) -> AlbumItem {
         AlbumItem {
             id: self.ids[i],
@@ -465,6 +497,28 @@ impl GeoIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn album_in_keeps_newest_inside_the_box() {
+        let rows = vec![
+            row(1, 10.0, 10.0, Some("2024-01-01 00:00:00")),
+            row(2, 10.1, 10.1, Some("2024-01-02 00:00:00")),
+            row(3, 50.0, 50.0, Some("2024-01-03 00:00:00")),
+            row(4, 10.2, 10.2, Some("2024-01-04 00:00:00")),
+            row(5, 10.3, 10.3, None),
+        ];
+        let geo = GeoIndex::build(rows);
+        let bbox = Bbox { west: 9.0, south: 9.0, east: 11.0, north: 11.0 };
+        let all = geo.album_in(bbox, None, None, 100);
+        assert_eq!(all.total, 4);
+        assert_eq!(all.items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![5, 1, 2, 4]);
+        let newest = geo.album_in(bbox, None, None, 2);
+        assert_eq!((newest.start, newest.total), (2, 4));
+        assert_eq!(newest.items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![2, 4]);
+        let from = parse_date_ms("2024-01-02 00:00:00");
+        let ranged = geo.album_in(bbox, from, None, 100);
+        assert_eq!(ranged.items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![5, 2, 4]);
+    }
 
     fn row(id: i64, lat: f64, lon: f64, date: Option<&str>) -> PhotoPreview {
         PhotoPreview {

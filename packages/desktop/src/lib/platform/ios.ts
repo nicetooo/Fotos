@@ -11,6 +11,7 @@ import type {
     PermissionStatus,
     MapTileConfig,
     IOSPlatformService,
+    NativeViewerItem,
 } from "./types";
 
 type EventHandler = { event: string; handler: EventListener };
@@ -25,6 +26,7 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         runtimePermissions: true,
         revealInFileManager: false,
         folderSelection: false,
+        nativePhotoViewer: true,
     };
 
     private progressCallbacks = new Set<(p: ImportProgress) => void>();
@@ -322,6 +324,13 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         void invoke("flush_photos_db").catch((e) => console.warn("[iOS] flush_photos_db", e));
         this.completeCallbacks.forEach(cb => cb(result));
         this.scanningCallbacks.forEach(cb => cb(false));
+    }
+
+    openNativeViewer(items: NativeViewerItem[], index: number): boolean {
+        const handler = (window as any).webkit?.messageHandlers?.footosPhotos;
+        if (!handler || items.length === 0) return false;
+        handler.postMessage({ command: "openViewer", items, index });
+        return true;
     }
 
     async ensureOriginal(path: string): Promise<string> {

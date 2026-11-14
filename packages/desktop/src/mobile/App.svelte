@@ -20,7 +20,7 @@
         type Theme,
         type ImportStatus,
     } from "../shared";
-    import { queryAlbum, photoCount, albumItemToPhoto } from "../shared/query";
+    import { queryAlbum, queryAlbumIn, photoCount, albumItemToPhoto, type Bbox } from "../shared/query";
 
     // i18n
     import { createI18nState, type Locale } from "../shared/i18n";
@@ -244,8 +244,8 @@
             (window as any).__footosOpenPreview = async () => {
                 const w = await queryAlbum(null, 0);
                 if (w.items.length === 0) return false;
-                await openPreview(w.items[0]);
-                return { ok: true, path: w.items[0].path };
+                const opened = await openPreview(w.items[0]);
+                return { ok: true, path: w.items[0].path, ...opened };
             };
             (window as any).__footosClosePreview = () => closePreview();
 
@@ -302,15 +302,67 @@
         return viewerPhotos;
     }
 
+    // Native viewer gets a bigger window: it cannot ask for more once open.
+    const NATIVE_ALBUM_RADIUS = 500;
+
     async function openPreview(item: { id: number; path: string }) {
         try {
+            if (platformService.capabilities.nativePhotoViewer && iosPlatformService) {
+                const w = await queryAlbum(item.id, NATIVE_ALBUM_RADIUS);
+                const index = w.items.findIndex((p) => p.id === item.id);
+                const opened = iosPlatformService.openNativeViewer(
+                    w.items.map((p) => ({
+                        path: p.path,
+                        thumb: p.thumb,
+                        media_type: p.media_type,
+                        date_taken: p.date_taken,
+                    })),
+                    Math.max(0, index),
+                );
+                if (opened) return { native: true, count: w.items.length };
+            }
             const list = await loadAlbumWindow(item.id);
             const photo = list.find((p) => p.path === item.path);
             if (!photo) return;
             previewPhoto = photo;
             history.pushState({ modal: "preview" }, "");
+            return { native: false, count: list.length };
         } catch (e) {
             console.error("[App] Failed to open preview", e);
+        }
+    }
+
+    // What the map shows can be a lot; the newest this many are enough to browse.
+    const VIEWPORT_ALBUM_LIMIT = 1000;
+
+    /** Open the album of what is on the map now, starting at the newest photo. */
+    async function openViewportAlbum(bbox: Bbox, startMs: number | null, endMs: number | null) {
+        try {
+            const w = await queryAlbumIn(bbox, startMs, endMs, VIEWPORT_ALBUM_LIMIT);
+            if (w.items.length === 0) return { native: false, count: 0 };
+            const last = w.items.length - 1;
+            if (platformService.capabilities.nativePhotoViewer && iosPlatformService) {
+                const opened = iosPlatformService.openNativeViewer(
+                    w.items.map((p) => ({
+                        path: p.path,
+                        thumb: p.thumb,
+                        media_type: p.media_type,
+                        date_taken: p.date_taken,
+                    })),
+                    last,
+                );
+                if (opened) return { native: true, count: w.items.length };
+            }
+            // A fixed list: start/total say there is nothing more to fetch, so
+            // browsing never swaps it for a window of the whole album.
+            viewerPhotos = w.items.map(albumItemToPhoto);
+            viewerStart = 0;
+            viewerTotal = viewerPhotos.length;
+            previewPhoto = viewerPhotos[last];
+            history.pushState({ modal: "preview" }, "");
+            return { native: false, count: w.items.length };
+        } catch (e) {
+            console.error("[App] Failed to open viewport album", e);
         }
     }
 
@@ -422,7 +474,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView {refreshKey} {libraryCount} onOpenPreview={openPreview} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
+        <MapView {refreshKey} {libraryCount} onOpenPreview={openPreview} onOpenAlbum={openViewportAlbum} theme={effectiveTheme} {t} {locale} isSyncing={isScanning} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute left-4 z-[1001] flex flex-col gap-2" style="top: calc(max(47px, env(safe-area-inset-top, 0px)) + 12px)">

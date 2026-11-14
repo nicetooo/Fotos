@@ -126,6 +126,7 @@ export const ru: Translations = {
 
     map: {
         showAllPhotos: 'Показать все фото',
+        openAlbum: 'Browse photos in view',
         boxSelect: 'Выделение области',
         noGeotaggedPhotos: 'Нет фото с геометками',
         noGeotaggedPhotosDesc: 'Ни одна из импортированных фотографий не содержит данных GPS.',

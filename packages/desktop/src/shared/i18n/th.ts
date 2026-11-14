@@ -126,6 +126,7 @@ export const th: Translations = {
 
     map: {
         showAllPhotos: 'แสดงรูปภาพทั้งหมด',
+        openAlbum: 'Browse photos in view',
         boxSelect: 'เลือกพื้นที่',
         noGeotaggedPhotos: 'ไม่มีรูปภาพที่มีตำแหน่ง',
         noGeotaggedPhotosDesc: 'รูปภาพที่นำเข้าไม่มีข้อมูล GPS',

@@ -126,6 +126,7 @@ export const nl: Translations = {
 
     map: {
         showAllPhotos: 'Alle foto\'s tonen',
+        openAlbum: 'Browse photos in view',
         boxSelect: 'Rechthoekige selectie',
         noGeotaggedPhotos: 'Geen foto\'s met locatie',
         noGeotaggedPhotosDesc: 'Geen van uw geïmporteerde foto\'s bevat GPS-gegevens.',

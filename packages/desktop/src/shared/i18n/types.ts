@@ -158,6 +158,7 @@ export interface Translations {
     // Map
     map: {
         showAllPhotos: string;
+        openAlbum: string;
         boxSelect: string;
         noGeotaggedPhotos: string;
         noGeotaggedPhotosDesc: string;

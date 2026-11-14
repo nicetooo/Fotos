@@ -3,11 +3,16 @@
     import type { PhotoInfo } from "../../shared/types";
 
     interface Props {
-        photos: PhotoInfo[];
-        onPhotoClick: (photo: PhotoInfo) => void;
+        /** Number of entries in the list. */
+        total: number;
+        /** The entry at an index, or undefined while its page is loading. */
+        getItem: (index: number) => PhotoInfo | undefined;
+        /** Changes whenever `getItem` may return something new. */
+        version: number;
+        onPhotoClick: (photo: PhotoInfo, index: number) => void;
     }
 
-    let { photos, onPhotoClick }: Props = $props();
+    let { total, getItem, version, onPhotoClick }: Props = $props();
 
     /** Format video duration (ms -> "m:ss" or "h:mm:ss") */
     function formatDuration(ms?: number): string {
@@ -53,7 +58,7 @@
     let rowHeight = $derived(cellSize + GAP);
 
     // ── Total row count ──
-    let totalRows = $derived(Math.ceil(photos.length / columns));
+    let totalRows = $derived(Math.ceil(total / columns));
 
     // ── Total scrollable height ──
     let totalHeight = $derived(
@@ -75,12 +80,14 @@
 
     // ── Visible photos slice ──
     let visiblePhotos = $derived.by(() => {
+        version;
         const start = startRow * columns;
-        const end = (endRow + 1) * columns;
-        return photos.slice(start, end).map((photo, i) => ({
-            photo,
-            index: start + i,
-        }));
+        const end = Math.min(total, (endRow + 1) * columns);
+        const cells: { photo: PhotoInfo | undefined; index: number }[] = [];
+        for (let index = start; index < end; index++) {
+            cells.push({ photo: getItem(index), index });
+        }
+        return cells;
     });
 
     // ── Offset for the visible chunk ──
@@ -125,11 +132,14 @@
                 gap: {GAP}px;
             "
         >
-            {#each visiblePhotos as { photo } (photo.path)}
+            {#each visiblePhotos as { photo, index } (index)}
+                {#if !photo}
+                    <div class="rounded theme-bg-secondary" style="width: {cellSize}px; height: {cellSize}px;"></div>
+                {:else}
                 <button
                     class="relative overflow-hidden rounded theme-bg-secondary hover:ring-2 hover:ring-[var(--accent)] transition-all group"
                     style="width: {cellSize}px; height: {cellSize}px;"
-                    onclick={() => onPhotoClick(photo)}
+                    onclick={() => onPhotoClick(photo, index)}
                     title={photo.path.split("/").pop()}
                 >
                     {#if photo.thumb_path}
@@ -173,6 +183,7 @@
                         </div>
                     {/if}
                 </button>
+                {/if}
             {/each}
         </div>
     </div>
