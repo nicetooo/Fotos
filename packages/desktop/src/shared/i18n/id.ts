@@ -60,6 +60,8 @@ export const id: Translations = {
         locationAny: 'Location',
         locationWith: 'With location',
         locationWithout: 'No location',
+        fullScreen: 'Full screen',
+        halfScreen: 'Half screen',
     },
 
     preview: {
@@ -73,6 +75,7 @@ export const id: Translations = {
     },
 
     photoInfo: {
+        fileDate: 'File date',
         date: 'Tanggal',
         dimensions: 'Dimensi',
         fileSize: 'Ukuran file',

@@ -60,6 +60,8 @@ export const ko: Translations = {
         locationAny: '위치',
         locationWith: '위치 있음',
         locationWithout: '위치 없음',
+        fullScreen: '전체 화면',
+        halfScreen: '절반 화면',
     },
 
     preview: {
@@ -73,6 +75,7 @@ export const ko: Translations = {
     },
 
     photoInfo: {
+        fileDate: '파일 날짜',
         date: '날짜',
         dimensions: '크기',
         fileSize: '파일 크기',

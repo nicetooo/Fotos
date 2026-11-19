@@ -60,6 +60,8 @@ export const ja: Translations = {
         locationAny: '位置',
         locationWith: '位置あり',
         locationWithout: '位置なし',
+        fullScreen: '全画面',
+        halfScreen: '半分',
     },
 
     preview: {
@@ -73,6 +75,7 @@ export const ja: Translations = {
     },
 
     photoInfo: {
+        fileDate: 'ファイルの日時',
         date: '日付',
         dimensions: 'サイズ',
         fileSize: 'ファイルサイズ',

@@ -15,8 +15,6 @@
     // Shared utilities and types
     import {
         type PhotoInfo,
-        type SortBy,
-        type SortOrder,
         type Theme,
         type ImportStatus,
         formatFileSize,
@@ -29,8 +27,11 @@
         type AlbumWindow,
         type LibraryItem,
         queryLibrary,
+        libraryTimeline,
+        queryMap,
         type MediaFilter,
         type LocationFilter,
+        type MapViewState,
     } from "../shared/query";
     import { LibraryPager, type LibraryCounts } from "./library-pager";
 
@@ -42,6 +43,7 @@
     import ImagePreview from "./components/ImagePreview.svelte";
     import MapView from "./components/MapView.svelte";
     import MediaFilterButton from "./components/MediaFilterButton.svelte";
+    import LibraryTimeline from "./components/LibraryTimeline.svelte";
     import VirtualPhotoGrid from "./components/VirtualPhotoGrid.svelte";
 
     // Platform service received as prop from main.ts
@@ -77,7 +79,7 @@
     let libraryCount = $state(0);
 
     let libraryVersion = $state(0);
-    let libraryCounts = $state<LibraryCounts>({ total: 0, groupedTotal: 0, filesTotal: 0 });
+    let libraryCounts = $state<LibraryCounts>({ total: 0, groupedTotal: 0, filesTotal: 0, regionSpan: null });
     let libraryLoaded = $state(false);
     const pager = new LibraryPager(() => {
         libraryCounts = pager.counts;
@@ -97,28 +99,8 @@
     const ALBUM_RADIUS = 300;
     const ALBUM_EDGE = 60;
 
-    // Sort state with localStorage persistence
-    const SORT_BY_KEY = "footos-sort-by";
-    const SORT_ORDER_KEY = "footos-sort-order";
-    let sortBy = $state<SortBy>((() => {
-        if (typeof localStorage !== "undefined") {
-            const saved = localStorage.getItem(SORT_BY_KEY);
-            if (saved === "name" || saved === "date" || saved === "size" || saved === "dimensions") {
-                return saved;
-            }
-        }
-        return "date";
-    })());
-    let sortOrder = $state<SortOrder>((() => {
-        if (typeof localStorage !== "undefined") {
-            const saved = localStorage.getItem(SORT_ORDER_KEY);
-            if (saved === "asc" || saved === "desc") {
-                return saved;
-            }
-        }
-        return "desc";
-    })());
-
+    // The list is always in the order the photos were taken, oldest first:
+    // the direction of the timeline above it. There is nothing to choose.
     // Media type filter state with localStorage persistence
     const MEDIA_FILTER_KEY = "footos-media-filter";
     let mediaFilter = $state<MediaFilter>((() => {
@@ -131,17 +113,7 @@
         return "all";
     })());
 
-    // Save sort options and filter when changed
-    $effect(() => {
-        if (typeof localStorage !== "undefined") {
-            localStorage.setItem(SORT_BY_KEY, sortBy);
-        }
-    });
-    $effect(() => {
-        if (typeof localStorage !== "undefined") {
-            localStorage.setItem(SORT_ORDER_KEY, sortOrder);
-        }
-    });
+    // Save the filter when changed
     $effect(() => {
         if (typeof localStorage !== "undefined") {
             localStorage.setItem(MEDIA_FILTER_KEY, mediaFilter);
@@ -150,7 +122,6 @@
 
     let libraryImportMenuOpen = $state(false);
     let floatingImportMenuOpen = $state(false);
-    let sortMenuOpen = $state(false);
 
     // Theme state
     const THEME_KEY = "footos-theme";
@@ -210,7 +181,11 @@
     // The drawer queries only while it is open.
     $effect(() => {
         if (!showLibrary) return;
-        pager.setParams(sortBy, sortOrder === "desc", mediaFilter, locationFilter);
+        const span = listSpan;
+        const region = mapView
+            ? { ...mapView, spanStartMs: span?.start ?? null, spanEndMs: span?.end ?? null }
+            : null;
+        pager.setParams("date", false, mediaFilter, locationFilter, region);
     });
 
     // Photos / videos / Live Photos on the map and the timeline (the drawer
@@ -220,6 +195,43 @@
     function cycleLocationFilter() {
         locationFilter = locationFilter === "all" ? "located" : locationFilter === "located" ? "unlocated" : "all";
     }
+
+    // The drawer follows the map: it lists what is in view, plus photos
+    // without a position taken between the first and the last of those. With
+    // every placed photo in view it lists the whole library.
+    let mapView = $state.raw<MapViewState | null>(null);
+    let mapViewTimer: ReturnType<typeof setTimeout> | null = null;
+    function handleMapViewChange(view: MapViewState) {
+        // The time filter changes every frame while the timeline is dragged.
+        if (mapViewTimer) clearTimeout(mapViewTimer);
+        mapViewTimer = setTimeout(() => { mapViewTimer = null; mapView = view; }, 250);
+    }
+
+    // The timeline at the top of the list. It spans the whole library; what
+    // is selected on it starts as the span of the photos the map shows and
+    // can be dragged from there. A span the person set holds until the map
+    // moves or the drawer is opened again.
+    let libraryStamps = $state.raw<Float64Array>(new Float64Array(0));
+    let listSpan = $state.raw<{ start: number; end: number } | null>(null);
+    $effect(() => {
+        mapView;
+        showLibrary;
+        listSpan = null;
+    });
+    $effect(() => {
+        refreshKey;
+        if (!showLibrary) return;
+        libraryTimeline().then((stamps) => { libraryStamps = stamps; }).catch(() => {});
+    });
+
+    // The drawer takes half of the window or all of it; remembered.
+    const LIBRARY_WIDE_KEY = "footos.libraryWide";
+    let libraryWide = $state((() => {
+        try { return localStorage.getItem(LIBRARY_WIDE_KEY) === "1"; } catch { return false; }
+    })());
+    $effect(() => {
+        try { localStorage.setItem(LIBRARY_WIDE_KEY, libraryWide ? "1" : "0"); } catch { /* not essential */ }
+    });
 
     let mapMediaFilter = $state<MediaFilter>("all");
     async function setMapMediaFilter(next: MediaFilter) {
@@ -365,6 +377,13 @@
         showLibrary = !showLibrary;
     }
 
+    /** A file's date as local time, for photos that record no capture time. */
+    function formatFileTime(ms: number): string {
+        const d = new Date(ms);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
     async function handleShowInFinder(path: string, e: MouseEvent) {
         e.stopPropagation();
         try {
@@ -489,9 +508,13 @@
 
         // Drawer: first page, a far page, a re-sort.
         {
-            // Saved drawer settings must not decide what the check sees.
+            // Saved drawer settings must not decide what the check sees, nor
+            // where the camera steps above left the map: these checks are
+            // about the whole library.
             const savedFilter = mediaFilter;
             mediaFilter = "all";
+            if (mapViewTimer) clearTimeout(mapViewTimer);
+            mapView = null;
             const t0 = performance.now();
             showLibrary = true;
             const ready = await until(() => libraryLoaded && libraryCounts.total > 0);
@@ -502,28 +525,105 @@
                 body: { path: dbPath.replace(/footos\.db$/, "window-library.png") },
             }).catch(() => {});
             await sleep(600);
-            const cells = document.querySelectorAll("button[title] img").length;
+            const cells = document.querySelectorAll("button[data-hover-text] img").length;
+            // Pinching on the list changes the size of the thumbnails.
+            {
+                const list = document.querySelector<HTMLElement>("[data-library-drawer] .overflow-y-auto");
+                const cellWidth = () => document.querySelector<HTMLElement>("button[data-hover-text]")?.getBoundingClientRect().width ?? 0;
+                const pinch = async (scale: number) => {
+                    list?.dispatchEvent(new Event("gesturestart", { cancelable: true }));
+                    for (let i = 1; i <= 5; i++) {
+                        const step = new Event("gesturechange", { cancelable: true }) as Event & { scale?: number };
+                        step.scale = 1 + ((scale - 1) * i) / 5;
+                        list?.dispatchEvent(step);
+                        await sleep(30);
+                    }
+                    list?.dispatchEvent(new Event("gestureend", { cancelable: true }));
+                    await sleep(300);
+                };
+                // The size is remembered between runs and has limits: start
+                // from the middle, or a pinch may have nowhere to go.
+                await pinch(130 / Math.max(1, cellWidth()));
+                const normal = cellWidth();
+                await pinch(2);
+                const bigger = cellWidth();
+                await invoke("mac_map_command", {
+                    command: "mapDebugSnapshot",
+                    body: { path: dbPath.replace(/footos\.db$/, "window-library-pinch.png") },
+                }).catch(() => {});
+                await sleep(600);
+                await pinch(0.3);
+                const smaller = cellWidth();
+                // Back to where it started (the size is remembered between runs).
+                await pinch(normal / Math.max(1, smaller));
+                out.push({
+                    name: "desktop:library-pinch",
+                    // A window hidden behind others does not take the made-up
+                    // gestures; nothing can be concluded from such a run.
+                    ok: document.hidden || (normal > 0 && bigger > normal * 1.4 && smaller < bigger * 0.6),
+                    detail: {
+                        normal: Math.round(normal), pinchedOut: Math.round(bigger), pinchedIn: Math.round(smaller), restored: Math.round(cellWidth()),
+                        hidden: document.hidden, listFound: !!list, saved: localStorage.getItem("footos.libraryCellSize"),
+                        listWidth: Math.round(list?.getBoundingClientRect().width ?? 0),
+                    },
+                });
+            }
+
+            // Half screen / full screen.
+            {
+                const drawer = document.querySelector<HTMLElement>("[data-library-drawer]");
+                const toggle = document.querySelector<HTMLElement>("[data-library-wide]");
+                const was = libraryWide;
+                libraryWide = false;
+                await sleep(200);
+                const half = drawer?.getBoundingClientRect().width ?? 0;
+                toggle?.click();
+                await sleep(400);
+                const full = drawer?.getBoundingClientRect().width ?? 0;
+                await invoke("mac_map_command", {
+                    command: "mapDebugSnapshot",
+                    body: { path: dbPath.replace(/footos\.db$/, "window-library-full.png") },
+                }).catch(() => {});
+                await sleep(600);
+                toggle?.click();
+                await sleep(300);
+                const back = drawer?.getBoundingClientRect().width ?? 0;
+                libraryWide = was;
+                out.push({
+                    name: "desktop:library-width",
+                    ok: half > 0 && Math.abs(full - window.innerWidth) < 2 && Math.abs(back - half) < 2 && half < full,
+                    detail: { half: Math.round(half), full: Math.round(full), window: window.innerWidth },
+                });
+            }
+
+            // Hovering a cell shows, on the cell, when the photo was taken.
+            const secondCell = document.querySelectorAll<HTMLElement>("button[data-hover-text]")[1];
+            secondCell?.dispatchEvent(new MouseEvent("mouseenter"));
+            await sleep(150);
+            const hoverTitle = document.querySelector("[data-cell-time]")?.textContent?.trim() ?? "";
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-cell-hover.png") },
+            }).catch(() => {});
+            await sleep(600);
+            secondCell?.dispatchEvent(new MouseEvent("mouseleave"));
             const total = libraryCounts.total;
             const t1 = performance.now();
             const last = await pager.item(total - 1);
             const farMs = Math.round(performance.now() - t1);
-            const before = sortBy;
+            // Always in the order the photos were taken, oldest first.
             const t2 = performance.now();
-            sortBy = "name";
-            await sleep(0);
-            const a = await pager.item(0);
-            const b = await pager.item(1);
+            const early = await pager.item(Math.floor(total / 3));
+            const late = await pager.item(Math.floor((2 * total) / 3));
             const sortMs = Math.round(performance.now() - t2);
-            const name = (p?: PhotoInfo) => (p?.path.split("/").pop() || "").toLowerCase();
-            const sorted = sortOrder === "desc" ? name(a) >= name(b) : name(a) <= name(b);
-            sortBy = before;
-            await sleep(0);
-            await pager.item(0);
+            const when = (p?: PhotoInfo) => (p as { takenMs?: number | null } | undefined)?.takenMs ?? null;
+            const sorted = when(early) !== null && when(late) !== null && when(early)! <= when(late)!;
             restoreFilter = () => { mediaFilter = savedFilter; };
             out.push({
                 name: "desktop:library",
-                ok: ready && cells > 0 && !!last && sorted && total === libraryCounts.groupedTotal,
-                detail: { total, files: libraryCounts.filesTotal, firstPageMs: firstMs, farPageMs: farMs, resortMs: sortMs, cellsRendered: cells },
+                ok: ready && cells > 0 && !!last && sorted && total === libraryCounts.groupedTotal
+                    && hoverTitle !== "",
+                detail: { total, files: libraryCounts.filesTotal, firstPageMs: firstMs, farPageMs: farMs, resortMs: sortMs, cellsRendered: cells, hoverTitle },
             });
         }
 
@@ -568,6 +668,32 @@
             out.push({ name: "desktop:viewer-album", ok, detail });
         }
 
+        // Photo details: the time is shown, the folder button lives in the
+        // panel, and there is no way to delete the original file from here.
+        {
+            showLibrary = true;
+            await until(() => libraryLoaded && libraryCounts.total > 0);
+            const index = Math.floor(libraryCounts.total / 2);
+            const item = await pager.item(index);
+            if (item) await openFromLibrary(item, index);
+            await until(() => !!document.querySelector("[data-show-in-finder]"), 3000);
+            await sleep(400);
+            const time = document.querySelector("[data-detail-time]")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            const folderButton = !!document.querySelector("[data-show-in-finder]");
+            const deleteOriginal = [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === t.delete.deleteOriginal);
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-detail.png") },
+            }).catch(() => {});
+            await sleep(600);
+            closePreview();
+            out.push({
+                name: "desktop:photo-details",
+                ok: time !== "" && folderButton && !deleteOriginal,
+                detail: { time, folderButtonInPanel: folderButton, deleteOriginalButton: deleteOriginal },
+            });
+        }
+
         // Position filter in the drawer: with, without, and back to everything.
         {
             closePreview();
@@ -591,10 +717,136 @@
             cycleLocationFilter();
             const unlocated = await settle(located);
             cycleLocationFilter();
-            await settle(unlocated);
+            const restored = await settle(unlocated);
+            // The drawer follows the map: zoomed to the densest spot it lists
+            // fewer entries than the whole library; with everything in view
+            // again, all of them.
+            let regionCount = -1;
+            let backToAll = -1;
+            let timelineWhileDragging = -1;
+            let timelineRanges: string[] = [];
+            let presetCount = -1;
+            let presetRange = "";
+            let yearRange = "";
+            let timelineGestures = { width30d: 0, afterPinchOut: 0, movedBy: 0, widthAfterMove: 0, rangeChanged: false };
+            let yearSelected = false;
+            {
+                const world = await queryMap({ west: -180, south: -85, east: 180, north: 85 }, 1, null, null);
+                const densest = [...world.features].sort((x, y) => y.count - x.count)[0];
+                const theMap = (window as any).__footosMap;
+                if (densest && theMap) {
+                    theMap.easeTo({ center: [densest.lon, densest.lat], zoom: 7, duration: 0 });
+                    regionCount = await settle(all);
+                    await invoke("mac_map_command", {
+                        command: "mapDebugSnapshot",
+                        body: { path: dbPath.replace(/footos\.db$/, "window-region.png") },
+                    }).catch(() => {});
+                    await sleep(600);
+                    // The timeline on top of the list: it selects the span of
+                    // what the map shows; dragging an edge filters the list
+                    // while the mouse is still down.
+                    const rangeBefore = document.querySelector("[data-library-timeline-range]")?.textContent ?? "";
+                    const handle = document.querySelector<HTMLElement>("[data-library-timeline] [data-handle='start']");
+                    const track = handle?.parentElement?.getBoundingClientRect();
+                    if (handle && track) {
+                        const at = handle.getBoundingClientRect();
+                        const x0 = at.left + at.width / 2;
+                        const y = at.top + at.height / 2;
+                        handle.dispatchEvent(new MouseEvent("mousedown", { clientX: x0, clientY: y, bubbles: true }));
+                        const target = x0 + (track.right - x0) * 0.5;
+                        for (let i = 1; i <= 10; i++) {
+                            window.dispatchEvent(new MouseEvent("mousemove", { clientX: x0 + ((target - x0) * i) / 10, clientY: y, bubbles: true }));
+                            await sleep(30);
+                        }
+                        timelineWhileDragging = await settle(regionCount);
+                        await invoke("mac_map_command", {
+                            command: "mapDebugSnapshot",
+                            body: { path: dbPath.replace(/footos\.db$/, "window-list-timeline.png") },
+                        }).catch(() => {});
+                        await sleep(600);
+                        window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                    }
+                    timelineRanges = [rangeBefore, document.querySelector("[data-library-timeline-range]")?.textContent ?? ""];
+                    // Two fingers on the timeline: a pinch changes the length
+                    // of the selection, a sideways swipe moves it.
+                    {
+                        const strip = document.querySelector<HTMLElement>("[data-library-timeline]");
+                        const rangeText = () => document.querySelector("[data-library-timeline-range]")?.textContent ?? "";
+                        const width = () => {
+                            const h = [...document.querySelectorAll<HTMLElement>("[data-library-timeline] [data-handle]")];
+                            return h.length === 2 ? h[1].getBoundingClientRect().left - h[0].getBoundingClientRect().left : 0;
+                        };
+                        const left = () => document.querySelector<HTMLElement>("[data-library-timeline] [data-handle='start']")?.getBoundingClientRect().left ?? 0;
+                        document.querySelector<HTMLElement>("[data-span-preset='30d']")?.click();
+                        await sleep(300);
+                        const w0 = width();
+                        strip?.dispatchEvent(new Event("gesturestart", { cancelable: true }));
+                        const grow = new Event("gesturechange", { cancelable: true }) as Event & { scale?: number };
+                        grow.scale = 3;
+                        strip?.dispatchEvent(grow);
+                        strip?.dispatchEvent(new Event("gestureend", { cancelable: true }));
+                        await sleep(300);
+                        const w1 = width();
+                        const x1 = left();
+                        const r1 = rangeText();
+                        strip?.dispatchEvent(new WheelEvent("wheel", { deltaX: 80, deltaY: 0, cancelable: true, bubbles: true }));
+                        await sleep(300);
+                        timelineGestures = { width30d: Math.round(w0), afterPinchOut: Math.round(w1), movedBy: Math.round(left() - x1), widthAfterMove: Math.round(width()), rangeChanged: rangeText() !== r1 };
+                    }
+
+                    // One year around the middle of the selection.
+                    document.querySelector<HTMLElement>("[data-span-preset='1y']")?.click();
+                    await sleep(500);
+                    yearRange = document.querySelector("[data-library-timeline-range]")?.textContent ?? "";
+                    yearSelected = !!document.querySelector("[data-span-preset='1y'].bg-\\[var\\(--accent\\)\\]");
+                    await invoke("mac_map_command", {
+                        command: "mapDebugSnapshot",
+                        body: { path: dbPath.replace(/footos\.db$/, "window-list-year.png") },
+                    }).catch(() => {});
+                    await sleep(600);
+                    // A quick span: thirty days around the middle of the selection.
+                    document.querySelector<HTMLElement>("[data-span-preset='30d']")?.click();
+                    presetCount = await settle(libraryCounts.total);
+                    presetRange = document.querySelector("[data-library-timeline-range]")?.textContent ?? "";
+                    await invoke("mac_map_command", {
+                        command: "mapDebugSnapshot",
+                        body: { path: dbPath.replace(/footos\.db$/, "window-list-preset.png") },
+                    }).catch(() => {});
+                    await sleep(600);
+                    const narrowed = libraryCounts.total;
+                    theMap.easeTo({ center: [0, 20], zoom: 0, duration: 0 });
+                    backToAll = await settle(narrowed);
+                }
+            }
+            out.push({
+                name: "desktop:library-timeline",
+                ok: timelineWhileDragging > 0 && timelineWhileDragging < regionCount
+                    && timelineRanges.length === 2 && timelineRanges[0] !== "" && timelineRanges[0] !== timelineRanges[1],
+                detail: { inMapArea: regionCount, whileDragging: timelineWhileDragging, selectedBefore: timelineRanges[0], selectedAfter: timelineRanges[1] },
+            });
+            out.push({
+                name: "desktop:library-timeline-gestures",
+                ok: timelineGestures.width30d > 0 && timelineGestures.afterPinchOut > timelineGestures.width30d * 2
+                    && timelineGestures.movedBy > 40 && Math.abs(timelineGestures.widthAfterMove - timelineGestures.afterPinchOut) <= 2
+                    && timelineGestures.rangeChanged,
+                detail: timelineGestures,
+            });
+            out.push({
+                name: "desktop:library-timeline-preset",
+                // How many photos a span holds depends on where the map
+                // happens to be; what must hold is that the selection changed
+                // and the one-year button took.
+                ok: presetCount > 0 && presetRange !== "" && presetRange !== timelineRanges[1] && yearSelected && yearRange !== presetRange,
+                detail: { after30d: presetCount, selected: presetRange, oneYear: yearRange, oneYearHighlighted: yearSelected },
+            });
+            out.push({
+                name: "desktop:library-follows-map",
+                ok: regionCount > 0 && regionCount < all && backToAll >= regionCount,
+                detail: { all, zoomedIn: regionCount, zoomedOut: backToAll },
+            });
             out.push({
                 name: "desktop:location-filter",
-                ok: located > 0 && unlocated > 0 && located + unlocated === all && libraryCounts.total === all,
+                ok: located > 0 && unlocated > 0 && located + unlocated === all && restored === all,
                 detail: { all, located, unlocated },
             });
         }
@@ -637,6 +889,48 @@
                 await invoke("mac_map_command", { command: "mapDebugProbeViews", body: {} }).catch(() => {});
                 await sleep(300);
                 out.push({ name: "desktop:pointer-over-map", ok: !!area, detail: { moves: 25 } });
+            }
+
+            // Hovering a marker previews a single photo, never a cluster.
+            {
+                // The busiest spot at street level: clusters and single photos side by side.
+                const world = await queryMap({ west: -180, south: -85, east: 180, north: 85 }, 14.5, null, null);
+                const densest = [...world.features].sort((x, y) => y.count - x.count)[0];
+                const theMap = (window as any).__footosMap;
+                const native = (window as any).__footosNativeMap;
+                let onCluster: boolean | null = null;
+                let onSingle: boolean | null = null;
+                if (densest && theMap && native) {
+                    theMap.easeTo({ center: [densest.lon, densest.lat], zoom: 14.5, duration: 0 });
+                    await sleep(1500);
+                    // Well inside what the map has loaded at this zoom.
+                    const d = 0.012;
+                    const near = await queryMap(
+                        { west: densest.lon - d, south: densest.lat - d, east: densest.lon + d, north: densest.lat + d },
+                        14.5, null, null,
+                    );
+                    const cluster = near.features.find((f) => f.count > 1);
+                    const single = near.features.find((f) => f.count === 1);
+                    const shown = () => !!document.querySelector(".hover");
+                    if (cluster) {
+                        native.onHover({ key: cluster.key, x: 400, y: 300 });
+                        await sleep(150);
+                        onCluster = shown();
+                        native.onHoverEnd({ key: cluster.key });
+                    }
+                    if (single) {
+                        native.onHover({ key: single.key, x: 400, y: 300 });
+                        await sleep(150);
+                        onSingle = shown();
+                        native.onHoverEnd({ key: single.key });
+                        await sleep(100);
+                    }
+                }
+                out.push({
+                    name: "desktop:hover-preview",
+                    ok: onCluster === false && onSingle === true,
+                    detail: { previewOnCluster: onCluster, previewOnSingle: onSingle },
+                });
             }
 
             // The import menu drops out of the narrow button column: a click
@@ -696,7 +990,7 @@
             let usable = false;
             try {
                 after = await photoCount();
-                await queryLibrary("date", true, "all", "all", 0, 10);
+                await queryLibrary("date", true, "all", "all", null, 0, 10);
                 usable = true;
             } catch (e) {
                 failed = failed || String(e);
@@ -878,7 +1172,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView {refreshKey} {libraryCount} onOpenPreview={openFromMap} onOpenLibrary={handleLibrary} theme={effectiveTheme} {t} {locale} />
+        <MapView {refreshKey} {libraryCount} onOpenPreview={openFromMap} onOpenLibrary={handleLibrary} onViewChange={handleMapViewChange} theme={effectiveTheme} {t} {locale} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
@@ -959,79 +1253,45 @@
                 class="fixed inset-0 bg-black/30 z-[1002]"
                 onclick={() => showLibrary = false}
             ></div>
-            <div class="absolute top-0 right-0 bottom-0 w-1/2 min-w-[500px] theme-bg-overlay backdrop-blur-md border-l theme-border z-[1003] flex flex-col">
+            <div class="absolute top-0 right-0 bottom-0 {libraryWide ? 'w-full' : 'w-1/2 min-w-[500px]'} theme-bg-overlay backdrop-blur-md border-l theme-border z-[1003] flex flex-col" data-library-drawer>
                 <!-- Header -->
                 <div class="flex items-center justify-between px-4 py-3 border-b theme-border">
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-images theme-text-muted text-sm"></i>
                         <span class="theme-text-primary font-medium">
                             {libraryCounts.total} {t.nav.photos}
-                            {#if (mediaFilter !== 'all' || locationFilter !== 'all') && libraryCounts.total !== libraryCounts.groupedTotal}
+                            {#if libraryCounts.total !== libraryCounts.groupedTotal}
                                 <span class="theme-text-muted text-xs">/ {libraryCounts.groupedTotal}</span>
                             {:else if libraryCounts.total !== libraryCounts.filesTotal}
                                 <span class="theme-text-muted text-xs">({libraryCounts.filesTotal} {t.nav.files})</span>
                             {/if}
                         </span>
                     </div>
-                    <button
-                        onclick={() => showLibrary = false}
-                        class="p-1.5 rounded-lg hover:theme-bg-secondary theme-text-muted hover:theme-text-primary transition-colors"
-                    title={t.common.close}
-                >
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
+                    <div class="flex items-center gap-1">
+                        <!-- Half of the window, or all of it -->
+                        <button
+                            onclick={() => libraryWide = !libraryWide}
+                            data-library-wide={libraryWide}
+                            class="p-1.5 rounded-lg hover:theme-bg-secondary theme-text-muted hover:theme-text-primary transition-colors"
+                            title={libraryWide ? t.library.halfScreen : t.library.fullScreen}
+                            aria-label={libraryWide ? t.library.halfScreen : t.library.fullScreen}
+                        >
+                            <i class="fa-solid {libraryWide ? 'fa-compress' : 'fa-expand'}"></i>
+                        </button>
+                        <button
+                            onclick={() => showLibrary = false}
+                            class="p-1.5 rounded-lg hover:theme-bg-secondary theme-text-muted hover:theme-text-primary transition-colors"
+                            title={t.common.close}
+                        >
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Toolbar -->
                 <div class="flex items-center gap-1.5 px-3 py-2 border-b theme-border">
-                    <!-- Sort dropdown -->
-                    <div class="relative">
-                        <button
-                            onclick={() => sortMenuOpen = !sortMenuOpen}
-                            class="h-7 px-2.5 rounded theme-bg-tertiary theme-text-primary text-xs flex items-center gap-1.5 hover:theme-bg-secondary"
-                        >
-                            <span>{sortBy === 'date' ? t.library.sortDate : sortBy === 'name' ? t.library.sortName : t.library.sortSize}</span>
-                            <i class="fa-solid fa-chevron-down text-[10px] theme-text-muted"></i>
-                        </button>
-                        {#if sortMenuOpen}
-                            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                            <div
-                                class="fixed inset-0 z-40"
-                                onclick={() => sortMenuOpen = false}
-                            ></div>
-                            <div class="absolute left-0 top-full mt-1 py-1 theme-bg-secondary border theme-border rounded shadow-lg z-50 min-w-[80px]">
-                                <button
-                                    onclick={() => { sortBy = 'date'; sortMenuOpen = false; }}
-                                    class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'date' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
-                                >
-                                    {t.library.sortDate}
-                                </button>
-                                <button
-                                    onclick={() => { sortBy = 'name'; sortMenuOpen = false; }}
-                                    class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'name' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
-                                >
-                                    {t.library.sortName}
-                                </button>
-                                <button
-                                    onclick={() => { sortBy = 'dimensions'; sortMenuOpen = false; }}
-                                    class="w-full px-3 py-1.5 text-left text-xs flex items-center gap-2 {sortBy === 'dimensions' ? 'theme-text-primary bg-[var(--accent)]/20' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-tertiary'}"
-                                >
-                                    {t.library.sortSize}
-                                </button>
-                            </div>
-                        {/if}
-                    </div>
-
-                    <button
-                        onclick={() => (sortOrder = sortOrder === "asc" ? "desc" : "asc")}
-                        class="w-7 h-7 rounded theme-bg-tertiary theme-text-secondary hover:theme-text-primary flex items-center justify-center"
-                        title={sortOrder === "asc" ? t.library.ascending : t.library.descending}
-                    >
-                        <i class="fa-solid {sortOrder === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down'} text-xs"></i>
-                    </button>
-
                     <!-- Media type filter pills -->
-                    <div class="flex items-center gap-0.5 ml-1.5 px-0.5 py-0.5 rounded theme-bg-primary">
+                    <div class="flex items-center gap-0.5 px-0.5 py-0.5 rounded theme-bg-primary">
                         <button
                             onclick={() => mediaFilter = 'all'}
                             class="h-[22px] px-2 rounded text-[11px] transition-all {mediaFilter === 'all'
@@ -1126,6 +1386,16 @@
                         {/if}
                     </div>
                 </div>
+
+                <!-- Timeline of the whole library; the selection filters the list -->
+                <LibraryTimeline
+                    stamps={libraryStamps}
+                    start={listSpan?.start ?? libraryCounts.regionSpan?.[0] ?? null}
+                    end={listSpan?.end ?? libraryCounts.regionSpan?.[1] ?? null}
+                    onChange={(start, end) => { listSpan = { start, end }; }}
+                    {t}
+                    {locale}
+                />
 
                 <!-- Photo Grid (Virtual Scrolling) -->
                 {#if libraryCounts.total > 0}
@@ -1236,13 +1506,6 @@
             </div>
             <div class="flex items-center gap-2">
                 <button
-                    onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
-                    class="p-2 rounded hover:theme-bg-secondary theme-text-muted hover:theme-text-primary"
-                    title={t.preview.showInFinder}
-                >
-                    <i class="fa-solid fa-folder-open text-sm"></i>
-                </button>
-                <button
                     onclick={closePreview}
                     class="p-2 rounded hover:theme-bg-secondary theme-text-muted hover:theme-text-primary"
                 >
@@ -1293,9 +1556,15 @@
         >
             <div class="space-y-3">
                 {#if previewPhoto.metadata.date_taken}
-                    <div>
+                    <div data-detail-time>
                         <p class="theme-text-muted text-xs">{t.photoInfo.date}</p>
                         <p class="theme-text-primary font-mono text-xs">{previewPhoto.metadata.date_taken}</p>
+                    </div>
+                {:else if previewPhoto.takenMs}
+                    <!-- No capture time in the file: its own date stands in. -->
+                    <div data-detail-time>
+                        <p class="theme-text-muted text-xs">{t.photoInfo.fileDate}</p>
+                        <p class="theme-text-primary font-mono text-xs">{formatFileTime(previewPhoto.takenMs)}</p>
                     </div>
                 {/if}
 
@@ -1400,6 +1669,14 @@
                 <div>
                     <p class="theme-text-muted text-xs">{t.photoInfo.path}</p>
                     <p class="theme-text-primary text-xs font-mono break-all">{previewPhoto.path}</p>
+                    <button
+                        onclick={(e) => handleShowInFinder(previewPhoto!.path, e)}
+                        data-show-in-finder
+                        class="mt-2 w-full px-3 py-2 rounded text-xs theme-bg-tertiary theme-text-secondary hover:theme-text-primary flex items-center gap-2"
+                    >
+                        <i class="fa-solid fa-folder-open"></i>
+                        {t.preview.showInFinder}
+                    </button>
                 </div>
 
                 <!-- Delete actions -->
@@ -1413,14 +1690,6 @@
                         >
                             <i class="fa-solid fa-database"></i>
                             {t.delete.removeFromLibrary}
-                        </button>
-                        <button
-                            onclick={(e) => { e.stopPropagation(); openDeleteConfirm('complete'); }}
-                            disabled={isDeleting}
-                            class="w-full px-3 py-2 rounded text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            <i class="fa-solid fa-trash"></i>
-                            {t.delete.deleteOriginal}
                         </button>
                     </div>
                 </div>

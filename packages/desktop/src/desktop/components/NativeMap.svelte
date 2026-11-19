@@ -28,6 +28,7 @@
         libraryCount = 0,
         onOpenPreview,
         onOpenLibrary,
+        onViewChange,
         theme = "dark",
         command,
         t,
@@ -37,6 +38,8 @@
         libraryCount?: number;
         onOpenPreview?: (item: { id: number; path: string }) => void;
         onOpenLibrary?: () => void;
+        /** The viewport or the time filter changed (reported when the map settles). */
+        onViewChange?: (view: { bbox: Bbox; startMs: number | null; endMs: number | null }) => void;
         theme?: "dark" | "light";
         /** Sends one map command to the native side. */
         command: (name: string, payload?: Record<string, unknown>) => void;
@@ -76,6 +79,12 @@
         timeFilterEnd = end;
         refresh();
         if (start === null) scheduleTimelineSync();
+        reportView();
+    }
+
+    function reportView() {
+        if (!region) return;
+        onViewChange?.({ bbox: queryBox(region, 0), startMs: timeFilterStart, endMs: timeFilterEnd });
     }
 
     function formatTimeRange(start: number | null, end: number | null): string {
@@ -221,6 +230,7 @@
         } else {
             scheduleTimelineSync();
             moveEndListeners.forEach((fn) => fn());
+            reportView();
         }
     }
 
@@ -323,7 +333,9 @@
 
     function onHover(e: { key: string; x: number; y: number }) {
         const f = featureByKey.get(e.key);
-        if (!f || boxMode) return;
+        // Single photos only: a cluster's picture is one of many, and a big
+        // preview of it says little about what is in the cluster.
+        if (!f || f.count > 1 || boxMode) return;
         hover = { key: e.key, x: e.x, y: e.y, path: f.path, thumb: f.thumb, date: "", hasRaw: false };
         // Thumbnail and name come with the feature; date and RAW badge follow.
         photoDetail(f.id).then((detail) => {

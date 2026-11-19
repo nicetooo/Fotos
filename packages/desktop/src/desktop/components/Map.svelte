@@ -18,7 +18,9 @@
     import type { Translations } from "../../shared/i18n/types";
     import type { Locale } from "../../shared/i18n/types";
 
-    let { refreshKey = 0, libraryCount = 0, onOpenPreview, theme = "dark", tileConfig, t, locale = 'en' as Locale } = $props<{
+    let { refreshKey = 0, libraryCount = 0, onOpenPreview, onViewChange, theme = "dark", tileConfig, t, locale = 'en' as Locale } = $props<{
+        /** The viewport or the time filter changed (reported when the map settles). */
+        onViewChange?: (view: { bbox: Bbox; startMs: number | null; endMs: number | null }) => void;
         /** Bumped whenever the library changes (import progress, delete, clear). */
         refreshKey?: number;
         /** Items in the whole library, geotagged or not. */
@@ -76,6 +78,17 @@
         timeFilterEnd = end;
         refresh();
         if (start === null) scheduleTimelineSync();
+        reportView();
+    }
+
+    function reportView() {
+        if (!map) return;
+        const b = map.getBounds();
+        onViewChange?.({
+            bbox: paddedBbox(b.getWest(), b.getSouth(), b.getEast(), b.getNorth(), 0),
+            startMs: timeFilterStart,
+            endMs: timeFilterEnd,
+        });
     }
 
     function formatTimeRange(start: number | null, end: number | null): string {
@@ -407,6 +420,7 @@
     function handleMoveEnd() {
         refresh();
         scheduleTimelineSync();
+        reportView();
     }
 
     // ============================================================

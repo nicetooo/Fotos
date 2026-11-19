@@ -352,7 +352,7 @@ iOS 的底图是系统地图（大陆上架要求合规底图；OSM 的边界画
 - 只在照片**第一次出现**时自动 `fitBounds`；后续导入不得抢镜头
 - ❌ 禁止通过 invoke 返回全量照片对象（iOS WKWebView 上 5k+ 对象约 8s）。需要批量数值时用 `tauri::ipc::Response` 返回原始字节
 - 桌面端与移动端共用同一套地图/时间轴数据流（`query_map` 单飞、`query_timeline`、单向同步）。桌面端特有的部分：
-  - **图库抽屉**：RAW+JPEG 分组、媒体类型过滤、排序都在 Rust（`core/src/query/library.rs` 的 `LibraryView`）。前端用 `query_library(sort_by, descending, media_filter, located, offset, limit)` 按页取（`located`：只看有定位 / 只看无定位 / 不限，抽屉工具栏里的三态按钮）（`desktop/library-pager.ts`，每页 200，最多缓存 30 页），抽屉关闭时不查询
+  - **图库抽屉**：RAW+JPEG 分组、媒体类型过滤、排序都在 Rust（`core/src/query/library.rs` 的 `LibraryView`）。前端用 `query_library(sort_by, descending, media_filter, located, offset, limit)` 按页取（`located`：只看有定位 / 只看无定位 / 不限，抽屉工具栏里的三态按钮）。抽屉列表**始终跟随地图**（没有开关）：`region` = 地图视野 + 时间过滤，只列视野内有定位的，以及拍摄时间落在它们首尾之间的无定位照片；视野包含全部有定位的照片且没有时间过滤时显示整个库；地图组件用 `onViewChange` 上报视野。没有拍摄时间的条目用文件修改时间顶替（`LibraryItem.taken_ms`），否则微信/QQ 转存的照片在时间轴上没有位置、任何时间范围都选不中。抽屉顶部有时间轴（`LibraryTimeline.svelte`）：轴长是全库时间范围（`library_timeline`），选区默认是视野内照片的时间区间（`region_span`），拖动后作为列表自己的时间范围实时筛选（`span_start_ms / span_end_ms`），地图移动或重新打开抽屉时回到默认（`desktop/library-pager.ts`，每页 200，最多缓存 30 页），抽屉关闭时不查询
   - **RAW 配对规则**：同目录 + 同文件名（不含扩展名）。只看文件名会把不同目录的同名文件配成一对
   - **查看器**：从抽屉打开按抽屉顺序翻；从地图打开走 `query_album` 窗口。单张详情用 `photo_detail(id)`（RAW 行解析到它所属的 JPEG）
   - **框选**：`query_timeline(框 bbox)` 取首尾时间交给时间轴，不在前端遍历照片

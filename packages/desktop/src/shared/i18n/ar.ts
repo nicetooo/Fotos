@@ -60,6 +60,8 @@ export const ar: Translations = {
         locationAny: 'Location',
         locationWith: 'With location',
         locationWithout: 'No location',
+        fullScreen: 'Full screen',
+        halfScreen: 'Half screen',
     },
 
     preview: {
@@ -73,6 +75,7 @@ export const ar: Translations = {
     },
 
     photoInfo: {
+        fileDate: 'File date',
         date: 'التاريخ',
         dimensions: 'الأبعاد',
         fileSize: 'حجم الملف',

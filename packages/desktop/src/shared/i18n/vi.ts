@@ -60,6 +60,8 @@ export const vi: Translations = {
         locationAny: 'Location',
         locationWith: 'With location',
         locationWithout: 'No location',
+        fullScreen: 'Full screen',
+        halfScreen: 'Half screen',
     },
 
     preview: {
@@ -73,6 +75,7 @@ export const vi: Translations = {
     },
 
     photoInfo: {
+        fileDate: 'File date',
         date: 'Ngày',
         dimensions: 'Kích thước',
         fileSize: 'Kích thước tệp',

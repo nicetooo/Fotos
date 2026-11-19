@@ -92,6 +92,15 @@ export async function queryTimeline(bbox: Bbox | null): Promise<Float64Array> {
     return new Float64Array(new Uint8Array(raw).buffer);
 }
 
+/** Ascending wall-clock timestamps of every dated item in the library list. */
+export async function libraryTimeline(): Promise<Float64Array> {
+    const raw = await invoke<ArrayBuffer | number[]>("library_timeline");
+    if (raw instanceof ArrayBuffer) {
+        return new Float64Array(raw.slice(0, raw.byteLength - (raw.byteLength % 8)));
+    }
+    return new Float64Array(new Uint8Array(raw).buffer);
+}
+
 export function queryAlbum(centerId: number | null, radius: number): Promise<AlbumWindow> {
     return invoke("query_album", { centerId, radius });
 }
@@ -108,12 +117,29 @@ export function queryAlbumIn(
 
 export type MediaFilter = "all" | "photo" | "video" | "live_photo";
 
+/** What the map is showing: its viewport and, when set, its time filter. */
+export interface MapViewState {
+    bbox: Bbox;
+    startMs: number | null;
+    endMs: number | null;
+}
+
+/** What the library list is limited to: the map's view, and the list's own span of time when it has one. */
+export interface LibraryRegion extends MapViewState {
+    spanStartMs: number | null;
+    spanEndMs: number | null;
+}
+
 /** Whether an item has a position: any, only with one, only without. */
 export type LocationFilter = "all" | "located" | "unlocated";
 
 /** A library entry: a file with its paired RAW folded in. */
 export interface LibraryItem extends PhotoInfo {
     rawId?: number | null;
+    /** Wall-clock ms: the capture time, or the file's date when it records none. */
+    takenMs?: number | null;
+    /** `takenMs` is the file's date, not a capture time. */
+    takenFromFile?: boolean;
     rawSize?: number;
 }
 
@@ -126,6 +152,8 @@ export interface LibraryPage {
     files_total: number;
     offset: number;
     items: LibraryItem[];
+    /** `[start, end]` (ms) covered by the placed items the map shows. */
+    region_span: [number, number] | null;
 }
 
 /** One page of the library list; grouping, filtering and sorting happen in Rust. */
@@ -134,6 +162,8 @@ export function queryLibrary(
     descending: boolean,
     mediaFilter: MediaFilter,
     locationFilter: LocationFilter,
+    /** Only what the map is showing, plus unplaced items from the same span of time. */
+    region: LibraryRegion | null,
     offset: number,
     limit: number,
 ): Promise<LibraryPage> {
@@ -142,6 +172,7 @@ export function queryLibrary(
         descending,
         mediaFilter: mediaFilter === "all" ? null : mediaFilter,
         located: locationFilter === "all" ? null : locationFilter === "located",
+        region,
         offset,
         limit,
     });

@@ -60,6 +60,8 @@ export const zh: Translations = {
         locationAny: '定位',
         locationWith: '有定位',
         locationWithout: '无定位',
+        fullScreen: '全屏',
+        halfScreen: '半屏',
     },
 
     preview: {
@@ -73,6 +75,7 @@ export const zh: Translations = {
     },
 
     photoInfo: {
+        fileDate: '文件时间',
         date: '日期',
         dimensions: '尺寸',
         fileSize: '文件大小',

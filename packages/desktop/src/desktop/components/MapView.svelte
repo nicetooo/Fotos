@@ -4,13 +4,15 @@
     import NativeMap from "./NativeMap.svelte";
     import { getPlatformService, type MapTileConfig } from "../../lib/platform";
     import type { Translations, Locale } from "../../shared/i18n/types";
+    import type { MapViewState } from "../../shared/query";
 
-    let { refreshKey = 0, libraryCount = 0, onOpenPreview, onOpenLibrary, theme = "dark", t, locale = 'en' as Locale } = $props<{
+    let { refreshKey = 0, libraryCount = 0, onOpenPreview, onOpenLibrary, onViewChange, theme = "dark", t, locale = 'en' as Locale } = $props<{
         refreshKey?: number;
         libraryCount?: number;
         onOpenPreview?: (item: { id: number; path: string }) => void;
         /** Opens the library drawer (the system map shows the button for it). */
         onOpenLibrary?: () => void;
+        onViewChange?: (view: MapViewState) => void;
         theme?: "dark" | "light";
         t: Translations;
         locale?: Locale;
@@ -34,9 +36,9 @@
 </script>
 
 {#if ready && nativeCommand}
-    <NativeMap {refreshKey} {libraryCount} {onOpenPreview} {onOpenLibrary} {theme} command={nativeCommand} {t} {locale} />
+    <NativeMap {refreshKey} {libraryCount} {onOpenPreview} {onOpenLibrary} {onViewChange} {theme} command={nativeCommand} {t} {locale} />
 {:else if ready}
-    <Map {refreshKey} {libraryCount} {onOpenPreview} {theme} tileConfig={tileConfig ?? undefined} {t} {locale} />
+    <Map {refreshKey} {libraryCount} {onOpenPreview} {onViewChange} {theme} tileConfig={tileConfig ?? undefined} {t} {locale} />
 {:else}
     <div class="w-full h-full flex items-center justify-center theme-bg-secondary">
         <i class="fa-solid fa-spinner fa-spin text-2xl theme-text-muted"></i>

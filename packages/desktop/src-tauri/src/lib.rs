@@ -31,7 +31,14 @@ struct AppState {
     generation: std::sync::atomic::AtomicU64,
 }
 
-type LibraryOrderKey = ((u64, i64), LibrarySort, bool, Option<MediaType>, Option<bool>);
+type LibraryOrderKey = (
+    (u64, i64),
+    LibrarySort,
+    bool,
+    Option<MediaType>,
+    Option<bool>,
+    Option<footos_core::RegionFilter>,
+);
 
 impl AppState {
     fn new() -> Self {
@@ -98,7 +105,14 @@ impl AppState {
         }
         let started = std::time::Instant::now();
         let photos = load_photos_backfilled(&index, &self.get_thumb_dir()?)?;
-        let view = Arc::new(LibraryView::build(photos));
+        // When the file was last modified stands in for a missing capture time.
+        let file_times: std::collections::HashMap<i64, i64> = index
+            .path_stats()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|f| (f.id, f.mtime_ms))
+            .collect();
+        let view = Arc::new(LibraryView::build_with_file_times(photos, &file_times));
         // Backfilling writes to the DB, so read the counter again: the cache
         // key must describe the state the view was built from.
         let key = (generation, index.change_counter().map_err(|e| e.to_string())?);
@@ -114,16 +128,17 @@ impl AppState {
         descending: bool,
         filter: Option<MediaType>,
         located: Option<bool>,
+        region: Option<footos_core::RegionFilter>,
     ) -> Result<(Arc<LibraryView>, Arc<Vec<u32>>), String> {
         let (view_key, view) = self.library()?;
-        let key: LibraryOrderKey = (view_key, sort, descending, filter, located);
+        let key: LibraryOrderKey = (view_key, sort, descending, filter, located, region);
         let mut cached = self.library_order.lock().map_err(|e| e.to_string())?;
         if let Some((k, order)) = cached.as_ref() {
             if *k == key {
                 return Ok((view, order.clone()));
             }
         }
-        let order = Arc::new(view.order(sort, descending, filter, located));
+        let order = Arc::new(view.order(sort, descending, filter, located, region));
         *cached = Some((key, order.clone()));
         Ok((view, order))
     }
@@ -644,6 +659,9 @@ struct LibraryPage {
     files_total: u32,
     offset: u32,
     items: Vec<LibraryItem>,
+    /// `[start, end]` (wall-clock ms) covered by the placed items the map
+    /// shows: what the list's timeline selects when it follows the map.
+    region_span: Option<[f64; 2]>,
 }
 
 /// One page of the library list, grouped, filtered and sorted in Rust.
@@ -655,12 +673,14 @@ async fn query_library(
     media_filter: Option<MediaType>,
     // `true`: only items with a position, `false`: only items without.
     located: Option<bool>,
+    // Only what the map is showing (plus unplaced photos from the same span).
+    region: Option<footos_core::RegionFilter>,
     offset: u32,
     limit: u32,
 ) -> Result<LibraryPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let (view, order) = state.library_order(sort_by, descending, media_filter, located)?;
+        let (view, order) = state.library_order(sort_by, descending, media_filter, located, region)?;
         let from = (offset as usize).min(order.len());
         let to = (from + limit.min(1_000) as usize).min(order.len());
         Ok(LibraryPage {
@@ -669,7 +689,28 @@ async fn query_library(
             files_total: view.files() as u32,
             offset: from as u32,
             items: order[from..to].iter().filter_map(|&i| view.get(i).cloned()).collect(),
+            region_span: region
+                .as_ref()
+                .and_then(|r| view.region_span(r))
+                .map(|(lo, hi)| [lo as f64, hi as f64]),
         })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Sorted wall-clock timestamps (little-endian f64 ms) of every dated item in
+/// the library list, for its timeline. Raw bytes, like `query_timeline`.
+#[tauri::command]
+async fn library_timeline(app: tauri::AppHandle) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_, view) = app.state::<AppState>().library()?;
+        let stamps = view.timestamps();
+        let mut bytes = Vec::with_capacity(stamps.len() * 8);
+        for t in stamps {
+            bytes.extend_from_slice(&t.to_le_bytes());
+        }
+        Ok(tauri::ipc::Response::new(bytes))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2806,6 +2847,7 @@ pub fn run() {
             set_media_filter,
             mac_map_command,
             sharpen_thumbnails,
+            library_timeline,
             sharpen_paths,
             query_timeline,
             query_album,
@@ -2905,6 +2947,46 @@ mod import_fixture {
     ///
     /// Thumbnails go to (and are deleted from) a folder next to the copy, so
     /// nothing of the real library is touched.
+    /// Where one file stands in the library list of a copy of a real library:
+    ///
+    ///     FOOTOS_DRYRUN_DB=<copy> FOOTOS_PROBE_PATH=<file> cargo test library_probe -- --nocapture
+    #[test]
+    fn library_probe() {
+        let (Ok(db), Ok(path)) = (std::env::var("FOOTOS_DRYRUN_DB"), std::env::var("FOOTOS_PROBE_PATH")) else {
+            return;
+        };
+        let index = PhotoIndex::open(db).unwrap();
+        let file_times: std::collections::HashMap<i64, i64> =
+            index.path_stats().unwrap().into_iter().map(|f| (f.id, f.mtime_ms)).collect();
+        let view = LibraryView::build_with_file_times(index.list().unwrap(), &file_times);
+        let world = footos_core::Bbox { west: -180.0, south: -85.0, east: 180.0, north: 85.0 };
+        let region = |bbox, span: Option<(f64, f64)>| footos_core::RegionFilter {
+            bbox,
+            start_ms: None,
+            end_ms: None,
+            span_start_ms: span.map(|s| s.0),
+            span_end_ms: span.map(|s| s.1),
+        };
+        let listed = |order: Vec<u32>| order.iter().any(|&i| view.get(i).map(|it| it.info.path == path).unwrap_or(false));
+        let item = (0..view.len() as u32).filter_map(|i| view.get(i)).find(|it| it.info.path == path);
+        eprintln!("in the library: {}", item.is_some());
+        if let Some(item) = item {
+            eprintln!("taken_ms={:?} from_file={} position={:?}", item.taken_ms, item.taken_from_file, item.info.metadata.lat);
+        }
+        let stamps = view.timestamps();
+        eprintln!("entries={} on the timeline={}", view.len(), stamps.len());
+        let all = view.order(LibrarySort::Date, true, None, None, Some(region(world, None)));
+        eprintln!("whole world in view: {} listed, this file listed: {}", all.len(), listed(all.clone()));
+        let nowhere = footos_core::Bbox { west: 0.0, south: 0.0, east: 0.01, north: 0.01 };
+        let none = view.order(LibrarySort::Date, true, None, None, Some(region(nowhere, None)));
+        eprintln!("a view with no photos: {} listed", none.len());
+        if let Some(t) = item.and_then(|it| it.taken_ms) {
+            let day = 24.0 * 3600.0 * 1000.0;
+            let around = view.order(LibrarySort::Date, true, None, None, Some(region(nowhere, Some((t as f64 - day, t as f64 + day)))));
+            eprintln!("timeline set to that day: {} listed, this file listed: {}", around.len(), listed(around));
+        }
+    }
+
     #[test]
     fn rescan_rehearsal() {
         let Ok(db) = std::env::var("FOOTOS_DRYRUN_DB") else {

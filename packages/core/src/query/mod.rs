@@ -83,7 +83,7 @@ fn mercator_y(lat: f64) -> f64 {
 }
 
 /// Geographic bounding box. `west > east` means the box crosses the antimeridian.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Bbox {
     pub west: f64,
     pub south: f64,
@@ -92,7 +92,7 @@ pub struct Bbox {
 }
 
 impl Bbox {
-    fn contains(&self, lat: f64, lon: f64) -> bool {
+    pub(crate) fn contains(&self, lat: f64, lon: f64) -> bool {
         if lat < self.south || lat > self.north {
             return false;
         }

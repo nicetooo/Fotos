@@ -14,6 +14,25 @@
 
     let { total, getItem, version, onPhotoClick }: Props = $props();
 
+    let hovered = $state<number | null>(null);
+
+    /**
+     * Shown on hover: when the photo was taken. A photo that records no
+     * capture time shows its file's date instead; the file name only when
+     * there is neither.
+     */
+    function hoverText(photo: PhotoInfo): string {
+        const taken = photo.metadata?.date_taken?.replace(/"/g, "").trim();
+        if (taken) return taken;
+        const fileMs = (photo as { takenMs?: number | null }).takenMs;
+        if (fileMs) {
+            const d = new Date(fileMs);
+            const pad = (n: number) => String(n).padStart(2, "0");
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        }
+        return photo.path.split("/").pop() || "";
+    }
+
     /** Format video duration (ms -> "m:ss" or "h:mm:ss") */
     function formatDuration(ms?: number): string {
         if (!ms) return "0:00";
@@ -40,13 +59,80 @@
     // ── Scroll state ──
     let scrollTop = $state(0);
 
-    // ── Responsive column count (mirrors Tailwind breakpoints) ──
-    // grid-cols-4 sm:grid-cols-5 md:grid-cols-6
-    let columns = $derived.by(() => {
-        if (containerWidth >= 768) return 6;  // md
-        if (containerWidth >= 640) return 5;  // sm
-        return 4;
+    // ── Thumbnail size: set by pinching, remembered ──
+    // The wanted cell size decides how many columns fit; the cells then
+    // stretch to fill the row exactly.
+    const SIZE_KEY = "footos.libraryCellSize";
+    const MIN_SIZE = 56;
+    const MAX_SIZE = 420;
+    let wantedSize = $state((() => {
+        try {
+            const saved = Number(localStorage.getItem(SIZE_KEY));
+            if (saved >= MIN_SIZE && saved <= MAX_SIZE) return saved;
+        } catch { /* not essential */ }
+        return 120;
+    })());
+    $effect(() => {
+        try { localStorage.setItem(SIZE_KEY, String(Math.round(wantedSize))); } catch { /* not essential */ }
     });
+
+    let columns = $derived.by(() => {
+        const usable = containerWidth - 2 * PADDING + GAP;
+        return Math.min(24, Math.max(2, Math.round(usable / (wantedSize + GAP))));
+    });
+
+    // Pinching changes the number of columns: keep the photo that was at the
+    // top of the view at the top.
+    let anchorIndex: number | null = null;
+    function setWantedSize(next: number) {
+        const clamped = Math.min(MAX_SIZE, Math.max(MIN_SIZE, next));
+        if (clamped === wantedSize) return;
+        if (anchorIndex === null && rowHeight > 0) {
+            anchorIndex = Math.floor(scrollTop / rowHeight) * columns;
+        }
+        wantedSize = clamped;
+    }
+    $effect(() => {
+        columns;
+        rowHeight;
+        if (anchorIndex === null || !scrollContainer) return;
+        const top = Math.floor(anchorIndex / columns) * rowHeight;
+        anchorIndex = null;
+        scrollContainer.scrollTop = top;
+        scrollTop = top;
+    });
+
+    // A pinch on a trackpad: WebKit reports it as gesture events with a
+    // scale, other engines as a wheel event with the control key down.
+    let pinchBase = 0;
+    function handleGestureStart(e: Event) {
+        e.preventDefault();
+        pinchBase = wantedSize;
+    }
+    function handleGestureChange(e: Event) {
+        e.preventDefault();
+        const scale = (e as Event & { scale?: number }).scale ?? 1;
+        setWantedSize(pinchBase * scale);
+    }
+    function handleWheel(e: WheelEvent) {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        setWantedSize(wantedSize * Math.exp(-e.deltaY * 0.01));
+    }
+    function pinchable(node: HTMLElement) {
+        node.addEventListener("gesturestart", handleGestureStart);
+        node.addEventListener("gesturechange", handleGestureChange);
+        node.addEventListener("gestureend", handleGestureStart);
+        node.addEventListener("wheel", handleWheel, { passive: false });
+        return {
+            destroy() {
+                node.removeEventListener("gesturestart", handleGestureStart);
+                node.removeEventListener("gesturechange", handleGestureChange);
+                node.removeEventListener("gestureend", handleGestureStart);
+                node.removeEventListener("wheel", handleWheel);
+            },
+        };
+    }
 
     // ── Cell size: square cells that fit the grid ──
     let cellSize = $derived.by(() => {
@@ -134,6 +220,7 @@
     bind:this={scrollContainer}
     class="flex-1 overflow-y-auto"
     onscroll={handleScroll}
+    use:pinchable
 >
     <!-- Spacer to set total scrollable height -->
     <div style="height: {totalHeight}px; position: relative;">
@@ -157,7 +244,9 @@
                     class="relative overflow-hidden rounded theme-bg-secondary hover:ring-2 hover:ring-[var(--accent)] transition-all group"
                     style="width: {cellSize}px; height: {cellSize}px;"
                     onclick={() => onPhotoClick(photo, index)}
-                    title={photo.path.split("/").pop()}
+                    onmouseenter={() => { hovered = index; }}
+                    onmouseleave={() => { if (hovered === index) hovered = null; }}
+                    data-hover-text={hoverText(photo)}
                 >
                     {#if photo.thumb_path}
                         <img
@@ -178,6 +267,14 @@
                             class="w-full h-full object-cover"
                             loading="lazy"
                         />
+                    {/if}
+                    {#if hovered === index}
+                        <!-- When it was taken, on the cell itself: the system
+                             tooltip of a title attribute does not show up in
+                             this web view. -->
+                        <div class="absolute inset-x-0 bottom-0 z-10 px-1.5 py-1 bg-black/75 text-white text-[11px] leading-tight text-left tabular-nums truncate" data-cell-time>
+                            {hoverText(photo)}
+                        </div>
                     {/if}
                     {#if photo.hasRaw}
                         <div class="absolute top-1 right-1 bg-amber-600 text-white text-[8px] font-bold px-1 rounded">R</div>

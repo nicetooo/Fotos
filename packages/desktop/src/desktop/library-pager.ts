@@ -6,7 +6,7 @@
  * their replacements arrive, so the grid does not blink during an import.
  */
 
-import { queryLibrary, type LibraryItem, type LocationFilter, type MediaFilter } from "../shared/query";
+import { queryLibrary, type LibraryItem, type LibraryRegion, type LocationFilter, type MediaFilter } from "../shared/query";
 import type { SortBy } from "../shared/types";
 
 const PAGE_SIZE = 200;
@@ -19,10 +19,12 @@ export interface LibraryCounts {
     groupedTotal: number;
     /** Rows in the database. */
     filesTotal: number;
+    /** `[start, end]` (ms) covered by the placed items the map shows, if any. */
+    regionSpan: [number, number] | null;
 }
 
 export class LibraryPager {
-    counts: LibraryCounts = { total: 0, groupedTotal: 0, filesTotal: 0 };
+    counts: LibraryCounts = { total: 0, groupedTotal: 0, filesTotal: 0, regionSpan: null };
     /** At least one page has arrived for the current parameters. */
     loaded = false;
 
@@ -34,19 +36,30 @@ export class LibraryPager {
     private descending = true;
     private filter: MediaFilter = "all";
     private location: LocationFilter = "all";
+    private region: LibraryRegion | null = null;
+    private regionKey = "";
 
     /** `onChange` fires whenever counts or pages change. */
     constructor(private onChange: () => void) {}
 
     /** Switch sort/filter. Nothing from the old order is reusable. */
-    setParams(sortBy: SortBy, descending: boolean, filter: MediaFilter, location: LocationFilter = "all") {
+    setParams(
+        sortBy: SortBy,
+        descending: boolean,
+        filter: MediaFilter,
+        location: LocationFilter = "all",
+        region: LibraryRegion | null = null,
+    ) {
+        const regionKey = region ? JSON.stringify(region) : "";
         if (
             sortBy === this.sortBy && descending === this.descending && filter === this.filter
-            && location === this.location && this.loaded
+            && location === this.location && regionKey === this.regionKey && this.loaded
         ) {
             return;
         }
         this.location = location;
+        this.region = region;
+        this.regionKey = regionKey;
         this.sortBy = sortBy;
         this.descending = descending;
         this.filter = filter;
@@ -98,13 +111,14 @@ export class LibraryPager {
         const pending = this.loading.get(page);
         if (pending) return pending;
         const epoch = this.epoch;
-        const request = queryLibrary(this.sortBy, this.descending, this.filter, this.location, page * PAGE_SIZE, PAGE_SIZE)
+        const request = queryLibrary(this.sortBy, this.descending, this.filter, this.location, this.region, page * PAGE_SIZE, PAGE_SIZE)
             .then((res) => {
                 if (epoch !== this.epoch) return;
                 this.counts = {
                     total: res.total,
                     groupedTotal: res.grouped_total,
                     filesTotal: res.files_total,
+                    regionSpan: res.region_span ?? null,
                 };
                 this.loaded = true;
                 this.pages.set(page, res.items);

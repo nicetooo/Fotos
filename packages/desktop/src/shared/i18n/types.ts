@@ -86,6 +86,8 @@ export interface Translations {
         locationAny: string;
         locationWith: string;
         locationWithout: string;
+        fullScreen: string;
+        halfScreen: string;
     };
 
     // Preview
@@ -111,6 +113,7 @@ export interface Translations {
         rawOnly: string;
         jpegPlusRaw: string;
         path: string;
+        fileDate: string;
     };
 
     // Delete
