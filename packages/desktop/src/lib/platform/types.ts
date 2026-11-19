@@ -82,6 +82,16 @@ export interface PlatformService {
      */
     requestGridThumbs?(paths: string[], onReady: (thumbs: Record<string, string>) => void): void;
 
+    /**
+     * Show the system's own menu for a library item at a point on the page
+     * (CSS pixels). Copy and share are handled by the platform; `onLocate`
+     * runs when the user picks "show on map".
+     */
+    showItemMenu?(
+        request: { x: number; y: number; path: string; dark: boolean; labels: { copy: string; share: string; locate: string } },
+        onLocate: () => void,
+    ): void;
+
     /** Hand an item (its original) to the system share sheet. */
     shareItem?(path: string): void;
     /** Put an item (its original) on the clipboard. */

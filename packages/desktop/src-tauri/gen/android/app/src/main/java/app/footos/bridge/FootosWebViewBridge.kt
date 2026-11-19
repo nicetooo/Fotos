@@ -61,6 +61,7 @@ class FootosWebViewBridge(
                 when (command) {
                     "openViewer" -> handleOpenViewer(json)
                     "syncMediaStore" -> handleSyncMediaStore(json)
+                    "itemMenu" -> handleItemMenu(json)
                     "shareItem" -> handleShareItem(json.optString("path", ""))
                     "copyItem" -> handleCopyItem(json.optString("path", ""))
                     else -> handleCommand(command)
@@ -329,6 +330,58 @@ class FootosWebViewBridge(
         } catch (e: Exception) {
             Log.w(TAG, "copy failed: ${e.message}")
         }
+    }
+
+    /**
+     * The system popup menu for a library item, at the point the user is
+     * pressing. Copy and share are done here; "locate" goes back to the web
+     * side, which owns the map.
+     */
+    private fun handleItemMenu(json: JSONObject) {
+        val path = json.optString("path", "")
+        val labels = json.optJSONObject("labels") ?: JSONObject()
+        val content = activity.findViewById<android.widget.FrameLayout>(android.R.id.content) ?: return
+        // Page coordinates are CSS pixels inside the web view.
+        val scale = json.optDouble("scale", activity.resources.displayMetrics.density.toDouble()).toFloat()
+        val origin = IntArray(2).also { webView.getLocationInWindow(it) }
+        val contentOrigin = IntArray(2).also { content.getLocationInWindow(it) }
+        val x = (json.optDouble("x", 0.0) * scale).toInt() + origin[0] - contentOrigin[0]
+        val y = (json.optDouble("y", 0.0) * scale).toInt() + origin[1] - contentOrigin[1]
+
+        val anchor = android.view.View(activity)
+        content.addView(anchor, android.widget.FrameLayout.LayoutParams(1, 1).apply {
+            leftMargin = x.coerceIn(0, maxOf(0, content.width - 1))
+            topMargin = y.coerceIn(0, maxOf(0, content.height - 1))
+        })
+        webView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+
+        // The app has its own light/dark setting, which may differ from the
+        // system's: the menu follows the app.
+        val themed = android.view.ContextThemeWrapper(
+            activity,
+            if (json.optBoolean("dark", false)) android.R.style.Theme_DeviceDefault
+            else android.R.style.Theme_DeviceDefault_Light
+        )
+        val menu = android.widget.PopupMenu(themed, anchor)
+        val shareable = path.startsWith("content://")
+        if (shareable) {
+            menu.menu.add(0, 1, 0, labels.optString("copy", "Copy"))
+            menu.menu.add(0, 2, 1, labels.optString("share", "Share"))
+        }
+        menu.menu.add(0, 3, 2, labels.optString("locate", "Show on map"))
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> handleCopyItem(path)
+                2 -> handleShareItem(path)
+                3 -> webView.evaluateJavascript(
+                    "(function(){if(window.__handleAndroidItemMenu)window.__handleAndroidItemMenu('locate');})()", null
+                )
+            }
+            true
+        }
+        menu.setOnDismissListener { content.removeView(anchor) }
+        // Shown once the anchor has a position.
+        anchor.post { menu.show() }
     }
 
     private fun showOpenSettingsDialog() {

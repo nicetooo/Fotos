@@ -758,6 +758,14 @@
         onOpen={openAlbumItem}
         onLocate={locateAlbumItem}
         nativeMenu={platformService.capabilities.nativeContextMenu}
+        onSystemMenu={platformService.showItemMenu ? (i, x, y) => {
+            const p = albumGrid?.items[i]?.path;
+            if (!p) return;
+            platformService.showItemMenu!(
+                { x, y, path: p, dark: effectiveTheme === "dark", labels: { copy: t.map.copyPhoto, share: t.map.sharePhoto, locate: t.map.locateOnMap } },
+                () => locateAlbumItem(i),
+            );
+        } : undefined}
         onShare={platformService.shareItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.shareItem!(p); } : undefined}
         onCopy={platformService.copyItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.copyItem!(p); } : undefined}
         requestThumbs={platformService.requestGridThumbs ? (paths, onReady) => platformService.requestGridThumbs!(paths, onReady) : undefined}

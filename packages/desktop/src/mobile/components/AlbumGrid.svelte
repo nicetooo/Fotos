@@ -9,10 +9,12 @@
      * like the system Photos app. Tapping a cell opens the viewer on that item.
      * Only the rows near the viewport are in the DOM.
      */
-    let { items, total, initialIndex = null, onOpen, onLocate, onShare = undefined, onCopy = undefined, nativeMenu = false, requestThumbs = undefined, onClose, t, locale } = $props<{
+    let { items, total, initialIndex = null, onOpen, onLocate, onShare = undefined, onCopy = undefined, onSystemMenu = undefined, nativeMenu = false, requestThumbs = undefined, onClose, t, locale } = $props<{
         /** Share / copy the original of an item (own menu only; the native menu has its own). */
         onShare?: (index: number) => void;
         onCopy?: (index: number) => void;
+        /** The platform shows its own menu at the pressed point; replaces the sheet below. */
+        onSystemMenu?: (index: number, x: number, y: number) => void;
         /** Asks the platform for sharper thumbnails of the given item paths. */
         requestThumbs?: (paths: string[], onReady: (thumbs: Record<string, string>) => void) => void;
         /** Time-ordered, oldest first. */
@@ -209,7 +211,8 @@
         pressTimer = setTimeout(() => {
             pressTimer = null;
             suppressClick = true;
-            menuIndex = index;
+            if (onSystemMenu) onSystemMenu(index, pressX, pressY);
+            else menuIndex = index;
         }, LONG_PRESS_MS);
     }
 

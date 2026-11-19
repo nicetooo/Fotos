@@ -339,6 +339,16 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
         });
     }
 
+    showItemMenu(
+        request: { x: number; y: number; path: string; dark: boolean; labels: { copy: string; share: string; locate: string } },
+        onLocate: () => void,
+    ): void {
+        (window as any).__handleAndroidItemMenu = (action: string) => {
+            if (action === "locate") onLocate();
+        };
+        this.postMessage({ command: "itemMenu", scale: window.devicePixelRatio || 1, ...request });
+    }
+
     shareItem(path: string): void {
         this.postMessage({ command: "shareItem", path });
     }
