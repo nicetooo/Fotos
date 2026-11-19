@@ -104,37 +104,50 @@
 
     // A pinch on a trackpad: WebKit reports it as gesture events with a
     // scale, other engines as a wheel event with the control key down.
+    // One set of listeners on the document for the whole list: what counts is
+    // that the pointer is over the list, not which element is under it (a
+    // photo, the gap between two, the padding).
     let pinchBase = 0;
+    function overList(e: Event): boolean {
+        if (!scrollContainer) return false;
+        const { clientX: x, clientY: y } = e as MouseEvent;
+        if (typeof x !== "number" || typeof y !== "number" || (x === 0 && y === 0)) {
+            return scrollContainer.matches(":hover") || scrollContainer.contains(e.target as Node);
+        }
+        const r = scrollContainer.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    }
     function handleGestureStart(e: Event) {
+        if (!overList(e)) return;
         e.preventDefault();
         pinchBase = wantedSize;
     }
     function handleGestureChange(e: Event) {
+        if (!overList(e)) return;
         e.preventDefault();
+        if (!pinchBase) pinchBase = wantedSize;
         const scale = (e as Event & { scale?: number }).scale ?? 1;
         setWantedSize(pinchBase * scale);
     }
     function handleWheel(e: WheelEvent) {
-        if (!e.ctrlKey) return;
+        if (!e.ctrlKey || !overList(e)) return;
         e.preventDefault();
         setWantedSize(wantedSize * Math.exp(-e.deltaY * 0.01));
     }
-    function pinchable(node: HTMLElement) {
-        node.addEventListener("gesturestart", handleGestureStart);
-        node.addEventListener("gesturechange", handleGestureChange);
-        node.addEventListener("gestureend", handleGestureStart);
-        node.addEventListener("wheel", handleWheel, { passive: false });
-        return {
-            destroy() {
-                node.removeEventListener("gesturestart", handleGestureStart);
-                node.removeEventListener("gesturechange", handleGestureChange);
-                node.removeEventListener("gestureend", handleGestureStart);
-                node.removeEventListener("wheel", handleWheel);
-            },
+    $effect(() => {
+        const options = { capture: true, passive: false } as const;
+        document.addEventListener("gesturestart", handleGestureStart, options);
+        document.addEventListener("gesturechange", handleGestureChange, options);
+        document.addEventListener("gestureend", handleGestureStart, options);
+        document.addEventListener("wheel", handleWheel, options);
+        return () => {
+            document.removeEventListener("gesturestart", handleGestureStart, options);
+            document.removeEventListener("gesturechange", handleGestureChange, options);
+            document.removeEventListener("gestureend", handleGestureStart, options);
+            document.removeEventListener("wheel", handleWheel, options);
         };
-    }
+    });
 
-    // ── Cell size: square cells that fit the grid ──
     let cellSize = $derived.by(() => {
         const available = containerWidth - 2 * PADDING - (columns - 1) * GAP;
         return Math.floor(available / columns);
@@ -183,7 +196,7 @@
         const waiting: string[] = [];
         for (const { photo } of visiblePhotos) {
             // Undefined while its page is still loading.
-            if (!photo || photo.media_type === "video") continue;
+            if (!photo) continue;
             if (!photo.thumb_path || photo.thumb_path.includes("/quick/")) waiting.push(photo.path);
         }
         if (waiting.length === 0) return;
@@ -220,7 +233,6 @@
     bind:this={scrollContainer}
     class="flex-1 overflow-y-auto"
     onscroll={handleScroll}
-    use:pinchable
 >
     <!-- Spacer to set total scrollable height -->
     <div style="height: {totalHeight}px; position: relative;">
@@ -259,6 +271,14 @@
                         <!-- Video without thumbnail: show placeholder instead of loading raw video -->
                         <div class="w-full h-full flex items-center justify-center theme-bg-tertiary">
                             <i class="fa-solid fa-film text-2xl theme-text-muted"></i>
+                        </div>
+                    {:else if photo.path.startsWith("/Volumes/")}
+                        <!-- No thumbnail yet, on a card or an external drive:
+                             showing the original instead would read megabytes
+                             per cell from a slow disk. The thumbnail is on
+                             its way (see the effect above). -->
+                        <div class="w-full h-full flex items-center justify-center theme-bg-tertiary" data-thumb-pending>
+                            <i class="fa-regular fa-image text-xl theme-text-muted"></i>
                         </div>
                     {:else}
                         <img

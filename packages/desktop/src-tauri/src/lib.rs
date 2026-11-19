@@ -1117,20 +1117,64 @@ impl Drop for ImportActive {
     }
 }
 
-/// Whether the recorded thumbnail of an image is not the real one yet: none,
-/// the camera's small stand-in, or one made for another size.
-fn needs_real_thumbnail(path: &str, thumb: &str, thumb_dir: &str, spec: &footos_core::ThumbnailSpec) -> bool {
+/// What a row still needs from the background pass.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ThumbNeed {
+    /// Nothing recorded yet: anything to show is better than a blank cell.
+    First,
+    /// A small stand-in (or one for another size) is recorded: the real one.
+    Real,
+}
+
+/// What the background pass still has to do for a row, if anything.
+fn thumbnail_need(path: &str, thumb: &str, thumb_dir: &str, spec: &footos_core::ThumbnailSpec) -> Option<ThumbNeed> {
     let source = std::path::Path::new(path);
-    if !source.is_absolute() || footos_core::is_supported_video(source) || !footos_core::is_supported_image(source) {
-        return false;
+    if !source.is_absolute() {
+        return None;
     }
     // A recorded thumbnail whose file is gone (a cleared cache) counts as none.
-    if thumb.is_empty() || is_quick_thumb(thumb) || !std::path::Path::new(thumb).exists() {
-        return true;
+    let missing = thumb.is_empty() || !std::path::Path::new(thumb).exists();
+    if footos_core::is_supported_video(source) {
+        return missing.then_some(ThumbNeed::First);
+    }
+    if !footos_core::is_supported_image(source) {
+        return None;
+    }
+    if missing {
+        return Some(ThumbNeed::First);
+    }
+    if is_quick_thumb(thumb) {
+        return Some(ThumbNeed::Real);
     }
     footos_core::image::thumbnail_path(std::path::Path::new(thumb_dir), source, spec)
         .map(|expected| expected != std::path::Path::new(thumb))
         .unwrap_or(false)
+        .then_some(ThumbNeed::Real)
+}
+
+#[cfg(test)]
+fn needs_real_thumbnail(path: &str, thumb: &str, thumb_dir: &str, spec: &footos_core::ThumbnailSpec) -> bool {
+    thumbnail_need(path, thumb, thumb_dir, spec).is_some()
+}
+
+/// Files the background pass could not make a thumbnail for, and when it
+/// last tried. Without this, every scroll of the list (which asks for what
+/// is on screen) started a pass over files that are simply not there.
+static THUMB_GIVEN_UP: Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> = Mutex::new(None);
+const THUMB_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(300);
+
+fn thumb_given_up(path: &str) -> bool {
+    THUMB_GIVEN_UP
+        .lock()
+        .ok()
+        .and_then(|map| map.as_ref().and_then(|m| m.get(path).map(|at| at.elapsed() < THUMB_RETRY_AFTER)))
+        .unwrap_or(false)
+}
+
+fn give_up_thumb(path: &str) {
+    if let Ok(mut map) = THUMB_GIVEN_UP.lock() {
+        map.get_or_insert_with(Default::default).insert(path.to_string(), std::time::Instant::now());
+    }
 }
 
 /// Replace stand-in thumbnails with real ones, newest photos first and what
@@ -1173,6 +1217,10 @@ fn sharpen_paths(
 }
 
 /// The body of `sharpen_thumbnails`. Returns how many thumbnails were made.
+///
+/// Order of work: what is on screen, then a first thumbnail for every row
+/// that has none (the camera's embedded one where there is one: quick, it
+/// sits at the start of the file), then the real thumbnails, RAW files last.
 fn sharpen_all(index: &PhotoIndex, thumb_dir: &str, emit: &(dyn Fn(u32, usize) + Sync)) -> u32 {
     let config = PhotoCoreConfig {
         thumbnail_dir: thumb_dir.to_string(),
@@ -1180,104 +1228,167 @@ fn sharpen_all(index: &PhotoIndex, thumb_dir: &str, emit: &(dyn Fn(u32, usize) +
     };
     let spec = footos_core::ThumbnailSpec::default();
     let local_pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().ok();
-    // Tried in this run and not made (file gone, card removed, cannot be decoded).
-    let mut given_up: HashSet<String> = HashSet::new();
+    let slow_pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().ok();
     let mut done = 0u32;
     let mut last_emit = std::time::Instant::now();
 
+    // One file: `Some((thumbnail, size))` when a thumbnail was made.
+    let make = |path: &String, need: ThumbNeed| -> Option<(String, u64)> {
+        let source = std::path::Path::new(path);
+        if !source.exists() {
+            return None;
+        }
+        let thumb = if footos_core::is_supported_video(source) {
+            extract_video_thumbnail_sync(source, thumb_dir)?
+        } else {
+            match need {
+                ThumbNeed::First => quick_thumbnail(source, &config).or_else(|| full_thumbnail(source, &config))?,
+                ThumbNeed::Real => full_thumbnail(source, &config)?,
+            }
+        };
+        Some((thumb, file_stat(source).0))
+    };
+
     loop {
-        let recorded: std::collections::HashMap<String, String> = match index.recorded_thumbs() {
+        let mut recorded: std::collections::HashMap<String, String> = match index.recorded_thumbs() {
             Ok(rows) => rows.into_iter().collect(),
             Err(_) => break,
         };
-        let mut pending: std::collections::VecDeque<String> = match index.recorded_thumbs() {
+        // Newest first within each kind of work; see the order above.
+        let mut pending: Vec<(String, ThumbNeed)> = match index.recorded_thumbs() {
             Ok(rows) => rows
                 .into_iter()
-                .filter(|(path, thumb)| !given_up.contains(path) && needs_real_thumbnail(path, thumb, thumb_dir, &spec))
-                .map(|(path, _)| path)
+                .filter(|(path, _)| !thumb_given_up(path))
+                .filter_map(|(path, thumb)| thumbnail_need(&path, &thumb, thumb_dir, &spec).map(|need| (path, need)))
                 .collect(),
             Err(_) => break,
         };
         if pending.is_empty() {
+            // Rows are still arriving: what comes on screen is made at once.
+            if IMPORTS_ACTIVE.load(Ordering::SeqCst) > 0 && !SHARPEN_STOP.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                continue;
+            }
             break;
         }
-        // RAW files last. They are the big ones (a whole 26 MB read each on a
-        // memory card), and where a RAW has a JPEG beside it the list shows
-        // the JPEG's thumbnail anyway. Newest-first order is kept within each.
-        pending.make_contiguous().sort_by_key(|path| footos_core::image::is_raw_file(std::path::Path::new(path)));
-        tracing::info!(pending = pending.len(), "Thumbnails: stand-ins to replace");
+        let listed = std::time::Instant::now();
+        pending.sort_by_key(|(path, need)| {
+            (*need, *need == ThumbNeed::Real && footos_core::image::is_raw_file(std::path::Path::new(path)))
+        });
+        let mut pending: std::collections::VecDeque<(String, ThumbNeed)> = pending.into();
+        tracing::info!(pending = pending.len(), "Thumbnails: to make");
 
         while !pending.is_empty() {
-            while IMPORTS_ACTIVE.load(Ordering::SeqCst) > 0 && !SHARPEN_STOP.load(Ordering::SeqCst) {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
             if SHARPEN_STOP.load(Ordering::SeqCst) {
                 tracing::info!(done, "Thumbnails: stopped");
                 return done;
             }
-            // What is on screen first, then the list.
-            let mut chunk: Vec<String> = Vec::new();
-            if let Ok(mut first) = SHARPEN_FIRST.lock() {
-                while chunk.len() < 4 {
-                    let Some(path) = first.pop_front() else { break };
-                    let waiting = recorded
-                        .get(&path)
-                        .map(|thumb| needs_real_thumbnail(&path, thumb, thumb_dir, &spec))
-                        .unwrap_or(false);
-                    if waiting && !given_up.contains(&path) {
-                        chunk.push(path);
-                    }
+            // An import has the disk: only what is on screen is made
+            // meanwhile, and the list is taken again as rows arrive.
+            let importing = IMPORTS_ACTIVE.load(Ordering::SeqCst) > 0;
+            if importing {
+                let asked = SHARPEN_FIRST.lock().map(|first| !first.is_empty()).unwrap_or(false);
+                if !asked {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    continue;
+                }
+                if listed.elapsed().as_millis() > 1000 {
+                    break;
                 }
             }
+
+            // What is on screen goes first: a first thumbnail for all of it
+            // (quick), then the real ones.
+            let mut chunk: Vec<(String, ThumbNeed)> = Vec::new();
+            if let Ok(mut first) = SHARPEN_FIRST.lock() {
+                let wanted: Vec<(String, ThumbNeed)> = first
+                    .iter()
+                    .filter(|path| !thumb_given_up(path))
+                    .filter_map(|path| {
+                        let need = pending.iter().find(|(p, _)| p == path).map(|(_, need)| *need)?;
+                        Some((path.clone(), need))
+                    })
+                    // Whole files are not read from under a running import.
+                    .filter(|(_, need)| !importing || *need == ThumbNeed::First)
+                    .collect();
+                if wanted.is_empty() {
+                    if !importing {
+                        first.clear();
+                    }
+                } else if wanted.iter().any(|(_, need)| *need == ThumbNeed::First) {
+                    chunk = wanted.into_iter().filter(|(_, need)| *need == ThumbNeed::First).take(16).collect();
+                } else if !matches!(pending.front(), Some((_, ThumbNeed::First))) {
+                    // Real thumbnails read whole files: even for what is on
+                    // screen they wait until every row has something to show.
+                    chunk = wanted.into_iter().take(4).collect();
+                }
+            }
+            if chunk.is_empty() && importing {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                continue;
+            }
             if chunk.is_empty() {
-                // One file from a slow volume, or up to four from local disks.
-                while chunk.len() < 4 {
-                    let Some(next) = pending.front() else { break };
-                    let slow = is_slow_volume(std::path::Path::new(next));
-                    if slow && !chunk.is_empty() {
+                // First thumbnails are quick: many at a time. Real ones read
+                // whole files: four from local disks, one from a slow volume.
+                let limit = match pending.front() {
+                    Some((_, ThumbNeed::First)) => 32,
+                    _ => 4,
+                };
+                while chunk.len() < limit {
+                    let Some((next, need)) = pending.front() else { break };
+                    let slow_real = *need == ThumbNeed::Real && is_slow_volume(std::path::Path::new(next));
+                    if (slow_real && !chunk.is_empty()) || chunk.first().map_or(false, |(_, n)| n != need) {
                         break;
                     }
                     chunk.push(pending.pop_front().unwrap());
-                    if slow {
+                    if slow_real {
                         break;
                     }
                 }
             } else {
-                pending.retain(|p| !chunk.contains(p));
+                pending.retain(|(p, _)| !chunk.iter().any(|(c, _)| c == p));
             }
 
-            let make = |path: &String| -> Option<(String, String, u64)> {
-                let source = std::path::Path::new(path);
-                if !source.exists() {
-                    return None;
-                }
-                let thumb = full_thumbnail(source, &config)?;
-                Some((path.clone(), thumb, file_stat(source).0))
+            let any_slow = chunk.iter().any(|(p, _)| is_slow_volume(std::path::Path::new(p)));
+            let real = chunk.first().map_or(false, |(_, need)| *need == ThumbNeed::Real);
+            let work = || -> Vec<Option<(String, u64)>> { chunk.par_iter().map(|(path, need)| make(path, *need)).collect() };
+            let made: Vec<Option<(String, u64)>> = match (any_slow, real, &local_pool, &slow_pool) {
+                // Whole files from a memory card: strictly one after another.
+                (true, true, _, _) => chunk.iter().map(|(path, need)| make(path, *need)).collect(),
+                (true, false, _, Some(pool)) => pool.install(work),
+                (false, _, Some(pool), _) => pool.install(work),
+                _ => chunk.iter().map(|(path, need)| make(path, *need)).collect(),
             };
-            let any_slow = chunk.iter().any(|p| is_slow_volume(std::path::Path::new(p)));
-            let made: Vec<Option<(String, String, u64)>> = match (&local_pool, any_slow) {
-                (Some(pool), false) => pool.install(|| chunk.par_iter().map(make).collect()),
-                _ => chunk.iter().map(make).collect(),
-            };
-            for (path, result) in chunk.iter().zip(made) {
-                // Tried once per run either way.
-                given_up.insert(path.clone());
-                let Some((path, thumb, size)) = result else { continue };
-                let old = recorded.get(&path).cloned().unwrap_or_default();
-                if index.update_thumb_info(path, Some(thumb.clone()), size).is_ok() {
+            let use_txn = chunk.len() > 1 && index.begin_transaction().is_ok();
+            for ((path, need), result) in chunk.iter().zip(made) {
+                let Some((thumb, size)) = result else {
+                    give_up_thumb(path);
+                    continue;
+                };
+                let old = recorded.get(path).cloned().unwrap_or_default();
+                if index.update_thumb_info(path.clone(), Some(thumb.clone()), size).is_ok() {
                     done += 1;
                     if is_quick_thumb(&old) && old != thumb {
                         let _ = std::fs::remove_file(&old);
                     }
+                    recorded.insert(path.clone(), thumb.clone());
+                    // A first thumbnail that is only the camera's small one
+                    // still has the real one coming.
+                    if *need == ThumbNeed::First && is_quick_thumb(&thumb) {
+                        pending.push_back((path.clone(), ThumbNeed::Real));
+                    }
                 }
             }
-            if last_emit.elapsed().as_millis() >= 1500 {
+            if use_txn {
+                let _ = index.commit_transaction();
+            }
+            if last_emit.elapsed().as_millis() >= 1000 {
                 last_emit = std::time::Instant::now();
                 emit(done, pending.len());
             }
         }
     }
-    tracing::info!(done, "Thumbnails: stand-ins replaced");
+    tracing::info!(done, "Thumbnails: made");
     done
 }
 
@@ -1288,7 +1399,7 @@ fn process_file(
     config: &PhotoCoreConfig,
     thumb_dir: &str,
     user_media_only: bool,
-    // Take the camera's embedded thumbnail for now (see `quick_thumbnail`).
+    // Leave the thumbnail to the background pass.
     quick: bool,
 ) -> ProcessResult {
     let path_str = path.to_string_lossy().to_string();
@@ -1339,10 +1450,14 @@ fn process_file(
         return ProcessResult::Skipped;
     }
 
-    let thumb_path_str = if is_video {
+    // An import that is followed by the background pass records what the
+    // file says about itself and nothing else: every thumbnail, even the
+    // camera's embedded one, is made afterwards (`sharpen_thumbnails`), what
+    // is on screen first.
+    let thumb_path_str = if quick {
+        None
+    } else if is_video {
         extract_video_thumbnail_sync(path, thumb_dir)
-    } else if let Some(quick) = quick.then(|| quick_thumbnail(path, config)).flatten() {
-        Some(quick)
     } else {
         full_thumbnail(path, config)
     };
@@ -2987,6 +3102,76 @@ mod import_fixture {
         }
     }
 
+    /// Time an import from a real folder (a memory card) into a scratch
+    /// library, then the first seconds of the background thumbnail pass:
+    ///
+    ///     FOOTOS_CARD_DIR=/Volumes/<card> FOOTOS_CARD_OUT=<scratch dir> cargo test card_probe -- --nocapture
+    #[test]
+    fn card_probe() {
+        let (Ok(card), Ok(out)) = (std::env::var("FOOTOS_CARD_DIR"), std::env::var("FOOTOS_CARD_OUT")) else {
+            return;
+        };
+        let out = std::path::PathBuf::from(out);
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).unwrap();
+        let thumb_dir = out.join("thumbnails").to_string_lossy().to_string();
+        let index = PhotoIndex::open(out.join("card.db").to_string_lossy().to_string()).unwrap();
+        let emit = |_: &str, _: serde_json::Value| {};
+        let t = std::time::Instant::now();
+        let files = footos_core::scan_user_media(std::path::Path::new(&card)).unwrap();
+        eprintln!("scan: {} files in {} ms", files.len(), t.elapsed().as_millis());
+        let t = std::time::Instant::now();
+        let r = import_files(&emit, &index, &thumb_dir, files, false, true, t).unwrap();
+        eprintln!("import: ok={} dup={} fail={} filtered={} in {} ms", r.success, r.duplicates, r.failure, r.filtered, t.elapsed().as_millis());
+        let seconds: u64 = std::env::var("FOOTOS_CARD_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(30);
+        let t = std::time::Instant::now();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(seconds));
+                SHARPEN_STOP.store(true, Ordering::SeqCst);
+            });
+            let made = sharpen_all(&index, &thumb_dir, &|_, _| {});
+            eprintln!("thumbnails: {made} made in {} ms", t.elapsed().as_millis());
+        });
+        SHARPEN_STOP.store(false, Ordering::SeqCst);
+        let rows = index.recorded_thumbs().unwrap();
+        let none = rows.iter().filter(|(_, t)| t.is_empty()).count();
+        let quick = rows.iter().filter(|(_, t)| is_quick_thumb(t)).count();
+        eprintln!("rows={} without={} stand-in={} real={}", rows.len(), none, quick, rows.len() - none - quick);
+    }
+
+    /// Why thumbnails are still waiting in a copy of a real library:
+    ///
+    ///     FOOTOS_DRYRUN_DB=<copy> FOOTOS_THUMB_DIR=<real thumbnails dir> cargo test thumbnail_probe -- --nocapture
+    #[test]
+    fn thumbnail_probe() {
+        let (Ok(db), Ok(thumb_dir)) = (std::env::var("FOOTOS_DRYRUN_DB"), std::env::var("FOOTOS_THUMB_DIR")) else {
+            return;
+        };
+        let index = PhotoIndex::open(db).unwrap();
+        let spec = footos_core::ThumbnailSpec::default();
+        let rows = index.recorded_thumbs().unwrap();
+        let pending: Vec<&(String, String)> =
+            rows.iter().filter(|(p, t)| needs_real_thumbnail(p, t, &thumb_dir, &spec)).collect();
+        let source_gone = pending.iter().filter(|(p, _)| !std::path::Path::new(p).exists()).count();
+        let none = pending.iter().filter(|(_, t)| t.is_empty()).count();
+        let quick = pending.iter().filter(|(_, t)| is_quick_thumb(t)).count();
+        let file_gone = pending.iter().filter(|(_, t)| !t.is_empty() && !std::path::Path::new(t).exists()).count();
+        eprintln!(
+            "rows={} pending={} (no thumbnail {none}, stand-in {quick}, thumbnail file gone {file_gone}); source file gone {source_gone}",
+            rows.len(),
+            pending.len()
+        );
+        let scratch = format!("{thumb_dir}-probe");
+        let config = PhotoCoreConfig { thumbnail_dir: scratch.clone(), thumbnail_size: DEFAULT_THUMBNAIL_SIZE };
+        for (path, thumb) in pending.iter().filter(|(p, _)| std::path::Path::new(p).exists()).take(3) {
+            let started = std::time::Instant::now();
+            let made = full_thumbnail(std::path::Path::new(path), &config);
+            eprintln!("  {path} (recorded: {thumb:?}) -> {:?} in {} ms", made.is_some(), started.elapsed().as_millis());
+        }
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+
     #[test]
     fn rescan_rehearsal() {
         let Ok(db) = std::env::var("FOOTOS_DRYRUN_DB") else {
@@ -3052,25 +3237,26 @@ mod import_fixture {
             let path = lib.join(name).to_string_lossy().to_string();
             assert!(index.get_by_path(path).unwrap().is_some(), "{name} is in the library");
         }
-        // Thumbnails were made.
+        // The import recorded information only: no thumbnail yet.
         let with_thumb = index.list().unwrap().iter().filter(|p| p.thumb_path.is_some()).count();
-        eprintln!("rows with thumbnail: {with_thumb}/{expected}");
-        assert!(with_thumb as u32 >= expected - 1);
+        assert_eq!(with_thumb, 0, "the import makes no thumbnail");
 
-        // ── A camera file gets its embedded thumbnail first, the real one later ──
+        // ── The background pass makes them: the camera's small one first, then the real one ──
         let camera = lib.join("camera.jpg").to_string_lossy().to_string();
         let thumb_of = |path: &str| -> String {
             index.recorded_thumbs().unwrap().into_iter().find(|(p, _)| p == path).map(|(_, t)| t).unwrap()
         };
-        let stand_in = thumb_of(&camera);
-        assert!(is_quick_thumb(&stand_in), "recorded the embedded thumbnail: {stand_in}");
-        assert_eq!(footos_core::image::image_long_side(std::path::Path::new(&stand_in)), Some(160));
         let made = sharpen_all(&index, &thumb_dir, &|_, _| {});
-        assert!(made >= 1, "the background pass made the real thumbnail");
+        let with_thumb = index.list().unwrap().iter().filter(|p| p.thumb_path.is_some()).count();
+        eprintln!("rows with thumbnail: {with_thumb}/{expected}, made {made}");
+        assert!(with_thumb as u32 >= expected - 1);
+        assert!(made as usize > with_thumb, "the camera file got a stand-in and then the real one");
         let real = thumb_of(&camera);
         assert!(!is_quick_thumb(&real));
         assert_eq!(footos_core::image::image_long_side(std::path::Path::new(&real)), Some(512));
-        assert!(!std::path::Path::new(&stand_in).exists(), "the stand-in is cleaned up");
+        let quick_dir = std::path::Path::new(&thumb_dir).join("quick");
+        let left = std::fs::read_dir(&quick_dir).map(|d| d.count()).unwrap_or(0);
+        assert_eq!(left, 0, "stand-ins are cleaned up");
         assert_eq!(sharpen_all(&index, &thumb_dir, &|_, _| {}), 0, "nothing left to do");
 
         // ── Importing the same folder again adds nothing ──
