@@ -33,3 +33,9 @@ rayon = "1.10"
 # on iOS 26.x simulator. This local patch skips the WebKit bundle lookup on iOS.
 wry = { path = "../../../patches/wry" }
 
+# Debug builds are what gets installed on test devices. Image decoding and
+# hashing in unoptimised dependencies are 20-50 times slower, which turns a
+# first sync of a few hundred photos into many minutes. Our own crate stays
+# unoptimised (fast to rebuild, debuggable); everything it calls is optimised.
+[profile.dev.package."*"]
+opt-level = 3

@@ -9,6 +9,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
     PlatformService,
     PlatformCapabilities,
@@ -55,6 +56,7 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
 
     private progressCallbacks = new Set<(p: ImportProgress) => void>();
     private completeCallbacks = new Set<(r: ImportResult) => void>();
+    private unlistenRustProgress?: () => void;
     private scanningCallbacks = new Set<(s: boolean) => void>();
     private permissionCallbacks = new Set<(hasAccess: boolean) => void>();
     private eventListeners: EventHandler[] = [];
@@ -88,6 +90,23 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
             };
             this.progressCallbacks.forEach(cb => cb(progress));
         });
+
+        // Rust reports each batch it has written to the library. The photos
+        // are in by then, so pass it on: the map fills in while the rest is
+        // still being processed.
+        void listen("import-progress", (event: any) => {
+            const p = event.payload ?? {};
+            if (!this.importRunning) return;
+            const progress: ImportProgress = {
+                success: p.success || 0,
+                failure: p.failure || 0,
+                duplicates: p.duplicates || 0,
+                current: p.current || 0,
+                total: p.total || 0,
+                lastPath: p.last_path || "",
+            };
+            this.progressCallbacks.forEach(cb => cb(progress));
+        }).then((off) => { this.unlistenRustProgress = off; });
 
         // Android import complete event
         this.addListener('android-import-complete', (e: CustomEvent) => {
@@ -172,6 +191,7 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
     }
 
     cleanup(): void {
+        this.unlistenRustProgress?.();
         this.eventListeners.forEach(({ event, handler }) => {
             window.removeEventListener(event, handler);
         });

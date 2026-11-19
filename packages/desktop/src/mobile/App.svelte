@@ -68,6 +68,7 @@
     let refreshKey = $state(0);
     let libraryCount = $state(0);
 
+    let lastProgressRefresh = 0;
     function bumpRefresh() {
         refreshKey++;
         photoCount().then((c) => { libraryCount = c; }).catch(() => {});
@@ -239,7 +240,10 @@
                     total: progress.total,
                     lastPath: progress.lastPath,
                 };
-                if (progress.current <= 5 || progress.current % 400 === 0) {
+                // At most once a second: batches arrive at any count.
+                const now = performance.now();
+                if (now - lastProgressRefresh >= 1000) {
+                    lastProgressRefresh = now;
                     bumpRefresh();
                 }
             });
