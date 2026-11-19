@@ -149,6 +149,16 @@
     let pinchStartDistance = 0;
     let pinchStartDuration = 0;
 
+    // The detail axis is a magnifier for a selection too narrow to work with
+    // on the overview: it shows while the yellow box is under a tenth of the
+    // overview's width. A gesture that started on it keeps it on screen until
+    // the fingers lift, or pinching out past the threshold would pull the
+    // axis from under them.
+    const DETAIL_BELOW_PERCENT = 10;
+    let showDetail = $derived(
+        overviewWidthPercent < DETAIL_BELOW_PERCENT || dragMode === 'detail-pan' || isPinching
+    );
+
     function clampCenter(center: number): number {
         const halfDuration = viewDurationMs / 2;
         return Math.max(rangeMin + halfDuration, Math.min(rangeMax - halfDuration, center));
@@ -510,6 +520,32 @@
 <svelte:window on:touchmove={handleGlobalTouchMove} on:touchend={handleGlobalTouchEnd} />
 
 <div class="timeline-container theme-bg-primary px-4 py-3">
+    <!-- === Detail Timeline ===
+         Only when the selection is a small part of the whole range (see
+         `showDetail`). It sits above everything else, so that when it comes
+         and goes the rows below keep their place and only the map's edge moves. -->
+    {#if showDetail}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="relative h-16 mx-2">
+        <div
+            bind:this={detailTrack}
+            class="absolute inset-0 theme-bg-secondary rounded-lg overflow-hidden border-2 border-[var(--accent)] detail-dots"
+            ontouchstart={handleDetailTouchStart}
+            ontouchmove={handleDetailTouchMove}
+            ontouchend={handleDetailTouchEnd}
+        >
+            <!-- Photo lines (canvas) -->
+            <canvas bind:this={detailCanvas} use:trackSize={(w, h) => { detailSize = { w, h }; }} class="absolute inset-0 w-full h-full"></canvas>
+        </div>
+    </div>
+
+    <!-- Detail labels -->
+    <div class="flex justify-between text-[10px] theme-text-muted mt-1 mb-3 mx-2">
+        <span>{formatDateTimeShort(viewWindow.startMs)}</span>
+        <span>{formatDateTimeShort(viewWindow.endMs)}</span>
+    </div>
+    {/if}
+
     <!-- Header -->
     <div class="flex items-center justify-between mb-2">
         <div class="text-[10px] theme-text-secondary">
@@ -545,9 +581,9 @@
         </div>
     </div>
 
-    <!-- === Overview Timeline (top) === -->
+    <!-- === Overview Timeline === -->
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="relative h-8 mx-2 mb-3">
+    <div class="relative h-8 mx-2 mb-1">
         <div
             bind:this={overviewTrack}
             class="absolute inset-0 theme-bg-primary rounded-lg overflow-hidden"
@@ -570,33 +606,12 @@
     </div>
 
     <!-- Overview labels -->
-    <div class="flex justify-between text-[10px] theme-text-muted mb-3 mx-2">
+    <div class="flex justify-between text-[10px] theme-text-muted mx-2">
         <span>{formatDate(rangeMin)}</span>
         {#if mapConstrained}
             <span class="text-[var(--accent)]">Map View</span>
         {/if}
         <span>{formatDate(rangeMax)}</span>
-    </div>
-
-    <!-- === Detail Timeline (bottom) === -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="relative h-16 mx-2">
-        <div
-            bind:this={detailTrack}
-            class="absolute inset-0 theme-bg-secondary rounded-lg overflow-hidden border-2 border-[var(--accent)] detail-dots"
-            ontouchstart={handleDetailTouchStart}
-            ontouchmove={handleDetailTouchMove}
-            ontouchend={handleDetailTouchEnd}
-        >
-            <!-- Photo lines (canvas) -->
-            <canvas bind:this={detailCanvas} use:trackSize={(w, h) => { detailSize = { w, h }; }} class="absolute inset-0 w-full h-full"></canvas>
-        </div>
-    </div>
-
-    <!-- Detail labels -->
-    <div class="flex justify-between text-[10px] theme-text-muted mt-1 mx-2">
-        <span>{formatDateTimeShort(viewWindow.startMs)}</span>
-        <span>{formatDateTimeShort(viewWindow.endMs)}</span>
     </div>
 </div>
 
