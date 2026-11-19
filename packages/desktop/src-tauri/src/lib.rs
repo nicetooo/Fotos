@@ -426,6 +426,41 @@ struct GeoSummary {
     version: String,
 }
 
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn footos_mac_map_command(
+        webview: *mut std::ffi::c_void,
+        command: *const std::os::raw::c_char,
+        json: *const std::os::raw::c_char,
+    );
+}
+
+/// One command for the system map of the macOS app (see macos/FootosMacMap.m).
+/// Does nothing on other platforms.
+#[tauri::command]
+fn mac_map_command(
+    webview: tauri::WebviewWindow,
+    command: String,
+    body: serde_json::Value,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let command = std::ffi::CString::new(command).map_err(|e| e.to_string())?;
+        let json = std::ffi::CString::new(body.to_string()).map_err(|e| e.to_string())?;
+        // Runs on the main thread, which is where the map view lives.
+        webview
+            .with_webview(move |platform| unsafe {
+                footos_mac_map_command(platform.inner() as *mut std::ffi::c_void, command.as_ptr(), json.as_ptr());
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (webview, command, body);
+    }
+    Ok(())
+}
+
 /// Limit the map, timeline and album to one media type (`null` = everything).
 #[tauri::command]
 fn set_media_filter(state: tauri::State<'_, AppState>, filter: Option<MediaType>) -> Result<(), String> {
@@ -2517,6 +2552,7 @@ pub fn run() {
             query_map,
             geo_summary,
             set_media_filter,
+            mac_map_command,
             query_timeline,
             query_album,
             query_album_in,

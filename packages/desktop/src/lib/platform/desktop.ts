@@ -38,7 +38,8 @@ class DesktopPlatformService implements PlatformService {
         runtimePermissions: false,
         revealInFileManager: true,
         folderSelection: true,
-        nativeMap: false,
+        // macOS draws the map with the system map view (src-tauri/macos/FootosMacMap.m).
+        nativeMap: typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent),
         nativeContextMenu: false,
         nativePhotoViewer: false,
     };
@@ -126,6 +127,12 @@ class DesktopPlatformService implements PlatformService {
         } finally {
             this.scanningCallbacks.forEach(cb => cb(false));
         }
+    }
+
+    nativeMapCommand(name: string, payload: Record<string, unknown> = {}): void {
+        invoke("mac_map_command", { command: name, body: payload }).catch((e) => {
+            console.error("[Desktop] map command failed", name, e);
+        });
     }
 
     /** Bring the library up to date with the remembered folders. */

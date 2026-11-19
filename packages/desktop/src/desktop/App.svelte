@@ -39,6 +39,7 @@
     import Settings from "./components/Settings.svelte";
     import ImagePreview from "./components/ImagePreview.svelte";
     import MapView from "./components/MapView.svelte";
+    import MediaFilterButton from "./components/MediaFilterButton.svelte";
     import VirtualPhotoGrid from "./components/VirtualPhotoGrid.svelte";
 
     // Platform service received as prop from main.ts
@@ -209,6 +210,19 @@
         if (!showLibrary) return;
         pager.setParams(sortBy, sortOrder === "desc", mediaFilter);
     });
+
+    // Photos / videos / Live Photos on the map and the timeline (the drawer
+    // has its own filter). Rust narrows the query index, so both follow.
+    let mapMediaFilter = $state<MediaFilter>("all");
+    async function setMapMediaFilter(next: MediaFilter) {
+        try {
+            await invoke("set_media_filter", { filter: next === "all" ? null : next });
+            mapMediaFilter = next;
+            refreshKey++;
+        } catch (e) {
+            console.error("[filter] set_media_filter failed", e);
+        }
+    }
 
     /** The library changed: tell the map, and the drawer if it is open. */
     function bumpRefresh() {
@@ -458,6 +472,11 @@
             const ready = await until(() => libraryLoaded && libraryCounts.total > 0);
             const firstMs = Math.round(performance.now() - t0);
             await sleep(200);
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-library.png") },
+            }).catch(() => {});
+            await sleep(600);
             const cells = document.querySelectorAll("button[title] img").length;
             const total = libraryCounts.total;
             const t1 = performance.now();
@@ -526,6 +545,47 @@
 
         showLibrary = false;
         restoreFilter();
+
+        // System map (macOS): the native map lies under the web view, so
+        // nothing of the page may paint over the middle of the map area.
+        if (document.documentElement.classList.contains("native-map")) {
+            // The viewer and the drawer from the steps above are legitimately on top.
+            closePreview();
+            await until(() => !document.querySelector(".fixed.inset-0.z-50"), 2000);
+            await sleep(400);
+            const frame = (window as any).__footosMapStats ? document.querySelector(".controls")?.parentElement : null;
+            const r = frame?.getBoundingClientRect();
+            const painted: string[] = [];
+            if (r) {
+                for (const el of document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2)) {
+                    const style = getComputedStyle(el);
+                    const bg = style.backgroundColor;
+                    const opaque = bg && bg !== "transparent" && !/rgba\(.*,\s*0\)$/.test(bg);
+                    if (opaque || style.backgroundImage !== "none") painted.push(`${el.tagName}.${(el as HTMLElement).className}`.slice(0, 80));
+                }
+            }
+            // The filter menu, open.
+            (document.querySelector("[data-media-filter]") as HTMLElement | null)?.click();
+            await sleep(700);
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-filter.png") },
+            }).catch(() => {});
+            await sleep(600);
+            (document.querySelector("[data-media-filter]") as HTMLElement | null)?.click();
+            await sleep(400);
+            // A picture of the window, so whoever runs the test can look at it.
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window.png") },
+            }).catch(() => {});
+            await sleep(800);
+            out.push({
+                name: "desktop:native-map-uncovered",
+                ok: !!r && r.width > 200 && painted.length === 0,
+                detail: { width: Math.round(r?.width ?? 0), height: Math.round(r?.height ?? 0), painted },
+            });
+        }
 
         // Import a folder of real files, rescan it, see it in Settings, remove it.
         const importDir = (await invoke("agent_test_import_dir")) as string | null;
@@ -697,7 +757,7 @@
 <main class="fixed inset-0 flex flex-col theme-bg-primary theme-text-primary overflow-hidden">
     <!-- Fullscreen Map -->
     <div class="flex-1 relative">
-        <MapView {refreshKey} {libraryCount} onOpenPreview={openFromMap} theme={effectiveTheme} {t} {locale} />
+        <MapView {refreshKey} {libraryCount} onOpenPreview={openFromMap} onOpenLibrary={handleLibrary} theme={effectiveTheme} {t} {locale} />
 
         <!-- Floating action buttons (top-left, vertical) -->
         <div class="absolute top-4 left-4 z-[1001] flex flex-col gap-2">
@@ -706,10 +766,10 @@
                 <button
                     onclick={() => floatingImportMenuOpen = !floatingImportMenuOpen}
                     disabled={isScanning}
-                    class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center shadow-lg transition-all"
+                    class="w-12 h-12 rounded-full theme-bg-card border theme-border theme-text-secondary hover:theme-text-primary disabled:opacity-50 flex items-center justify-center transition-all"
                     title={t.import.importPhotos}
                 >
-                    <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'}"></i>
+                    <i class="fa-solid {isScanning ? 'fa-spinner fa-spin' : 'fa-plus'} text-lg"></i>
                 </button>
                 {#if floatingImportMenuOpen}
                     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -746,30 +806,36 @@
                 {/if}
             </div>
 
-            <!-- Library button -->
-            <button
-                onclick={() => handleLibrary()}
-                class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all {showLibrary ? 'theme-bg-secondary' : ''}"
-                title={t.nav.library}
-            >
-                <i class="fa-solid fa-images"></i>
-            </button>
-
+            <!-- Same order as on the phone: add, settings, filter. -->
             <!-- Settings button -->
             <button
                 onclick={() => showSettings = true}
-                class="w-10 h-10 rounded-full theme-bg-card backdrop-blur-sm border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center shadow-lg transition-all"
+                class="w-12 h-12 rounded-full theme-bg-card border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center transition-all"
                 title={t.common.settings}
             >
-                <i class="fa-solid fa-gear"></i>
+                <i class="fa-solid fa-gear text-lg"></i>
             </button>
+
+            <MediaFilterButton value={mapMediaFilter} onChange={setMapMediaFilter} {t} />
+
+            <!-- Library button: with the system map it sits at the bottom right
+                 of the map, where the phone has its album button. -->
+            {#if !platformService.capabilities.nativeMap}
+                <button
+                    onclick={() => handleLibrary()}
+                    class="w-12 h-12 rounded-full theme-bg-card border theme-border theme-text-secondary hover:theme-text-primary flex items-center justify-center transition-all {showLibrary ? 'theme-bg-secondary' : ''}"
+                    title={t.nav.library}
+                >
+                    <i class="fa-solid fa-images text-lg"></i>
+                </button>
+            {/if}
         </div>
 
         <!-- Library Drawer (right side) -->
         {#if showLibrary}
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div
-                class="fixed inset-0 bg-black/30 backdrop-blur-sm z-[1002]"
+                class="fixed inset-0 bg-black/30 z-[1002]"
                 onclick={() => showLibrary = false}
             ></div>
             <div class="absolute top-0 right-0 bottom-0 w-1/2 min-w-[500px] theme-bg-overlay backdrop-blur-md border-l theme-border z-[1003] flex flex-col">

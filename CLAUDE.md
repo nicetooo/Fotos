@@ -259,6 +259,14 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 - 缩略图通过 `map.addImage()` 注入 GL atlas，由 `styleimagemissing` 事件按需加载。图片 ID 由缩略图路径决定（`thumb:<path>` / `cthumb:<path>`），重新查询后不会失效
 - 图层 ID：`CLUSTER_THUMB_LAYER_ID`（聚类缩略图）、`UNCLUSTERED_THUMB_LAYER_ID`（单点缩略图）
 
+### macOS：同样是系统地图
+
+- Mac 版底图也是 MapKit：`src-tauri/macos/FootosMacMap.m`（由 `build.rs` 用 `cc` 编译，仅 macOS），命令经 Rust 的 `mac_map_command` 转发，协议与 iOS 相同。Windows / Linux 仍是 MapLibre
+- 前端是 `desktop/components/NativeMap.svelte`（`capabilities.nativeMap`）。鼠标事件默认交给地图；盖在地图上的网页元素由组件自动收集（地图区域内的 `data-map-overlay`，以及从地图向上各层的兄弟元素），不用逐个标记。新加在地图区域**内部**的控件仍要加 `data-map-overlay`
+- 桌面自测有一步 `desktop:native-map-uncovered`：地图区域不能被带底色的网页元素盖住
+- Mac 上 WebView 比页面视口高出标题栏那一截（28 点）：页面坐标换成视图坐标必须经过 `viewRectFromPage` / `pagePointFromView`，前端发地图矩形时要带 `vh`
+- **看画面**：`mac_map_command` 的 `mapDebugSnapshot {path}` 让应用截自己的窗口（不需要屏幕录制权限）。桌面自测会写出 `window.png` 和 `window-library.png`，改了桌面界面后要打开看
+
 ### iOS：系统地图（MapKit），不是 MapLibre
 
 iOS 的底图是系统地图（大陆上架要求合规底图；OSM 的边界画法不合规）。安卓和桌面仍是下面说的 MapLibre。

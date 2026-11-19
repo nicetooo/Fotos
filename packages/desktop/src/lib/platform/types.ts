@@ -97,6 +97,9 @@ export interface PlatformService {
     /** Put an item (its original) on the clipboard. */
     copyItem?(path: string): void;
 
+    /** 给系统地图发一条命令（`capabilities.nativeMap` 为真时可用） */
+    nativeMapCommand?(name: string, payload?: Record<string, unknown>): void;
+
     /** 重新扫描记住的文件夹（桌面端）；返回库是否有变化 */
     rescanLibrary?(): Promise<boolean>;
 
