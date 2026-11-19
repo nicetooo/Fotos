@@ -182,6 +182,8 @@ lsof -i:1420 || echo "Port 1420 is free"
 
 SQLite 表 `photos`（另有 `library_roots` 记录导入过的文件夹），关键字段：`path`(唯一)、`hash`(内容哈希去重)、`file_size`/`file_mtime`(增量扫描比对)、`lat/lon`(地理位置)、`date_taken`、`media_type`(photo / video / live_photo)、`video_path`(实况照片的配对视频)
 
+安卓相册同步同样不拷贝原片：`path` 为 MediaStore 的 `content://media/external/{images|video}/media/<id>`，缩略图在 `<thumbDir>/ms_{i|v}_<id>.jpg`（`MediaStoreSync.kt`）。入库复用 `upsert_ios_previews`，删除同步用 `list_paths_containing` + `remove_library_paths`。❌ 不要改回把原图拷进缓存目录（占空间，且会被系统清掉）。库里的路径可能是 `/data/data/...` 也可能是 `/data/user/0/...`，按路径匹配时不要假定前缀。
+
 iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localIdentifier>`，原片在查看时按需导出。
 
 ## 桌面端导入与增量扫描

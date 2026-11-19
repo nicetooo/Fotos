@@ -82,6 +82,11 @@ export interface PlatformService {
      */
     requestGridThumbs?(paths: string[], onReady: (thumbs: Record<string, string>) => void): void;
 
+    /** Hand an item (its original) to the system share sheet. */
+    shareItem?(path: string): void;
+    /** Put an item (its original) on the clipboard. */
+    copyItem?(path: string): void;
+
     /** 重新扫描记住的文件夹（桌面端）；返回库是否有变化 */
     rescanLibrary?(): Promise<boolean>;
 
@@ -178,7 +183,7 @@ export interface AndroidPlatformService extends PlatformService, NativeViewerHos
     readonly hasMediaAccess: boolean;
 
     /** 如果有权限则同步 MediaStore 照片 */
-    syncPhotosIfHasAccess(): Promise<void>;
+    syncPhotosIfHasAccess(prompt?: boolean): Promise<void>;
 
     /** 请求媒体访问权限 */
     requestPermission(): Promise<void>;

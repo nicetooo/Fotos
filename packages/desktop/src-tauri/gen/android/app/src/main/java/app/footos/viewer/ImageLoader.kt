@@ -49,7 +49,7 @@ object ImageLoader {
         }
         pool.execute {
             val bitmap = try {
-                decode(path, maxSide)
+                decode(target.context.applicationContext, path, maxSide)
             } catch (e: Throwable) {
                 null
             }
@@ -73,7 +73,24 @@ object ImageLoader {
     private fun sampleFor(width: Int, height: Int, maxSide: Int): Int =
         max(1, ceil(max(width, height) / maxSide.toFloat()).toInt())
 
-    private fun decode(path: String, maxSide: Int): Bitmap? {
+    private fun decode(context: android.content.Context, path: String, maxSide: Int): Bitmap? {
+        // An item of the system library, read where it is.
+        if (path.startsWith("content://")) {
+            val uri = android.net.Uri.parse(path)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                return ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.setTargetSampleSize(sampleFor(info.size.width, info.size.height, maxSide))
+                }
+            }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            if (bounds.outWidth <= 0) return null
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = Integer.highestOneBit(sampleFor(bounds.outWidth, bounds.outHeight, maxSide))
+            }
+            return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        }
         val file = File(path)
         if (!file.exists()) return null
 

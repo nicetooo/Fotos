@@ -57,6 +57,11 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
     private progressCallbacks = new Set<(p: ImportProgress) => void>();
     private completeCallbacks = new Set<(r: ImportResult) => void>();
     private unlistenRustProgress?: () => void;
+    /** Batches are written one after another, and the end waits for them. */
+    private syncQueue: Promise<void> = Promise.resolve();
+    private syncKnown: string[] = [];
+    private syncAdded = 0;
+    private syncFailed = 0;
     private scanningCallbacks = new Set<(s: boolean) => void>();
     private permissionCallbacks = new Set<(hasAccess: boolean) => void>();
     private eventListeners: EventHandler[] = [];
@@ -107,6 +112,73 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
             };
             this.progressCallbacks.forEach(cb => cb(progress));
         }).then((off) => { this.unlistenRustProgress = off; });
+
+        // ── Library sync by reference ──
+        // New items arrive in batches, ready to be written to the library.
+        this.addListener('android-library-batch', (e: CustomEvent) => {
+            const { items, current, total } = e.detail ?? {};
+            this.syncQueue = this.syncQueue.then(async () => {
+                try {
+                    if (Array.isArray(items) && items.length > 0) {
+                        const r: any = await invoke("upsert_ios_previews", { items });
+                        this.syncAdded += r?.success || 0;
+                        this.syncFailed += r?.failure || 0;
+                    }
+                } catch (err) {
+                    console.error("[Android] writing a sync batch failed:", err);
+                    this.syncFailed += Array.isArray(items) ? items.length : 0;
+                }
+                const progress: ImportProgress = {
+                    success: this.syncAdded, failure: this.syncFailed, duplicates: 0,
+                    current: current || 0, total: total || 0, lastPath: "",
+                };
+                this.progressCallbacks.forEach(cb => cb(progress));
+            });
+        });
+
+        // The run is over. `paths` is everything in the system library now:
+        // rows for items that are no longer there are dropped.
+        this.addListener('android-library-done', (e: CustomEvent) => {
+            const { paths, complete, failure, legacyDir } = e.detail ?? {};
+            this.syncQueue = this.syncQueue.then(async () => {
+                let removed = 0;
+                try {
+                    if (complete && Array.isArray(paths)) {
+                        const current = new Set<string>(paths);
+                        const gone = this.syncKnown.filter(p => !current.has(p));
+                        if (gone.length > 0) {
+                            removed += await invoke<number>("remove_library_paths", { paths: gone });
+                        }
+                        // Rows left by older versions, which copied every
+                        // original into the cache: the copies are deleted
+                        // now and the same items are in by reference.
+                        if (legacyDir) {
+                            // By folder name: the stored paths went through
+                            // the file system's own spelling (/data/data/...)
+                            // while Android reports /data/user/0/...
+                            const folder = "/cache/" + String(legacyDir).split("/").pop() + "/";
+                            const legacy = await invoke<string[]>("list_paths_containing", { needle: folder });
+                            if (legacy.length > 0) {
+                                removed += await invoke<number>("remove_library_paths", { paths: legacy });
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error("[Android] pruning after sync failed:", err);
+                }
+                console.log("[Android] library sync done:", { added: this.syncAdded, removed, failed: this.syncFailed + (failure || 0) });
+                this.importRunning = false;
+                this.scanningCallbacks.forEach(cb => cb(false));
+                this.completeCallbacks.forEach(cb => cb({
+                    success: this.syncAdded, failure: this.syncFailed + (failure || 0), duplicates: 0,
+                }));
+            });
+        });
+
+        // Photos were added to or removed from the system library.
+        this.addListener('android-library-changed', () => {
+            void this.syncPhotosIfHasAccess();
+        });
 
         // Android import complete event
         this.addListener('android-import-complete', (e: CustomEvent) => {
@@ -242,19 +314,37 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
     /**
      * Sync all photos from MediaStore (requires permission)
      */
-    async syncPhotosIfHasAccess(): Promise<void> {
-        console.log("[Android] Checking for permission to auto-sync...");
-
+    async syncPhotosIfHasAccess(prompt = false): Promise<void> {
+        if (this.importRunning) return;
         const ready = await this.waitForBridge(3000);
-        if (ready) {
-            this.postMessage({
-                command: "syncMediaStore",
-                dbPath: this.dbPath,
-                thumbDir: this.thumbDir
-            });
-        } else {
-            console.log("[Android] Bridge not ready for auto-sync");
+        if (!ready) {
+            console.log("[Android] Bridge not ready for sync");
+            return;
         }
+        if (this.importRunning) return;
+        try {
+            this.syncKnown = await invoke<string[]>("list_paths_containing", { needle: "content://media/" });
+        } catch (err) {
+            console.error("[Android] could not list known items:", err);
+            return;
+        }
+        this.syncAdded = 0;
+        this.syncFailed = 0;
+        this.postMessage({
+            command: "syncMediaStore",
+            dbPath: this.dbPath,
+            thumbDir: this.thumbDir,
+            known: this.syncKnown,
+            prompt,
+        });
+    }
+
+    shareItem(path: string): void {
+        this.postMessage({ command: "shareItem", path });
+    }
+
+    copyItem(path: string): void {
+        this.postMessage({ command: "copyItem", path });
     }
 
     /**
@@ -433,7 +523,8 @@ class AndroidPlatformService implements PlatformService, NativeViewerHost {
  */
 export interface AndroidPlatformServiceExtended extends PlatformService, NativeViewerHost {
     readonly hasMediaAccess: boolean;
-    syncPhotosIfHasAccess(): Promise<void>;
+    /** `prompt`: may put up the system permission prompt if access is missing. */
+    syncPhotosIfHasAccess(prompt?: boolean): Promise<void>;
     requestPermission(): Promise<void>;
     cancelImport(): void;
     onPermissionChange(callback: (hasAccess: boolean) => void): () => void;

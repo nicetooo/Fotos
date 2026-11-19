@@ -7,6 +7,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import app.footos.viewer.PhotoViewerActivity
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -57,7 +58,13 @@ class FootosWebViewBridge(
             if (msgThumbDir.isNotEmpty()) thumbDir = msgThumbDir
 
             mainHandler.post {
-                if (command == "openViewer") handleOpenViewer(json) else handleCommand(command)
+                when (command) {
+                    "openViewer" -> handleOpenViewer(json)
+                    "syncMediaStore" -> handleSyncMediaStore(json)
+                    "shareItem" -> handleShareItem(json.optString("path", ""))
+                    "copyItem" -> handleCopyItem(json.optString("path", ""))
+                    else -> handleCommand(command)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse message: ${e.message}")
@@ -73,7 +80,6 @@ class FootosWebViewBridge(
 
         when (command) {
             "requestImport" -> handleRequestImport()
-            "syncMediaStore" -> handleSyncMediaStore()
             "checkPermission" -> handleCheckPermission()
             "requestPermission" -> handleRequestPermission()
             "cancelImport" -> handleCancelImport()
@@ -147,39 +153,66 @@ class FootosWebViewBridge(
         }
     }
 
-    private fun handleSyncMediaStore() {
-        Log.d(TAG, "Requesting MediaStore sync")
-
-        if (dbPath.isEmpty() || thumbDir.isEmpty()) {
-            sendError("dbPath or thumbDir not set")
+    /**
+     * Bring the library up to date with the system photo library. `known`
+     * lists the content URIs the library already has; only the others are
+     * described, and the full current list comes back at the end.
+     */
+    private fun handleSyncMediaStore(json: JSONObject) {
+        if (thumbDir.isEmpty()) {
+            sendError("thumbDir not set")
             return
         }
+        val knownArray = json.optJSONArray("known")
+        val known = HashSet<String>(knownArray?.length() ?: 0)
+        if (knownArray != null) {
+            for (i in 0 until knownArray.length()) known.add(knownArray.optString(i))
+        }
+        // A sync the user did not ask for (app start, library changed) must
+        // not put up a permission prompt.
+        val mayPrompt = json.optBoolean("prompt", true)
 
-        // MediaStore sync requires permission (including ACCESS_MEDIA_LOCATION for GPS)
-        permissionManager.checkAndRequestPermission { granted ->
-            if (granted) {
-                importCancelled = false
-                sendImportStarted()
-                sendPermissionGranted("mediastore")
-
-                mediaStoreSync.syncAllPhotos(
-                    dbPath,
-                    thumbDir,
-                    progressCallback = { current, total ->
-                        sendImportProgress(0, 0, 0, current, total, "Syncing...")
-                    },
-                    completionCallback = { result ->
-                        if (result.paths.isNotEmpty()) {
-                            // Pass paths to frontend for processing via Tauri
-                            callGlobalImportFunction(result.paths)
-                        } else {
-                            sendImportComplete(result.success, result.failure, result.duplicates)
-                        }
-                    }
-                )
+        val start = {
+            importCancelled = false
+            sendImportStarted()
+            sendPermissionGranted("mediastore")
+            mediaStoreSync.syncLibrary(
+                thumbDir,
+                known,
+                onBatch = { items, done, total ->
+                    sendEvent("android-library-batch", mapOf("items" to items, "current" to done, "total" to total))
+                },
+                onDone = { current, failures ->
+                    val detail = HashMap<String, Any>()
+                    detail["failure"] = failures
+                    detail["complete"] = current != null
+                    detail["paths"] = JSONArray(current ?: emptyList<String>())
+                    detail["legacyDir"] = java.io.File(activity.cacheDir, MediaStoreSync.LEGACY_EXPORT_DIR).absolutePath
+                    sendEvent("android-library-done", detail)
+                    if (current != null) mediaStoreSync.deleteLegacyExports()
+                }
+            )
+        }
+        if (permissionManager.hasMediaPermission()) {
+            if (mayPrompt && permissionManager.shouldAskForAdditions()) {
+                // Photos were granted before videos were asked for.
+                permissionManager.requestAll { start() }
             } else {
-                sendPermissionDenied("MediaStore access requires permission")
+                start()
             }
+        } else if (mayPrompt) {
+            permissionManager.checkAndRequestPermission { granted ->
+                if (granted) {
+                    start()
+                } else {
+                    sendPermissionDenied("MediaStore access requires permission")
+                    // Refused for good: the system will not ask again, so
+                    // the only way in is the app's page in Settings.
+                    if (permissionManager.isPermanentlyDenied(activity)) showOpenSettingsDialog()
+                }
+            }
+        } else {
+            sendPermissionStatus(false)
         }
     }
 
@@ -267,6 +300,84 @@ class FootosWebViewBridge(
         }
     }
 
+    // ==================== Share, copy, settings ====================
+
+    /** Hand a library item to the system share sheet (the original, not the thumbnail). */
+    private fun handleShareItem(path: String) {
+        if (!path.startsWith("content://")) return
+        try {
+            val uri = android.net.Uri.parse(path)
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = activity.contentResolver.getType(uri) ?: "image/*"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                clipData = android.content.ClipData.newRawUri(null, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivity(android.content.Intent.createChooser(send, null))
+        } catch (e: Exception) {
+            Log.w(TAG, "share failed: ${e.message}")
+        }
+    }
+
+    private fun handleCopyItem(path: String) {
+        if (!path.startsWith("content://")) return
+        try {
+            val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(
+                android.content.ClipData.newUri(activity.contentResolver, "photo", android.net.Uri.parse(path))
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "copy failed: ${e.message}")
+        }
+    }
+
+    private fun showOpenSettingsDialog() {
+        val chinese = java.util.Locale.getDefault().language == "zh"
+        androidx.appcompat.app.AlertDialog.Builder(activity)
+            .setTitle(if (chinese) "无法访问照片" else "No access to photos")
+            .setMessage(
+                if (chinese) "足迹相册需要读取照片和视频才能把它们显示在地图上。请在系统设置里允许访问。"
+                else "Footos needs to read your photos and videos to show them on the map. Allow access in Settings."
+            )
+            .setPositiveButton(if (chinese) "去设置" else "Open Settings") { _, _ -> permissionManager.openAppSettings() }
+            .setNegativeButton(if (chinese) "取消" else "Cancel", null)
+            .show()
+    }
+
+    // ==================== Library changes ====================
+
+    private var libraryObserver: android.database.ContentObserver? = null
+    private val libraryChanged = Runnable { sendEvent("android-library-changed", emptyMap()) }
+
+    /**
+     * Tell the web side when photos or videos are added to or removed from
+     * the system library, so it can sync again. Changes come in bursts (a
+     * burst of shots, a batch delete): one event after things settle.
+     */
+    fun watchLibrary() {
+        if (libraryObserver != null) return
+        val observer = object : android.database.ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean) {
+                mainHandler.removeCallbacks(libraryChanged)
+                mainHandler.postDelayed(libraryChanged, 2000)
+            }
+        }
+        try {
+            val resolver = activity.contentResolver
+            resolver.registerContentObserver(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer)
+            resolver.registerContentObserver(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer)
+            libraryObserver = observer
+        } catch (e: Exception) {
+            Log.w(TAG, "could not watch the media library: ${e.message}")
+        }
+    }
+
+    private fun stopWatchingLibrary() {
+        libraryObserver?.let { activity.contentResolver.unregisterContentObserver(it) }
+        libraryObserver = null
+        mainHandler.removeCallbacks(libraryChanged)
+    }
+
     // ==================== Event Dispatching ====================
 
     private fun sendEvent(eventName: String, detail: Map<String, Any>) {
@@ -328,6 +439,7 @@ class FootosWebViewBridge(
      * Call this after WebView is loaded to notify frontend that bridge is ready
      */
     fun notifyBridgeReady() {
+        watchLibrary()
         val script = """
             console.log('[足迹相册] Android bridge initialized');
             window.__ANDROID_BRIDGE_READY__ = true;
@@ -343,6 +455,7 @@ class FootosWebViewBridge(
      * Clean up resources
      */
     fun cleanup() {
+        stopWatchingLibrary()
         photoPickerManager.shutdown()
         mediaStoreSync.shutdown()
     }

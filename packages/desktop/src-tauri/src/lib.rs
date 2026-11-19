@@ -1692,6 +1692,53 @@ fn remove_ios_assets(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Res
     Ok(removed)
 }
 
+/// Paths of library rows that contain `needle`. A phone's system library is
+/// referenced in place (`content://media/...`), and the sync needs to know
+/// which of its items the library already has.
+#[tauri::command]
+async fn list_paths_containing(app: tauri::AppHandle, needle: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let index = app.state::<AppState>().get_index()?;
+        Ok(index
+            .path_stats()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|f| f.path.contains(&needle))
+            .map(|f| f.path)
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Remove library rows by path, with the thumbnail each one recorded. Only
+/// the library is touched: whatever the path points at stays where it is.
+#[tauri::command]
+fn remove_library_paths(state: tauri::State<'_, AppState>, paths: Vec<String>) -> Result<u32, String> {
+    let index = state.get_index()?;
+    let thumb_dir = state.get_thumb_dir()?;
+    let mut removed = 0u32;
+    let in_txn = index.begin_transaction().is_ok();
+    for path in paths {
+        let Some(photo) = index.get_by_path(path).map_err(|e| e.to_string())? else {
+            continue;
+        };
+        if index.delete_by_id(photo.id.id).map_err(|e| e.to_string())?.is_some() {
+            removed += 1;
+            if let Some(thumb) = photo.thumb_path {
+                // Only files the app made itself.
+                if std::path::Path::new(&thumb).starts_with(&thumb_dir) {
+                    let _ = std::fs::remove_file(thumb);
+                }
+            }
+        }
+    }
+    if in_txn {
+        index.commit_transaction().map_err(|e| e.to_string())?;
+    }
+    Ok(removed)
+}
+
 /// Insert PhotoKit preview rows (no original file, no perceptual hash).
 #[tauri::command]
 fn upsert_ios_previews(
@@ -2460,6 +2507,8 @@ pub fn run() {
             remove_library_root,
             upsert_ios_previews,
             remove_ios_assets,
+            list_paths_containing,
+            remove_library_paths,
             flush_photos_db,
             cancel_import,
             list_photos,

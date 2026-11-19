@@ -49,6 +49,8 @@ class PhotoViewerActivity : AppCompatActivity() {
     )
 
     companion object {
+        /** Long side of the picture loaded when the user zooms in. */
+        private const val DETAIL_SIDE = 6048
         // The list can be large, so it stays in-process instead of going through
         // an Intent (binder transactions are limited to about 1 MB).
         private var pendingItems: List<Item> = emptyList()
@@ -221,12 +223,67 @@ class PhotoViewerActivity : AppCompatActivity() {
                 liveBadge.alpha = alpha.coerceIn(0f, 1f)
             }
             image.onDismiss = { close() }
+            // Zooming in: swap in the picture at (close to) its own resolution.
+            image.onZoomedIn = {
+                val shown = item
+                if (shown != null && shown.mediaType != "video" && !detailed) {
+                    detailed = true
+                    ImageLoader.load(shown.path, DETAIL_SIDE, image)
+                }
+            }
+            // The badge plays the clip a motion photo carries.
+            liveBadge.setOnClickListener { playMotionClip() }
         }
 
         val isVideo: Boolean get() = item?.mediaType == "video"
+        /** The full-resolution picture is loaded (the user zoomed in). */
+        private var detailed = false
+
+        private fun playMotionClip() {
+            val shown = item ?: return
+            if (video != null) {
+                stopVideo()
+                return
+            }
+            Thread {
+                val clip = MotionPhoto.clipFor(frame.context.applicationContext, shown.path)
+                frame.post {
+                    if (item === shown && clip != null && video == null) startVideo(clip, loop = false, restorePlayGlyph = false)
+                }
+            }.start()
+        }
+
+        private fun startVideo(source: String, loop: Boolean, restorePlayGlyph: Boolean) {
+            val view = VideoView(frame.context)
+            video = view
+            frame.addView(view, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.CENTER))
+            playGlyph.visibility = View.GONE
+            view.setOnPreparedListener { it.isLooping = loop }
+            view.setOnCompletionListener {
+                if (restorePlayGlyph) {
+                    playGlyph.visibility = View.VISIBLE
+                    setChrome(true)
+                } else {
+                    stopVideo()
+                }
+            }
+            view.setOnErrorListener { _, _, _ ->
+                stopVideo()
+                true
+            }
+            // Taps land on the video surface while it is on top of the image.
+            view.setOnClickListener { onPageTapped(this) }
+            if (source.startsWith("content://")) {
+                view.setVideoURI(android.net.Uri.parse(source))
+            } else {
+                view.setVideoPath(source)
+            }
+            view.start()
+        }
 
         fun bind(item: Item) {
             leave()
+            detailed = false
             this.item = item
             image.zoomEnabled = item.mediaType != "video"
             playGlyph.visibility = if (isVideo) View.VISIBLE else View.GONE
@@ -253,23 +310,7 @@ class PhotoViewerActivity : AppCompatActivity() {
                 }
                 return
             }
-            val view = VideoView(frame.context)
-            video = view
-            frame.addView(view, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.CENTER))
-            playGlyph.visibility = View.GONE
-            view.setOnPreparedListener { it.isLooping = false }
-            view.setOnCompletionListener {
-                playGlyph.visibility = View.VISIBLE
-                setChrome(true)
-            }
-            view.setOnErrorListener { _, _, _ ->
-                stopVideo()
-                true
-            }
-            // Taps land on the video surface while it is on top of the image.
-            view.setOnClickListener { onPageTapped(this) }
-            view.setVideoPath(item.path)
-            view.start()
+            startVideo(item.path, loop = false, restorePlayGlyph = true)
         }
 
         val isPlaying: Boolean get() = video?.isPlaying == true
@@ -286,6 +327,12 @@ class PhotoViewerActivity : AppCompatActivity() {
         fun leave() {
             stopVideo()
             image.reset()
+            // Off screen: do not keep a full-resolution bitmap around.
+            val shown = item
+            if (detailed && shown != null) {
+                detailed = false
+                ImageLoader.load(shown.path, fullSide, image)
+            }
         }
     }
 

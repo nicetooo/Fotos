@@ -303,7 +303,7 @@
                     hasFullAccess = hasAccess;
                 });
 
-                androidPlatformService.syncPhotosIfHasAccess();
+                androidPlatformService.syncPhotosIfHasAccess(true);
             }
             // Photos taken while the app was in the background: pick them up
             // when it comes back, since there is no button to ask for it.
@@ -368,7 +368,7 @@
                 await refreshKnownIosIds();
                 await iosPlatformService.syncPhotosIfFullAccess();
             } else {
-                await androidPlatformService?.syncPhotosIfHasAccess();
+                await androidPlatformService?.syncPhotosIfHasAccess(true);
             }
         } catch (e) {
             console.warn("[App] Refresh failed", e);
@@ -758,6 +758,8 @@
         onOpen={openAlbumItem}
         onLocate={locateAlbumItem}
         nativeMenu={platformService.capabilities.nativeContextMenu}
+        onShare={platformService.shareItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.shareItem!(p); } : undefined}
+        onCopy={platformService.copyItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.copyItem!(p); } : undefined}
         requestThumbs={platformService.requestGridThumbs ? (paths, onReady) => platformService.requestGridThumbs!(paths, onReady) : undefined}
         onClose={closeAlbum}
         {t}

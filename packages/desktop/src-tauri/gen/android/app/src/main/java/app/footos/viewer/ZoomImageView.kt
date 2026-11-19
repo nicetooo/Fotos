@@ -29,6 +29,9 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
     var onDismiss: (() -> Unit)? = null
     /** When false the view only reports taps and the dismiss drag (video pages). */
     var zoomEnabled = true
+    /** Called once each time the picture goes from fitted to clearly zoomed in. */
+    var onZoomedIn: (() -> Unit)? = null
+    private var zoomedInReported = false
 
     private var zoom = 1f
     private var tx = 0f
@@ -149,6 +152,7 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
     /** Back to the fitted, untransformed state (when the page scrolls away). */
     fun reset() {
         animator?.cancel()
+        zoomedInReported = false
         zoom = 1f
         tx = 0f
         ty = 0f
@@ -178,6 +182,10 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
         tx = fx - width / 2f - (fx - cx) * k
         ty = fy - height / 2f - (fy - cy) * k
         zoom = next
+        if (zoom > 1.3f && !zoomedInReported) {
+            zoomedInReported = true
+            onZoomedIn?.invoke()
+        }
         applyMatrix()
     }
 
