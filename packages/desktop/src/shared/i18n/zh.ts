@@ -56,6 +56,10 @@ export const zh: Translations = {
         filterPhotos: '照片',
         filterVideos: '视频',
         filterLivePhotos: '实况',
+        locationFilter: '按有无定位过滤',
+        locationAny: '定位',
+        locationWith: '有定位',
+        locationWithout: '无定位',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const zh: Translations = {
         thumbnails: '缩略图',
         cache: '缓存',
         clearCache: '清除缓存',
+        clearingCache: '正在清除…',
         clearAllData: '清除所有数据',
         clearCacheConfirm: '这将删除所有已导入的照片和缩略图。地图缓存将被保留。\n\n是否继续？',
         libraryFolders: '照片文件夹',

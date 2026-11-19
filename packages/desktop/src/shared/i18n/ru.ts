@@ -56,6 +56,10 @@ export const ru: Translations = {
         filterPhotos: 'Фото',
         filterVideos: 'Видео',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const ru: Translations = {
         thumbnails: 'Миниатюры',
         cache: 'Кэш',
         clearCache: 'Очистить кэш',
+        clearingCache: 'Clearing…',
         clearAllData: 'Удалить все данные',
         clearCacheConfirm: 'Это удалит все импортированные фото и миниатюры. Кэш карты будет сохранен.\n\nПродолжить?',
         libraryFolders: 'Photo Folders',

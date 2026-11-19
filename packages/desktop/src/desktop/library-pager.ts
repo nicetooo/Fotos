@@ -6,7 +6,7 @@
  * their replacements arrive, so the grid does not blink during an import.
  */
 
-import { queryLibrary, type LibraryItem, type MediaFilter } from "../shared/query";
+import { queryLibrary, type LibraryItem, type LocationFilter, type MediaFilter } from "../shared/query";
 import type { SortBy } from "../shared/types";
 
 const PAGE_SIZE = 200;
@@ -33,15 +33,20 @@ export class LibraryPager {
     private sortBy: SortBy = "date";
     private descending = true;
     private filter: MediaFilter = "all";
+    private location: LocationFilter = "all";
 
     /** `onChange` fires whenever counts or pages change. */
     constructor(private onChange: () => void) {}
 
     /** Switch sort/filter. Nothing from the old order is reusable. */
-    setParams(sortBy: SortBy, descending: boolean, filter: MediaFilter) {
-        if (sortBy === this.sortBy && descending === this.descending && filter === this.filter && this.loaded) {
+    setParams(sortBy: SortBy, descending: boolean, filter: MediaFilter, location: LocationFilter = "all") {
+        if (
+            sortBy === this.sortBy && descending === this.descending && filter === this.filter
+            && location === this.location && this.loaded
+        ) {
             return;
         }
+        this.location = location;
         this.sortBy = sortBy;
         this.descending = descending;
         this.filter = filter;
@@ -93,7 +98,7 @@ export class LibraryPager {
         const pending = this.loading.get(page);
         if (pending) return pending;
         const epoch = this.epoch;
-        const request = queryLibrary(this.sortBy, this.descending, this.filter, page * PAGE_SIZE, PAGE_SIZE)
+        const request = queryLibrary(this.sortBy, this.descending, this.filter, this.location, page * PAGE_SIZE, PAGE_SIZE)
             .then((res) => {
                 if (epoch !== this.epoch) return;
                 this.counts = {

@@ -82,6 +82,10 @@ export interface Translations {
         filterPhotos: string;
         filterVideos: string;
         filterLivePhotos: string;
+        locationFilter: string;
+        locationAny: string;
+        locationWith: string;
+        locationWithout: string;
     };
 
     // Preview
@@ -137,6 +141,7 @@ export interface Translations {
         thumbnails: string;
         cache: string;
         clearCache: string;
+        clearingCache: string;
         clearAllData: string;
         clearCacheConfirm: string;
         libraryFolders: string;

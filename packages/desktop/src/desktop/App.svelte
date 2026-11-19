@@ -28,7 +28,9 @@
         albumItemToPhoto,
         type AlbumWindow,
         type LibraryItem,
+        queryLibrary,
         type MediaFilter,
+        type LocationFilter,
     } from "../shared/query";
     import { LibraryPager, type LibraryCounts } from "./library-pager";
 
@@ -208,11 +210,17 @@
     // The drawer queries only while it is open.
     $effect(() => {
         if (!showLibrary) return;
-        pager.setParams(sortBy, sortOrder === "desc", mediaFilter);
+        pager.setParams(sortBy, sortOrder === "desc", mediaFilter, locationFilter);
     });
 
     // Photos / videos / Live Photos on the map and the timeline (the drawer
     // has its own filter). Rust narrows the query index, so both follow.
+    // The drawer only: everything, items with a position, items without.
+    let locationFilter = $state<LocationFilter>("all");
+    function cycleLocationFilter() {
+        locationFilter = locationFilter === "all" ? "located" : locationFilter === "located" ? "unlocated" : "all";
+    }
+
     let mapMediaFilter = $state<MediaFilter>("all");
     async function setMapMediaFilter(next: MediaFilter) {
         try {
@@ -239,7 +247,15 @@
         importStatus = { success: 0, failure: 0, duplicates: 0, current: 0, total: 0, lastPath: "" };
         await platformService.rescanLibrary();
         bumpRefresh();
+        sharpenThumbnails();
     }
+
+    // Imports record the camera's small embedded thumbnail and move on; the
+    // real ones are made in the background and show up as they are ready.
+    function sharpenThumbnails() {
+        invoke("sharpen_thumbnails").catch((e) => console.error("[thumbs] sharpen_thumbnails failed", e));
+    }
+    let lastSharpenRefresh = 0;
 
     onMount(async () => {
         try {
@@ -279,6 +295,15 @@
 
             platformService.onImportComplete(() => {
                 bumpRefresh();
+                sharpenThumbnails();
+            });
+
+            await listen("thumbs-sharpened", (event: any) => {
+                const now = performance.now();
+                if (event.payload?.remaining === 0 || now - lastSharpenRefresh >= 2000) {
+                    lastSharpenRefresh = now;
+                    bumpRefresh();
+                }
             });
 
             // Listen for reload-photos event (e.g., after clear cache)
@@ -543,6 +568,37 @@
             out.push({ name: "desktop:viewer-album", ok, detail });
         }
 
+        // Position filter in the drawer: with, without, and back to everything.
+        {
+            closePreview();
+            showLibrary = true;
+            mediaFilter = "all";
+            locationFilter = "all";
+            await until(() => libraryLoaded && libraryCounts.total > 0);
+            const all = libraryCounts.total;
+            const settle = async (expectChangeFrom: number) => {
+                await until(() => libraryLoaded && libraryCounts.total !== expectChangeFrom, 3000);
+                await sleep(300);
+                return libraryCounts.total;
+            };
+            cycleLocationFilter();
+            const located = await settle(all);
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-located.png") },
+            }).catch(() => {});
+            await sleep(600);
+            cycleLocationFilter();
+            const unlocated = await settle(located);
+            cycleLocationFilter();
+            await settle(unlocated);
+            out.push({
+                name: "desktop:location-filter",
+                ok: located > 0 && unlocated > 0 && located + unlocated === all && libraryCounts.total === all,
+                detail: { all, located, unlocated },
+            });
+        }
+
         showLibrary = false;
         restoreFilter();
 
@@ -564,6 +620,44 @@
                     if (opaque || style.backgroundImage !== "none") painted.push(`${el.tagName}.${(el as HTMLElement).className}`.slice(0, 80));
                 }
             }
+            // Move the pointer across the map and the controls. Things that
+            // only happen when a pointer is over the window (tracking areas,
+            // hover) have crashed the app before.
+            {
+                const area = document.querySelector(".controls")?.parentElement?.getBoundingClientRect();
+                if (area) {
+                    for (let i = 0; i <= 24; i++) {
+                        await invoke("mac_map_command", {
+                            command: "mapDebugMouseMove",
+                            body: { x: area.left + (area.width * i) / 24, y: area.top + area.height * (0.2 + 0.6 * ((i % 5) / 4)) },
+                        }).catch(() => {});
+                        await sleep(40);
+                    }
+                }
+                await invoke("mac_map_command", { command: "mapDebugProbeViews", body: {} }).catch(() => {});
+                await sleep(300);
+                out.push({ name: "desktop:pointer-over-map", ok: !!area, detail: { moves: 25 } });
+            }
+
+            // The import menu drops out of the narrow button column: a click
+            // on an item's text (not only its icon) must stay with the page.
+            {
+                const plus = document.querySelector<HTMLElement>("button[title='" + t.import.importPhotos + "']");
+                plus?.click();
+                await sleep(700);
+                const item = [...document.querySelectorAll<HTMLElement>("button")].find((b) => b.textContent?.trim() === t.import.importFile);
+                const r = item?.getBoundingClientRect();
+                if (r) {
+                    await invoke("mac_map_command", { command: "mapDebugHit", body: { label: "import menu text", x: r.right - 12, y: r.top + r.height / 2 } }).catch(() => {});
+                    await invoke("mac_map_command", { command: "mapDebugHit", body: { label: "import menu icon", x: r.left + 14, y: r.top + r.height / 2 } }).catch(() => {});
+                }
+                await sleep(300);
+                // Close it again (the click-catcher behind the menu).
+                document.querySelector<HTMLElement>(".fixed.inset-0.z-40")?.click();
+                await sleep(300);
+                out.push({ name: "desktop:import-menu-open", ok: !!r, detail: { width: Math.round(r?.width ?? 0) } });
+            }
+
             // The filter menu, open.
             (document.querySelector("[data-media-filter]") as HTMLElement | null)?.click();
             await sleep(700);
@@ -584,6 +678,33 @@
                 name: "desktop:native-map-uncovered",
                 ok: !!r && r.width > 200 && painted.length === 0,
                 detail: { width: Math.round(r?.width ?? 0), height: Math.round(r?.height ?? 0), painted },
+            });
+        }
+
+        // SCENARIO=clear: clear everything while the background thumbnail pass
+        // is busy. That used to fail half way and leave the app without a
+        // database. Wipes the test library: run with FRESH=1 afterwards.
+        if ((await invoke("agent_test_enabled")) === "clear") {
+            const before = await photoCount();
+            await invoke("sharpen_thumbnails");
+            await sleep(1500);
+            let failed = "";
+            const t0 = performance.now();
+            await invoke("clear_app_data").catch((e) => { failed = String(e); });
+            const clearMs = Math.round(performance.now() - t0);
+            let after = -1;
+            let usable = false;
+            try {
+                after = await photoCount();
+                await queryLibrary("date", true, "all", "all", 0, 10);
+                usable = true;
+            } catch (e) {
+                failed = failed || String(e);
+            }
+            out.push({
+                name: "desktop:clear-while-busy",
+                ok: !failed && usable && before > 0 && after === 0,
+                detail: { before, after, clearMs, failed },
             });
         }
 
@@ -845,7 +966,7 @@
                         <i class="fa-solid fa-images theme-text-muted text-sm"></i>
                         <span class="theme-text-primary font-medium">
                             {libraryCounts.total} {t.nav.photos}
-                            {#if mediaFilter !== 'all' && libraryCounts.total !== libraryCounts.groupedTotal}
+                            {#if (mediaFilter !== 'all' || locationFilter !== 'all') && libraryCounts.total !== libraryCounts.groupedTotal}
                                 <span class="theme-text-muted text-xs">/ {libraryCounts.groupedTotal}</span>
                             {:else if libraryCounts.total !== libraryCounts.filesTotal}
                                 <span class="theme-text-muted text-xs">({libraryCounts.filesTotal} {t.nav.files})</span>
@@ -944,6 +1065,20 @@
                             <i class="fa-solid fa-bolt text-[9px] mr-1"></i>{t.library.filterLivePhotos}
                         </button>
                     </div>
+
+                    <!-- Position filter: click to go through all / with / without -->
+                    <button
+                        onclick={cycleLocationFilter}
+                        data-location-filter={locationFilter}
+                        title={t.library.locationFilter}
+                        class="h-[26px] ml-1.5 px-2 rounded text-[11px] whitespace-nowrap transition-all {locationFilter === 'all'
+                            ? 'theme-bg-primary theme-text-muted hover:theme-text-secondary'
+                            : 'bg-[var(--accent)] text-black font-medium'}"
+                    >
+                        <i class="fa-solid fa-location-dot text-[10px] mr-1"></i>{locationFilter === 'located'
+                            ? t.library.locationWith
+                            : locationFilter === 'unlocated' ? t.library.locationWithout : t.library.locationAny}
+                    </button>
 
                     <div class="flex-1"></div>
 

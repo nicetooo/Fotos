@@ -212,9 +212,11 @@
                 class="px-3 py-1.5 rounded theme-bg-tertiary border theme-border text-sm theme-text-secondary hover:theme-text-primary disabled:opacity-50"
             >
                 {#if clearCacheLoading}
+                    <!-- Stopping a running import and deleting thousands of
+                         thumbnails can take a while: say so. -->
                     <i class="fa-solid fa-spinner fa-spin mr-1"></i>
                 {/if}
-                {t.settings.clearCache}
+                {clearCacheLoading ? t.settings.clearingCache : t.settings.clearCache}
             </button>
         </div>
     </section>

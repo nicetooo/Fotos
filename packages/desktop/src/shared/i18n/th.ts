@@ -56,6 +56,10 @@ export const th: Translations = {
         filterPhotos: 'รูปภาพ',
         filterVideos: 'วิดีโอ',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const th: Translations = {
         thumbnails: 'รูปย่อ',
         cache: 'แคช',
         clearCache: 'ล้างแคช',
+        clearingCache: 'Clearing…',
         clearAllData: 'ลบข้อมูลทั้งหมด',
         clearCacheConfirm: 'การกระทำนี้จะลบรูปภาพที่นำเข้าและรูปย่อทั้งหมด แคชแผนที่จะถูกเก็บไว้\n\nดำเนินการต่อ?',
         libraryFolders: 'Photo Folders',

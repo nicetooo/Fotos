@@ -56,6 +56,10 @@ export const en: Translations = {
         filterPhotos: 'Photos',
         filterVideos: 'Videos',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const en: Translations = {
         thumbnails: 'Thumbnails',
         cache: 'Cache',
         clearCache: 'Clear Cache',
+        clearingCache: 'Clearing…',
         clearAllData: 'Clear All Data',
         clearCacheConfirm: 'This will delete all imported photos and thumbnails. Map cache will be preserved.\n\nContinue?',
         libraryFolders: 'Photo Folders',

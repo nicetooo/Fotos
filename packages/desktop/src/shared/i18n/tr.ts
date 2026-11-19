@@ -56,6 +56,10 @@ export const tr: Translations = {
         filterPhotos: 'Fotoğraflar',
         filterVideos: 'Videolar',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const tr: Translations = {
         thumbnails: 'Küçük resimler',
         cache: 'Önbellek',
         clearCache: 'Önbelleği temizle',
+        clearingCache: 'Clearing…',
         clearAllData: 'Tüm verileri sil',
         clearCacheConfirm: 'Bu, tüm içe aktarılan fotoğrafları ve küçük resimleri silecektir. Harita önbelleği korunacaktır.\n\nDevam edilsin mi?',
         libraryFolders: 'Photo Folders',

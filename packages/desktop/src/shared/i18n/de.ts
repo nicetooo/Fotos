@@ -56,6 +56,10 @@ export const de: Translations = {
         filterPhotos: 'Fotos',
         filterVideos: 'Videos',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const de: Translations = {
         thumbnails: 'Miniaturansichten',
         cache: 'Cache',
         clearCache: 'Cache leeren',
+        clearingCache: 'Clearing…',
         clearAllData: 'Alle Daten löschen',
         clearCacheConfirm: 'Dies löscht alle importierten Fotos und Miniaturansichten. Der Karten-Cache wird beibehalten.\n\nFortfahren?',
         libraryFolders: 'Photo Folders',

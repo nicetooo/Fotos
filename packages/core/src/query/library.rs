@@ -170,9 +170,19 @@ impl LibraryView {
     }
 
     /// Positions of the entries matching `filter`, in display order.
-    pub fn order(&self, sort: LibrarySort, descending: bool, filter: Option<MediaType>) -> Vec<u32> {
+    /// `located`: `Some(true)` keeps only entries with a position, `Some(false)`
+    /// only those without, `None` all.
+    pub fn order(
+        &self,
+        sort: LibrarySort,
+        descending: bool,
+        filter: Option<MediaType>,
+        located: Option<bool>,
+    ) -> Vec<u32> {
+        let has_position = |info: &PhotoInfo| info.metadata.lat.is_some() && info.metadata.lon.is_some();
         let mut order: Vec<u32> = (0..self.items.len() as u32)
             .filter(|&i| filter.map_or(true, |m| self.items[i as usize].info.media_type == m))
+            .filter(|&i| located.map_or(true, |want| has_position(&self.items[i as usize].info) == want))
             .collect();
 
         let names: Vec<String> = if sort == LibrarySort::Name {
@@ -276,12 +286,12 @@ mod tests {
     fn sorts_and_filters() {
         let v = sample();
         // Missing dates sort first ascending.
-        assert_eq!(ids(&v, &v.order(LibrarySort::Date, false, None)), vec![5, 3, 4, 1, 6]);
-        assert_eq!(ids(&v, &v.order(LibrarySort::Date, true, None)), vec![6, 1, 4, 3, 5]);
-        assert_eq!(ids(&v, &v.order(LibrarySort::Name, false, None)), vec![6, 5, 1, 4, 3]);
-        assert_eq!(ids(&v, &v.order(LibrarySort::Dimensions, true, None)), vec![3, 5, 1, 4, 6]);
-        assert_eq!(ids(&v, &v.order(LibrarySort::Date, false, Some(MediaType::Video))), vec![5]);
-        assert_eq!(v.order(LibrarySort::Date, false, Some(MediaType::LivePhoto)).len(), 0);
+        assert_eq!(ids(&v, &v.order(LibrarySort::Date, false, None, None)), vec![5, 3, 4, 1, 6]);
+        assert_eq!(ids(&v, &v.order(LibrarySort::Date, true, None, None)), vec![6, 1, 4, 3, 5]);
+        assert_eq!(ids(&v, &v.order(LibrarySort::Name, false, None, None)), vec![6, 5, 1, 4, 3]);
+        assert_eq!(ids(&v, &v.order(LibrarySort::Dimensions, true, None, None)), vec![3, 5, 1, 4, 6]);
+        assert_eq!(ids(&v, &v.order(LibrarySort::Date, false, Some(MediaType::Video), None)), vec![5]);
+        assert_eq!(v.order(LibrarySort::Date, false, Some(MediaType::LivePhoto), None).len(), 0);
     }
 
     #[test]
@@ -298,5 +308,18 @@ mod tests {
         assert_eq!(json["hasRaw"], true);
         assert_eq!(json["rawPath"], "/a/IMG_1.CR3");
         assert_eq!(json["media_type"], "photo");
+    }
+
+    #[test]
+    fn filters_by_whether_there_is_a_position() {
+        let mut here = photo(1, "/a/here.jpg", "2024-01-01 10:00:00", 10, 10, MediaType::Photo);
+        here.metadata.lat = Some(31.2);
+        here.metadata.lon = Some(121.5);
+        let nowhere = photo(2, "/a/nowhere.jpg", "2024-01-02 10:00:00", 10, 10, MediaType::Photo);
+        let v = LibraryView::build(vec![here, nowhere]);
+        let ids = |order: Vec<u32>| -> Vec<i64> { order.iter().map(|&i| v.get(i).unwrap().info.id.id).collect() };
+        assert_eq!(ids(v.order(LibrarySort::Date, false, None, None)), vec![1, 2]);
+        assert_eq!(ids(v.order(LibrarySort::Date, false, None, Some(true))), vec![1]);
+        assert_eq!(ids(v.order(LibrarySort::Date, false, None, Some(false))), vec![2]);
     }
 }

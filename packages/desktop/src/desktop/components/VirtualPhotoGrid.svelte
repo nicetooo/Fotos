@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { convertFileSrc } from "@tauri-apps/api/core";
+    import { convertFileSrc, invoke } from "@tauri-apps/api/core";
     import type { PhotoInfo } from "../../shared/types";
 
     interface Props {
@@ -88,6 +88,23 @@
             cells.push({ photo: getItem(index), index });
         }
         return cells;
+    });
+
+    // Freshly imported items show the camera's small embedded thumbnail (kept
+    // under ".../quick/") or none at all. Once scrolling settles, ask for the
+    // real thumbnails of what is on screen; the rest follow in the background.
+    $effect(() => {
+        const waiting: string[] = [];
+        for (const { photo } of visiblePhotos) {
+            // Undefined while its page is still loading.
+            if (!photo || photo.media_type === "video") continue;
+            if (!photo.thumb_path || photo.thumb_path.includes("/quick/")) waiting.push(photo.path);
+        }
+        if (waiting.length === 0) return;
+        const timer = setTimeout(() => {
+            invoke("sharpen_paths", { paths: waiting }).catch(() => {});
+        }, 250);
+        return () => clearTimeout(timer);
     });
 
     // ── Offset for the visible chunk ──

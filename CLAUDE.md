@@ -197,7 +197,9 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 - macOS 的 `/System/Volumes/Data/...` 和 `/...` 是同一批文件：判规则前先 `without_volume_alias`，重新扫描会把别名路径的记录改名
 - ⚠️ 会批量删库记录的改动，先在库副本上演练：`FOOTOS_DRYRUN_DB=<副本> cargo test rescan_rehearsal -- --nocapture`（在 `packages/desktop/src-tauri`）。曾经没演练直接跑，把 23 万条删到 140 条
 - EXIF 一律用 `metadata::exif::read_container`（容错，取部分结果）。❌ 不要直接 `Reader::new().read_from_container`：不规范的 EXIF 会整体失败，照片就会被上面的规则当成素材图
-- **缩略图**：先取内嵌预览，没有就解码缩小（RAW 除外）
+- **缩略图分两步**（桌面端）：导入时只把相机内嵌的小图抄到 `<thumbnails>/quick/` 先入库（只读文件开头），清晰的 512 像素图由 `sharpen_thumbnails` 在后台补：可见的优先（`sharpen_paths`），然后 JPG，最后 RAW；有导入时让路。❌ 不要在导入里整个读文件做缩略图：存储卡读速约 20MB/s，一张 RAW 26MB，一万张要两小时
+- 慢速卷（`/Volumes` 等）读文件限并发：导入 2 路，补图一次一个
+- 每批 64 个文件提交一次
 - 测试：`IMPORT=1 ./scripts/agent-test/run-desktop.sh`（应用内）；`FOOTOS_IMPORT_FIXTURE=<dir> FOOTOS_IMPORT_EXPECTED=<n> cargo test import_fixture`（改/删/增/移/离线，fixture 由 `scripts/agent-test/make-import-fixture.py` 生成）
 
 ## 技术栈
@@ -266,6 +268,9 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 
 - Mac 版底图也是 MapKit：`src-tauri/macos/FootosMacMap.m`（由 `build.rs` 用 `cc` 编译，仅 macOS），命令经 Rust 的 `mac_map_command` 转发，协议与 iOS 相同。Windows / Linux 仍是 MapLibre
 - 前端是 `desktop/components/NativeMap.svelte`（`capabilities.nativeMap`）。鼠标事件默认交给地图；盖在地图上的网页元素由组件自动收集（地图区域内的 `data-map-overlay`，以及从地图向上各层的兄弟元素），不用逐个标记。新加在地图区域**内部**的控件仍要加 `data-map-overlay`
+- ❌ 不要在 Mac 上给 WebView 实例换运行时子类（`objc_allocateClassPair` + `object_setClass`，iOS 的做法）：AppKit 按类解析部分视图属性，鼠标一移到窗口上就断言崩溃（`NSDP_getComputedPropertyValue: imp != NULL`）。`hitTest:` 是在 `WryWebView` 类上替换的
+- 桌面版进程自己退出时先看 `~/Library/Logs/DiagnosticReports/footos-*.ips`，`pnpm desktop` 崩溃时退出码也是 0
+- 桌面自测的 `mapDebugProbeViews` 会把鼠标移入窗口时系统要问的视图都问一遍，并检查点击落点
 - 桌面自测有一步 `desktop:native-map-uncovered`：地图区域不能被带底色的网页元素盖住
 - Mac 上 WebView 比页面视口高出标题栏那一截（28 点）：页面坐标换成视图坐标必须经过 `viewRectFromPage` / `pagePointFromView`，前端发地图矩形时要带 `vh`
 - **看画面**：`mac_map_command` 的 `mapDebugSnapshot {path}` 让应用截自己的窗口（不需要屏幕录制权限）。桌面自测会写出 `window.png` 和 `window-library.png`，改了桌面界面后要打开看
@@ -347,7 +352,7 @@ iOS 的底图是系统地图（大陆上架要求合规底图；OSM 的边界画
 - 只在照片**第一次出现**时自动 `fitBounds`；后续导入不得抢镜头
 - ❌ 禁止通过 invoke 返回全量照片对象（iOS WKWebView 上 5k+ 对象约 8s）。需要批量数值时用 `tauri::ipc::Response` 返回原始字节
 - 桌面端与移动端共用同一套地图/时间轴数据流（`query_map` 单飞、`query_timeline`、单向同步）。桌面端特有的部分：
-  - **图库抽屉**：RAW+JPEG 分组、媒体类型过滤、排序都在 Rust（`core/src/query/library.rs` 的 `LibraryView`）。前端用 `query_library(sort_by, descending, media_filter, offset, limit)` 按页取（`desktop/library-pager.ts`，每页 200，最多缓存 30 页），抽屉关闭时不查询
+  - **图库抽屉**：RAW+JPEG 分组、媒体类型过滤、排序都在 Rust（`core/src/query/library.rs` 的 `LibraryView`）。前端用 `query_library(sort_by, descending, media_filter, located, offset, limit)` 按页取（`located`：只看有定位 / 只看无定位 / 不限，抽屉工具栏里的三态按钮）（`desktop/library-pager.ts`，每页 200，最多缓存 30 页），抽屉关闭时不查询
   - **RAW 配对规则**：同目录 + 同文件名（不含扩展名）。只看文件名会把不同目录的同名文件配成一对
   - **查看器**：从抽屉打开按抽屉顺序翻；从地图打开走 `query_album` 窗口。单张详情用 `photo_detail(id)`（RAW 行解析到它所属的 JPEG）
   - **框选**：`query_timeline(框 bbox)` 取首尾时间交给时间轴，不在前端遍历照片

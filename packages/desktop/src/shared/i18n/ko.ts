@@ -56,6 +56,10 @@ export const ko: Translations = {
         filterPhotos: '사진',
         filterVideos: '동영상',
         filterLivePhotos: 'Live',
+        locationFilter: '위치로 필터',
+        locationAny: '위치',
+        locationWith: '위치 있음',
+        locationWithout: '위치 없음',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const ko: Translations = {
         thumbnails: '썸네일',
         cache: '캐시',
         clearCache: '캐시 지우기',
+        clearingCache: '지우는 중…',
         clearAllData: '모든 데이터 지우기',
         clearCacheConfirm: '가져온 모든 사진과 썸네일이 삭제됩니다. 지도 캐시는 유지됩니다.\n\n계속하시겠습니까?',
         libraryFolders: '사진 폴더',

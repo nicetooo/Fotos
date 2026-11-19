@@ -56,6 +56,10 @@ export const vi: Translations = {
         filterPhotos: 'Ảnh',
         filterVideos: 'Video',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const vi: Translations = {
         thumbnails: 'Ảnh thu nhỏ',
         cache: 'Bộ nhớ đệm',
         clearCache: 'Xóa bộ nhớ đệm',
+        clearingCache: 'Clearing…',
         clearAllData: 'Xóa tất cả dữ liệu',
         clearCacheConfirm: 'Điều này sẽ xóa tất cả ảnh đã nhập và ảnh thu nhỏ. Bộ nhớ đệm bản đồ sẽ được giữ lại.\n\nTiếp tục?',
         libraryFolders: 'Photo Folders',

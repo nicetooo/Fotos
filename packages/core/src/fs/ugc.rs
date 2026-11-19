@@ -162,6 +162,13 @@ pub fn is_software_dir(dir: &Path) -> bool {
     false
 }
 
+/// Hidden files. On volumes that cannot hold extended attributes (the exFAT
+/// of a memory card) macOS writes a 4 KB "._NAME" companion next to every
+/// file it touches, with the same extension: 79 "RAW files" on one card.
+fn is_hidden_file(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with('.')).unwrap_or(false)
+}
+
 /// File types that are graphics rather than photographs. Cameras and phones
 /// write JPEG, HEIC or RAW; PNG and WebP are screenshots, icons and web art.
 fn is_graphics_file(path: &Path) -> bool {
@@ -192,7 +199,7 @@ impl ScanRules {
     /// Whether a scan of `root` leaves `path` out by rule (not because it
     /// could not be read). `root` itself is always entered: the person chose it.
     pub fn excludes(&mut self, root: &Path, path: &Path) -> bool {
-        if is_graphics_file(path) {
+        if is_graphics_file(path) || is_hidden_file(path) {
             return true;
         }
         let Ok(relative) = path.strip_prefix(root) else {
@@ -227,7 +234,7 @@ pub fn scan_user_media(root: &Path) -> Result<Vec<PathBuf>, CoreError> {
             continue;
         }
         let path = entry.path();
-        if is_graphics_file(path) || !(is_supported_image(path) || is_supported_video(path)) {
+        if is_graphics_file(path) || is_hidden_file(path) || !(is_supported_image(path) || is_supported_video(path)) {
             continue;
         }
         if entry.metadata().map(|m| m.len() > 0).unwrap_or(false) {
@@ -268,7 +275,7 @@ pub fn is_user_media(path: &Path, meta: &PhotoMetadata, file_size: u64) -> bool 
     if is_supported_video(path) {
         return file_size >= MIN_VIDEO_BYTES;
     }
-    if is_graphics_file(path) {
+    if is_graphics_file(path) || is_hidden_file(path) {
         return false;
     }
     // Only phones and cameras write these.
@@ -329,6 +336,7 @@ mod tests {
         assert!(rules.excludes(Path::new("/"), Path::new("/Users/me/Library/a.jpg")));
         assert!(rules.excludes(Path::new("/"), Path::new("/Users/me/Pictures/shot.png")));
         assert!(!rules.excludes(Path::new("/"), Path::new("/Users/me/Pictures/a.jpg")));
+        assert!(rules.excludes(Path::new("/Volumes/Card"), Path::new("/Volumes/Card/DCIM/._DSC_1.NEF")));
     }
 
     #[test]
@@ -353,6 +361,7 @@ mod tests {
             "proj/node_modules/pkg/logo.jpg",
             "Tool.app/Contents/bg.jpg",
             ".hidden/c.jpg",
+            "trip/._a.jpg",
             "repo/assets/hero.jpg",
             "repo/Cargo.toml",
         ] {

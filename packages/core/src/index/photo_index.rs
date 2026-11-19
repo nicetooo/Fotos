@@ -157,11 +157,12 @@ impl PhotoIndex {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
-    /// `(path, thumb_path)` of rows that have a thumbnail recorded.
+    /// `(path, thumb_path)` of every row, newest first; the thumbnail is
+    /// empty where none is recorded.
     pub fn recorded_thumbs(&self) -> Result<Vec<(String, String)>, CoreError> {
         let conn = self.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT path, thumb_path FROM photos WHERE thumb_path IS NOT NULL AND thumb_path != ''",
+            "SELECT path, COALESCE(thumb_path, '') FROM photos ORDER BY date_taken DESC, id DESC",
         )?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         Ok(rows.filter_map(Result::ok).collect())

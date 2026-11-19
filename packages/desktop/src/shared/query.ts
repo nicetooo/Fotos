@@ -108,6 +108,9 @@ export function queryAlbumIn(
 
 export type MediaFilter = "all" | "photo" | "video" | "live_photo";
 
+/** Whether an item has a position: any, only with one, only without. */
+export type LocationFilter = "all" | "located" | "unlocated";
+
 /** A library entry: a file with its paired RAW folded in. */
 export interface LibraryItem extends PhotoInfo {
     rawId?: number | null;
@@ -130,6 +133,7 @@ export function queryLibrary(
     sortBy: SortBy,
     descending: boolean,
     mediaFilter: MediaFilter,
+    locationFilter: LocationFilter,
     offset: number,
     limit: number,
 ): Promise<LibraryPage> {
@@ -137,6 +141,7 @@ export function queryLibrary(
         sortBy,
         descending,
         mediaFilter: mediaFilter === "all" ? null : mediaFilter,
+        located: locationFilter === "all" ? null : locationFilter === "located",
         offset,
         limit,
     });

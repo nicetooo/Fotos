@@ -56,6 +56,10 @@ export const ja: Translations = {
         filterPhotos: '写真',
         filterVideos: '動画',
         filterLivePhotos: 'Live',
+        locationFilter: '位置情報で絞り込む',
+        locationAny: '位置',
+        locationWith: '位置あり',
+        locationWithout: '位置なし',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const ja: Translations = {
         thumbnails: 'サムネイル',
         cache: 'キャッシュ',
         clearCache: 'キャッシュをクリア',
+        clearingCache: '消去中…',
         clearAllData: 'すべてのデータをクリア',
         clearCacheConfirm: 'インポートした写真とサムネイルがすべて削除されます。マップキャッシュは保持されます。\n\n続行しますか？',
         libraryFolders: '写真フォルダ',

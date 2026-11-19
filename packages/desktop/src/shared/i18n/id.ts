@@ -56,6 +56,10 @@ export const id: Translations = {
         filterPhotos: 'Foto',
         filterVideos: 'Video',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const id: Translations = {
         thumbnails: 'Gambar mini',
         cache: 'Cache',
         clearCache: 'Hapus cache',
+        clearingCache: 'Clearing…',
         clearAllData: 'Hapus semua data',
         clearCacheConfirm: 'Ini akan menghapus semua foto yang diimpor dan gambar mini. Cache peta akan dipertahankan.\n\nLanjutkan?',
         libraryFolders: 'Photo Folders',

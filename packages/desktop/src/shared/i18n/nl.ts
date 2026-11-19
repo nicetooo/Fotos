@@ -56,6 +56,10 @@ export const nl: Translations = {
         filterPhotos: "Foto's",
         filterVideos: "Video's",
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const nl: Translations = {
         thumbnails: 'Miniaturen',
         cache: 'Cache',
         clearCache: 'Cache wissen',
+        clearingCache: 'Clearing…',
         clearAllData: 'Alle gegevens wissen',
         clearCacheConfirm: 'Dit verwijdert alle geïmporteerde foto\'s en miniaturen. De kaartcache blijft behouden.\n\nDoorgaan?',
         libraryFolders: 'Photo Folders',

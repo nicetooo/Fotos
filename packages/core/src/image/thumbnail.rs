@@ -107,6 +107,23 @@ fn generate_image_file(
     Ok(())
 }
 
+/// Writes the small thumbnail a camera embeds in a file's EXIF (about 160 px)
+/// to `dest`, turned the right way up. It sits in the first few hundred
+/// kilobytes, so this is quick even where reading whole files is slow (a
+/// memory card). Too small to look good in a grid: a stand-in until the real
+/// thumbnail is made.
+pub fn write_embedded_thumbnail(source: &Path, dest: &Path) -> Result<(), ThumbnailError> {
+    let thumb = try_extract_embedded_thumbnail(source, &ThumbnailSpec::default())?;
+    let thumb = match read_exif_orientation(source) {
+        Some(orient) if orient > 1 => apply_orientation_correction(&thumb, orient)?,
+        _ => thumb,
+    };
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+    }
+    std::fs::write(dest, thumb).map_err(|e| ThumbnailError::EncodeError(e.to_string()))
+}
+
 /// The longer side of an image file in pixels, read from its header.
 pub fn image_long_side(path: &Path) -> Option<u32> {
     image::image_dimensions(path).ok().map(|(w, h)| w.max(h))

@@ -59,6 +59,20 @@ def main():
     pair.save(os.path.join(lib, "pair.jpg"), exif=exif(39.9, 116.4, "2025:03:01 10:00:00"))
     pair.save(os.path.join(lib, "pair.dng"), format="TIFF")
 
+    # A camera file: carries its own small thumbnail in the EXIF, which an
+    # import records first and replaces with a real one later.
+    import io
+    shot = picture(960).resize((1600, 1200))
+    small = io.BytesIO()
+    shot.resize((160, 120)).save(small, format="JPEG")
+    with_thumb = piexif.dump({
+        "0th": {piexif.ImageIFD.Make: "TestCam"},
+        "Exif": {piexif.ExifIFD.DateTimeOriginal: "2025:05:01 10:00:00"},
+        "1st": {piexif.ImageIFD.Compression: 6},
+        "thumbnail": small.getvalue(),
+    })
+    shot.save(os.path.join(lib, "camera.jpg"), exif=with_thumb)
+
     # Not a person's photos: must stay out of the library.
     os.makedirs(os.path.join(lib, "assets"))
     os.makedirs(os.path.join(lib, "Tool.app", "Contents"))
@@ -71,7 +85,7 @@ def main():
                       exif=exif(2.0, 2.0, "2025:04:02 10:00:00"))
 
     # Distinct files: the JPEGs, two lookalikes, pair.jpg and pair.dng. The copy is a duplicate.
-    print(args.count + 2 + 2)
+    print(args.count + 2 + 2 + 1)
     return 0
 
 

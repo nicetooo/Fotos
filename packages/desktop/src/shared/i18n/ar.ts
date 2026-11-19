@@ -56,6 +56,10 @@ export const ar: Translations = {
         filterPhotos: 'صور',
         filterVideos: 'فيديو',
         filterLivePhotos: 'Live',
+        locationFilter: 'Filter by location',
+        locationAny: 'Location',
+        locationWith: 'With location',
+        locationWithout: 'No location',
     },
 
     preview: {
@@ -107,6 +111,7 @@ export const ar: Translations = {
         thumbnails: 'الصور المصغرة',
         cache: 'الذاكرة المؤقتة',
         clearCache: 'مسح الذاكرة المؤقتة',
+        clearingCache: 'Clearing…',
         clearAllData: 'حذف جميع البيانات',
         clearCacheConfirm: 'سيتم حذف جميع الصور المستوردة والصور المصغرة. سيتم الاحتفاظ بذاكرة الخريطة المؤقتة.\n\nهل تريد المتابعة؟',
         libraryFolders: 'Photo Folders',

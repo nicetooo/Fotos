@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onDestroy } from "svelte";
     import { convertFileSrc } from "@tauri-apps/api/core";
     import { invoke } from "@tauri-apps/api/core";
     import { appDataDir } from "@tauri-apps/api/path";
@@ -88,23 +89,29 @@
         }
     });
 
+    // Developing a RAW can take seconds, by which time another photo may be
+    // showing or the viewer may be closed. Each request gets a number and only
+    // the latest one may touch the state. (Comparing with `src` instead reads
+    // a prop of a viewer that no longer exists, and throws.)
+    let rawRequest = 0;
+    onDestroy(() => { rawRequest++; });
+
     async function loadRawPreview(path: string) {
+        const request = ++rawRequest;
         try {
             const cacheDir = await appDataDir();
             const previewPath = await invoke<string>("get_raw_preview", { path, cacheDir });
-            if (path === src) {
-                rawPreviewPath = previewPath;
-            }
+            if (request !== rawRequest) return;
+            rawPreviewPath = previewPath;
         } catch (e) {
+            if (request !== rawRequest) return;
             console.error("[RAW] Failed to load full preview, will use thumbnail:", e);
-            if (path === src) {
-                rawPreviewFailed = true;
-                if (!thumbPath) {
-                    error = true;
-                }
+            rawPreviewFailed = true;
+            if (!thumbPath) {
+                error = true;
             }
         } finally {
-            if (path === src) {
+            if (request === rawRequest) {
                 loading = false;
             }
         }
