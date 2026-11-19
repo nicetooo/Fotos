@@ -45,7 +45,22 @@
     let height = $state(0);
     let scrollTop = $state(0);
 
-    let columns = $derived(width >= 700 ? 7 : width >= 500 ? 5 : 4);
+    // How many photos across: a default by width, changed by pinching with
+    // two fingers anywhere on the list, and remembered.
+    const COLUMNS_KEY = "footos.albumColumns";
+    const MIN_COLUMNS = 2;
+    let defaultColumns = $derived(width >= 700 ? 7 : width >= 500 ? 5 : 4);
+    let maxColumns = $derived(defaultColumns * 2);
+    let chosenColumns = $state<number | null>(readColumns());
+    let columns = $derived(Math.min(maxColumns, Math.max(MIN_COLUMNS, chosenColumns ?? defaultColumns)));
+    function readColumns(): number | null {
+        try {
+            const n = Number(localStorage.getItem(COLUMNS_KEY));
+            return Number.isInteger(n) && n >= MIN_COLUMNS ? n : null;
+        } catch {
+            return null;
+        }
+    }
     let cell = $derived(width > 0 ? (width - (columns - 1) * GAP) / columns : 0);
     let rowHeight = $derived(cell + GAP);
     let rows = $derived(Math.ceil(items.length / columns));
@@ -109,7 +124,15 @@
         root.addEventListener("touchmove", edgeMove, { passive: false });
         root.addEventListener("touchend", edgeEnd);
         root.addEventListener("touchcancel", edgeEnd);
+        root.addEventListener("touchstart", pinchStart, { passive: true });
+        root.addEventListener("touchmove", pinchMove, { passive: false });
+        root.addEventListener("touchend", pinchEnd);
+        root.addEventListener("touchcancel", pinchEnd);
         return () => {
+            root.removeEventListener("touchstart", pinchStart);
+            root.removeEventListener("touchmove", pinchMove);
+            root.removeEventListener("touchend", pinchEnd);
+            root.removeEventListener("touchcancel", pinchEnd);
             ro.disconnect();
             root.removeEventListener("touchstart", edgeStart);
             root.removeEventListener("touchmove", edgeMove);
@@ -117,6 +140,75 @@
             root.removeEventListener("touchcancel", edgeEnd);
         };
     });
+
+    // --- Pinch to resize -------------------------------------------------
+    // Two fingers apart: bigger photos (fewer across); together: smaller.
+    // The photo between the fingers stays where it is.
+    let pinch: { distance: number; columns: number; index: number; y: number } | null = null;
+    let pinchedAt = 0;
+    function spread(e: TouchEvent): number {
+        const [a, b] = [e.touches[0], e.touches[1]];
+        return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    }
+    function pinchStart(e: TouchEvent) {
+        if (e.touches.length !== 2 || menuIndex !== null || rowHeight <= 0) return;
+        cancelPress();
+        edge = null;
+        const box = scroller.getBoundingClientRect();
+        const x = (e.touches[0].clientX + e.touches[1].clientX) / 2 - box.left;
+        const y = (e.touches[0].clientY + e.touches[1].clientY) / 2 - box.top;
+        const row = Math.floor((scroller.scrollTop + y) / rowHeight);
+        const column = Math.min(columns - 1, Math.max(0, Math.floor(x / (cell + GAP))));
+        const index = Math.min(items.length - 1, Math.max(0, row * columns + column));
+        pinch = { distance: Math.max(1, spread(e)), columns, index, y };
+        // Resizing takes the cells under the fingers out of the page, and a
+        // touch keeps reporting to the element it started on: once that is
+        // gone its events no longer reach the list. So listen on them too.
+        releasePinchTargets();
+        for (const touch of Array.from(e.touches)) {
+            const target = touch.target;
+            if (!(target instanceof Element) || pinchTargets.includes(target)) continue;
+            target.addEventListener("touchmove", pinchMove as EventListener, { passive: false });
+            target.addEventListener("touchend", pinchEnd as EventListener);
+            target.addEventListener("touchcancel", pinchEnd as EventListener);
+            pinchTargets.push(target);
+        }
+    }
+    let pinchTargets: Element[] = [];
+    function releasePinchTargets() {
+        for (const target of pinchTargets) {
+            target.removeEventListener("touchmove", pinchMove as EventListener);
+            target.removeEventListener("touchend", pinchEnd as EventListener);
+            target.removeEventListener("touchcancel", pinchEnd as EventListener);
+        }
+        pinchTargets = [];
+    }
+    function pinchMove(e: TouchEvent) {
+        if (!pinch || e.touches.length !== 2) return;
+        if (e.cancelable) e.preventDefault();
+        pinchedAt = performance.now();
+        const wanted = Math.round(pinch.columns / (spread(e) / pinch.distance));
+        setColumns(wanted, pinch.index, pinch.y);
+    }
+    function pinchEnd(e: TouchEvent) {
+        if (pinch && e.touches.length < 2) {
+            pinch = null;
+            releasePinchTargets();
+        }
+    }
+    /** Change the number of columns, keeping `index` at height `y` of the list. */
+    function setColumns(wanted: number, index: number, y: number) {
+        const next = Math.min(maxColumns, Math.max(MIN_COLUMNS, wanted));
+        if (next === columns) return;
+        chosenColumns = next;
+        try { localStorage.setItem(COLUMNS_KEY, String(next)); } catch { /* private mode */ }
+        const nextCell = (width - (next - 1) * GAP) / next;
+        const top = Math.floor(index / next) * (nextCell + GAP) + nextCell / 2 - y;
+        requestAnimationFrame(() => {
+            scroller.scrollTop = Math.max(0, top);
+            scrollTop = scroller.scrollTop;
+        });
+    }
 
     // --- Edge swipe back -------------------------------------------------
     const EDGE_WIDTH = 28;
@@ -227,6 +319,8 @@
     function cellClick(index: number, e?: MouseEvent) {
         // Cells may be links; a tap must never navigate.
         e?.preventDefault();
+        // Lifting the fingers of a pinch is not a tap.
+        if (performance.now() - pinchedAt < 400) return;
         // The click that ends a long press belongs to the menu, not the cell.
         if (suppressClick) {
             suppressClick = false;
