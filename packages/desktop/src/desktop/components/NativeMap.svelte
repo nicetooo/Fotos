@@ -444,13 +444,27 @@
         if (!mapArea) return;
         const area = mapArea.getBoundingClientRect();
         const rects: number[][] = [];
+        // An element's box does not bound what is inside it: a menu that
+        // drops out of a 48 px button column is far wider than the column. So
+        // go down the tree, stopping at anything that clips its content
+        // (nothing sticks out of that) and at a budget, in case of a huge one.
+        let budget = 1500;
         const add = (el: Element) => {
+            if (budget-- <= 0) return;
             const style = getComputedStyle(el);
-            if (style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none") return;
+            if (style.display === "none" || style.visibility === "hidden") return;
             const r = el.getBoundingClientRect();
-            if (r.width <= 0 || r.height <= 0) return;
-            if (r.right <= area.left || r.left >= area.right || r.bottom <= area.top || r.top >= area.bottom) return;
-            rects.push([Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]);
+            const inArea = r.width > 0 && r.height > 0
+                && r.right > area.left && r.left < area.right && r.bottom > area.top && r.top < area.bottom;
+            if (inArea && style.pointerEvents !== "none") {
+                rects.push([Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]);
+            }
+            const clips = style.overflowX !== "visible" || style.overflowY !== "visible";
+            // Covering the whole map already: nothing inside can add to that.
+            const coversAll = inArea && style.pointerEvents !== "none"
+                && r.left <= area.left && r.top <= area.top && r.right >= area.right && r.bottom >= area.bottom;
+            if (clips || coversAll) return;
+            for (const child of el.children) add(child);
         };
         mapArea.querySelectorAll("[data-map-overlay]").forEach(add);
         for (let node: Element = mapArea; node.parentElement; node = node.parentElement) {

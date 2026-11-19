@@ -253,16 +253,20 @@ static NSImage *FMLoadThumb(NSString *path) {
 
 @end
 
-// Installed on the web view (as a runtime subclass): a click on the map area
-// that no web control covers is not the web view's, so the hit test falls
-// through to the map view underneath. `point` is in the superview's coordinates.
+// The web view's hit test, replaced on its class (see installHitTestOn:): a
+// click on the map area that no web control covers is not the web view's, so
+// the hit test falls through to the map view underneath. `point` is in the
+// superview's coordinates.
+static IMP gOriginalHitTest = NULL;
 static NSView *FMWebViewHitTest(NSView *self, SEL _cmd, NSPoint point) {
-    NSPoint local = [self convertPoint:point fromView:self.superview];
-    if ([[FootosMacMap shared] passesThroughPoint:[[FootosMacMap shared] pagePointFromView:local]]) {
-        return nil;
+    FootosMacMap *map = [FootosMacMap shared];
+    if (self == map.webView) {
+        NSPoint local = [self convertPoint:point fromView:self.superview];
+        if ([map passesThroughPoint:[map pagePointFromView:local]]) {
+            return nil;
+        }
     }
-    struct objc_super sup = { self, class_getSuperclass(object_getClass(self)) };
-    return ((NSView *(*)(struct objc_super *, SEL, NSPoint))objc_msgSendSuper)(&sup, _cmd, point);
+    return ((NSView *(*)(id, SEL, NSPoint))gOriginalHitTest)(self, _cmd, point);
 }
 
 @implementation FootosMacMap
@@ -391,9 +395,99 @@ static NSView *FMWebViewHitTest(NSView *self, SEL _cmd, NSPoint point) {
         [self applyDark:[body[@"dark"] boolValue]];
     } else if ([command isEqualToString:@"mapSetOverlays"]) {
         [self setOverlays:body];
+    } else if ([command isEqualToString:@"mapDebugProbeViews"]) {
+        [self debugProbeViews];
+    } else if ([command isEqualToString:@"mapDebugHit"]) {
+        // Who gets a click at this point of the page: the page or the map?
+        NSView *content = self.webView.window.contentView;
+        NSRect inView = [self viewRectFromPage:CGRectMake([body[@"x"] doubleValue], [body[@"y"] doubleValue], 0, 0)];
+        NSPoint inWindow = [self.webView convertPoint:inView.origin toView:nil];
+        NSView *hit = [content hitTest:[content.superview convertPoint:inWindow fromView:nil]];
+        BOOL page = hit && self.webView && [hit isDescendantOf:self.webView];
+        NSLog(@"[footos] hit %@ -> %@", body[@"label"] ?: @"?", page ? @"page" : @"map");
+    } else if ([command isEqualToString:@"mapDebugMouseMove"]) {
+        [self debugMouseMoveToPageX:[body[@"x"] doubleValue] y:[body[@"y"] doubleValue]];
     } else if ([command isEqualToString:@"mapDebugSnapshot"]) {
         [self snapshotWindowTo:[body[@"path"] isKindOfClass:[NSString class]] ? body[@"path"] : nil];
     }
+}
+
+/// Asks each view involved for what AppKit asks it when the pointer moves over
+/// the window (`-[NSView _interactiveBounds]`, from the tracking-area
+/// manager). A view AppKit cannot answer for aborts the process there, which
+/// is how a pointer over the window once crashed the app. Logging before each
+/// call shows which view it was.
+- (void)debugProbeViews {
+    SEL probe = NSSelectorFromString(@"_interactiveBounds");
+    // Every view in the window, not only ours: the map view has many of its own.
+    NSMutableArray<NSView *> *views = [NSMutableArray array];
+    NSView *root = self.webView.window.contentView.superview ?: self.webView.window.contentView;
+    NSMutableArray<NSView *> *queue = root ? [NSMutableArray arrayWithObject:root] : [NSMutableArray array];
+    while (queue.count) {
+        NSView *view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        [views addObject:view];
+        [queue addObjectsFromArray:view.subviews];
+    }
+    for (NSView *view in views) {
+        // Views that own tracking areas, and everything inside the web view:
+        // WebKit puts its tracking areas on inner views once the window is
+        // active, and those ask the web view above them.
+        BOOL insideWeb = self.webView && [view isDescendantOf:self.webView];
+        if (![view respondsToSelector:probe] || (view.trackingAreas.count == 0 && !insideWeb)) {
+            continue;
+        }
+        NSLog(@"[footos] probe: %@ (tracking areas: %lu)", NSStringFromClass(object_getClass(view)),
+              (unsigned long)view.trackingAreas.count);
+        ((NSRect (*)(id, SEL))objc_msgSend)(view, probe);
+    }
+    NSLog(@"[footos] probe: all %lu views answered", (unsigned long)views.count);
+
+    // Where a click would land: the middle of the map must reach the map
+    // view, a corner of the page outside the map area must stay with the page.
+    NSView *content = self.webView.window.contentView;
+    NSView *(^hitAtPage)(CGFloat, CGFloat) = ^NSView *(CGFloat x, CGFloat y) {
+        NSRect inView = [self viewRectFromPage:CGRectMake(x, y, 0, 0)];
+        NSPoint inWindow = [self.webView convertPoint:inView.origin toView:nil];
+        return [content hitTest:[content.superview convertPoint:inWindow fromView:nil]];
+    };
+    CGRect area = self.mapRectInWebView;
+    NSView *onMap = hitAtPage(CGRectGetMidX(area), CGRectGetMidY(area));
+    NSView *onPage = hitAtPage(CGRectGetMidX(area), CGRectGetMaxY(area) + 40);
+    BOOL mapOK = onMap && self.mapView && [onMap isDescendantOf:self.mapView];
+    BOOL pageOK = onPage && self.webView && [onPage isDescendantOf:self.webView];
+    NSLog(@"[footos] probe: click on map -> %@ (%@), click below map -> %@ (%@)",
+          NSStringFromClass([onMap class]), mapOK ? @"map, ok" : @"NOT the map",
+          NSStringFromClass([onPage class]), pageOK ? @"page, ok" : @"NOT the page");
+}
+
+/// Sends the window a mouse-moved event at a point of the page, as if the
+/// pointer were there. The self-test has no pointer of its own, and code that
+/// only runs when one moves over the window (tracking areas, hover) would
+/// otherwise go untested.
+- (void)debugMouseMoveToPageX:(CGFloat)x y:(CGFloat)y {
+    WKWebView *webView = self.webView;
+    NSWindow *window = webView.window;
+    if (!window) {
+        return;
+    }
+    // Tracking areas are only live in the key window of the active app.
+    if (!window.isKeyWindow) {
+        [NSApp activateIgnoringOtherApps:YES];
+        [window makeKeyAndOrderFront:nil];
+    }
+    NSRect inView = [self viewRectFromPage:CGRectMake(x, y, 0, 0)];
+    NSPoint inWindow = [webView convertPoint:inView.origin toView:nil];
+    NSEvent *event = [NSEvent mouseEventWithType:NSEventTypeMouseMoved
+                                        location:inWindow
+                                   modifierFlags:0
+                                       timestamp:NSProcessInfo.processInfo.systemUptime
+                                    windowNumber:window.windowNumber
+                                         context:nil
+                                     eventNumber:0
+                                      clickCount:0
+                                        pressure:0];
+    [NSApp sendEvent:event];
 }
 
 /// A picture of the app's own window, for the self-test to look at: the map
@@ -524,25 +618,26 @@ static NSView *FMWebViewHitTest(NSView *self, SEL _cmd, NSPoint point) {
 #pragma mark Mouse routing
 
 - (void)installHitTestOn:(WKWebView *)webView {
-    static const char *kSuffix = "_FootosPassthrough";
-    Class current = object_getClass(webView);
-    NSString *name = NSStringFromClass(current);
-    if ([name hasSuffix:@(kSuffix)]) {
-        return;
-    }
-    NSString *subName = [name stringByAppendingString:@(kSuffix)];
-    Class sub = NSClassFromString(subName);
-    if (!sub) {
-        sub = objc_allocateClassPair(current, subName.UTF8String, 0);
-        if (!sub) {
-            NSLog(@"[footos] map: could not subclass the web view; clicks will not reach the map");
-            return;
+    // The method is replaced on the web view's class. Giving this one web view
+    // a class made at run time (which is what the iOS side does) is not an
+    // option here: AppKit resolves some view properties per class, cannot do
+    // so for such a class, and aborts as soon as a pointer moves over the
+    // window ("NSDP_getComputedPropertyValue: imp != NULL").
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // `-class`, not object_getClass: key-value observing may have put its
+        // own subclass in front.
+        Class cls = [webView class];
+        SEL sel = @selector(hitTest:);
+        Method inherited = class_getInstanceMethod(cls, sel);
+        gOriginalHitTest = method_getImplementation(inherited);
+        // Adds an override when the class only inherits the method; replaces
+        // the class's own otherwise.
+        if (!class_addMethod(cls, sel, (IMP)FMWebViewHitTest, method_getTypeEncoding(inherited))) {
+            method_setImplementation(inherited, (IMP)FMWebViewHitTest);
         }
-        Method original = class_getInstanceMethod(current, @selector(hitTest:));
-        class_addMethod(sub, @selector(hitTest:), (IMP)FMWebViewHitTest, method_getTypeEncoding(original));
-        objc_registerClassPair(sub);
-    }
-    object_setClass(webView, sub);
+        NSLog(@"[footos] map: hit test installed on %@", NSStringFromClass(cls));
+    });
 }
 
 /// A point of the web view (page coordinates) that belongs to the map.
