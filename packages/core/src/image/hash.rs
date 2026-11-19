@@ -152,10 +152,7 @@ fn try_extract_thumbnail_data(path: &Path) -> Result<Vec<u8>, CoreError> {
     let mut header_buf = vec![0u8; 256 * 1024];
     let bytes_read = buf_reader.read(&mut header_buf).unwrap_or(0);
     header_buf.truncate(bytes_read);
-
-    let exif_reader = exif::Reader::new();
-    let exif = exif_reader
-        .read_from_container(&mut Cursor::new(&header_buf))
+    let exif = crate::metadata::exif::read_container(&mut Cursor::new(&header_buf))
         .map_err(|_| CoreError::Io("no exif".into()))?;
 
     let thumbnail_field = exif

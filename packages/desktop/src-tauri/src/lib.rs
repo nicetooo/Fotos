@@ -655,6 +655,8 @@ enum ProcessResult {
     New(ProcessedPhoto),
     /// Processing failed (hash, metadata, or thumbnail error).
     Failed(String),
+    /// Not something a person shot (a graphic, an asset, a UI clip).
+    Skipped,
     /// Import was cancelled before this photo was processed.
     Cancelled,
 }
@@ -678,6 +680,8 @@ struct ImportResultWithTiming {
     moved: u32,
     /// Rows dropped because the file is gone (folder rescans).
     removed: u32,
+    /// Files a folder scan found that are not a person's photos or videos.
+    filtered: u32,
 }
 
 /// All data needed to insert a photo into the DB.
@@ -807,6 +811,7 @@ async fn import_photos(
     tracing::debug!(dir = ?photos_dir, "Import: photos storage dir ready");
 
     // Support both single file and directory import
+    let mut from_scan = false;
     let photos = if root_path_buf.is_file() {
         tracing::debug!("Import: processing as single file");
         // Verify file is readable
@@ -840,16 +845,27 @@ async fn import_photos(
         }
     } else {
         tracing::debug!("Import: processing as directory");
-        // Remember the folder: later scans pick up what changes in it.
         let root = std::fs::canonicalize(root_path_buf)
             .unwrap_or_else(|_| root_path_buf.to_path_buf());
-        let _ = index.add_root(&root.to_string_lossy(), now_ms());
-        footos_core::scan_photos(&root).map_err(|e| {
-            tracing::error!(error = %e, "Import: scan failed");
-            e.to_string()
-        })?
+        if cfg!(any(target_os = "ios", target_os = "android")) {
+            // A phone hands over a folder of files it exported from the
+            // system photo library: all of it is the person's own, and the
+            // folder is a temporary one, not something to remember.
+            footos_core::scan_photos(&root).map_err(|e| {
+                tracing::error!(error = %e, "Import: scan failed");
+                e.to_string()
+            })?
+        } else {
+            // Remember the folder: later scans pick up what changes in it.
+            let _ = index.add_root(&root.to_string_lossy(), now_ms());
+            from_scan = true;
+            footos_core::scan_user_media(&root).map_err(|e| {
+                tracing::error!(error = %e, "Import: scan failed");
+                e.to_string()
+            })?
+        }
     };
-    run_import_pipeline(&window, index, thumb_dir, photos, import_start)
+    run_import_pipeline(&window, index, thumb_dir, photos, from_scan, import_start)
 }
 
 fn now_ms() -> i64 {
@@ -887,13 +903,61 @@ fn run_import_pipeline(
     index: std::sync::Arc<PhotoIndex>,
     thumb_dir: String,
     photos: Vec<std::path::PathBuf>,
+    user_media_only: bool,
     import_start: std::time::Instant,
 ) -> Result<ImportResultWithTiming, String> {
     use tauri::Emitter;
     let emit = |event: &str, payload: serde_json::Value| {
         let _ = window.emit(event, payload);
     };
-    import_files(&emit, &index, &thumb_dir, photos, false, import_start)
+    import_files(&emit, &index, &thumb_dir, photos, false, user_media_only, import_start)
+}
+
+/// Render a RAW file with the operating system's decoder, scaled so that its
+/// longer side is `max_px`. For cameras whose files carry no JPEG preview
+/// (recent Nikon Z bodies, for one) this is the only way to a sharp picture.
+/// macOS only (`sips`); elsewhere it reports failure.
+fn system_raw_render(source: &std::path::Path, max_px: u32, dest: &std::path::Path) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    if let Some(parent) = dest.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let done = std::process::Command::new("/usr/bin/sips")
+        .args(["-s", "format", "jpeg", "-s", "formatOptions", "85", "-Z"])
+        .arg(max_px.to_string())
+        .arg(source)
+        .arg("--out")
+        .arg(dest)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    done && std::fs::metadata(dest).map(|m| m.len() > 0).unwrap_or(false)
+}
+
+/// A RAW file's thumbnail from the system decoder, when what the file itself
+/// offers is missing or much smaller than a thumbnail should be.
+fn better_raw_thumbnail(
+    path: &std::path::Path,
+    config: &PhotoCoreConfig,
+    current: Option<&str>,
+) -> Option<String> {
+    if !footos_core::image::is_raw_file(path) {
+        return None;
+    }
+    let sharp_enough = current
+        .and_then(|p| footos_core::image::image_long_side(std::path::Path::new(p)))
+        .map(|side| side >= config.thumbnail_size / 2)
+        .unwrap_or(false);
+    if sharp_enough {
+        return None;
+    }
+    let spec = footos_core::ThumbnailSpec { width: config.thumbnail_size, height: config.thumbnail_size };
+    let dest = footos_core::image::thumbnail_path(std::path::Path::new(&config.thumbnail_dir), path, &spec)?;
+    system_raw_render(path, config.thumbnail_size, &dest).then(|| dest.to_string_lossy().to_string())
 }
 
 /// Read metadata and make the thumbnail of one file (the expensive part).
@@ -902,6 +966,7 @@ fn process_file(
     hash: String,
     config: &PhotoCoreConfig,
     thumb_dir: &str,
+    user_media_only: bool,
 ) -> ProcessResult {
     let path_str = path.to_string_lossy().to_string();
     let is_video = footos_core::is_supported_video(path);
@@ -945,15 +1010,21 @@ fn process_file(
         }
     };
 
+    let (file_size, mtime_ms) = file_stat(path);
+    // Before the thumbnail: that is the expensive part.
+    if user_media_only && !footos_core::is_user_media(path, &metadata, file_size) {
+        return ProcessResult::Skipped;
+    }
+
     let thumb_path_str = if is_video {
         extract_video_thumbnail_sync(path, thumb_dir)
     } else {
-        footos_core::generate_thumbnail(path, config)
+        let made = footos_core::generate_thumbnail(path, config)
             .ok()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| p.to_string_lossy().to_string());
+        better_raw_thumbnail(path, config, made.as_deref()).or(made)
     };
 
-    let (file_size, mtime_ms) = file_stat(path);
     ProcessResult::New(ProcessedPhoto {
         path: path.to_path_buf(),
         path_str,
@@ -986,6 +1057,9 @@ fn import_files(
     thumb_dir: &str,
     photos: Vec<std::path::PathBuf>,
     update: bool,
+    // Found by scanning a folder rather than picked one by one: keep only
+    // what a person shot.
+    user_media_only: bool,
     import_start: std::time::Instant,
 ) -> Result<ImportResultWithTiming, String> {
     let config = PhotoCoreConfig {
@@ -1123,7 +1197,7 @@ fn import_files(
                 if IMPORT_CANCELLED.load(Ordering::Relaxed) {
                     return ProcessResult::Cancelled;
                 }
-                process_file(path, hash.clone(), &config, thumb_dir)
+                process_file(path, hash.clone(), &config, thumb_dir, user_media_only)
             })
             .collect();
         result.phase2_ms += work_start.elapsed().as_millis() as u64;
@@ -1136,6 +1210,7 @@ fn import_files(
             match item {
                 ProcessResult::Cancelled => cancelled = true,
                 ProcessResult::Failed(_) => result.failure += 1,
+                ProcessResult::Skipped => result.filtered += 1,
                 ProcessResult::New(photo) => {
                     let (media_type, video_path) = match live_video_of.get(&photo.path) {
                         Some(video) => (
@@ -1231,6 +1306,10 @@ struct RescanSummary {
     updated: u32,
     moved: u32,
     removed: u32,
+    /// Of `removed`: rows in software folders or code projects, and graphics.
+    not_photos_by_folder: u32,
+    /// Of `removed`: pictures too small to be photographs, clips too small to be footage.
+    not_photos_by_size: u32,
     duplicates: u32,
     failure: u32,
     total_ms: u64,
@@ -1252,7 +1331,88 @@ fn rescan_root(
         return Ok(());
     }
 
-    let files = footos_core::scan_photos(root_path).map_err(|e| e.to_string())?;
+    // macOS names the data volume twice. Rows recorded under the alias are
+    // renamed to the plain path (or dropped when the plain path has a row).
+    {
+        let known = index.path_stats().map_err(|e| e.to_string())?;
+        let taken: std::collections::HashSet<&str> = known.iter().map(|f| f.path.as_str()).collect();
+        let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut twins = Vec::new();
+        let use_txn = index.begin_transaction().is_ok();
+        for file in &known {
+            let plain = footos_core::without_volume_alias(&file.path);
+            if plain.len() == file.path.len() || !footos_core::is_under(root, plain) {
+                continue;
+            }
+            if taken.contains(plain) || !claimed.insert(plain.to_string()) {
+                twins.push(file.id);
+            } else {
+                let _ = index.move_path(file.id, plain, file.mtime_ms);
+            }
+        }
+        if use_txn {
+            let _ = index.commit_transaction();
+        }
+        if !twins.is_empty() {
+            summary.removed += index.delete_by_ids(twins).map_err(|e| e.to_string())?.len() as u32;
+        }
+    }
+
+    // Rows from before scans were limited to a person's own photos: files in
+    // software folders and code projects, graphics, pictures too small to be
+    // photographs. Only the library rows go; the files are not touched.
+    {
+        let known = index.path_stats().map_err(|e| e.to_string())?;
+        let bare: std::collections::HashSet<i64> = index
+            .rows_without_camera_data(footos_core::fs::ugc::MIN_VIDEO_BYTES)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let mut rules = footos_core::ScanRules::default();
+        let mut by_rule = Vec::new();
+        let mut to_check = Vec::new();
+        for file in &known {
+            if !footos_core::is_under(root, &file.path) {
+                continue;
+            }
+            let path = std::path::Path::new(&file.path);
+            if rules.excludes(root_path, path) {
+                by_rule.push(file.id);
+            } else if bare.contains(&file.id) {
+                to_check.push((file.id, file.path.clone()));
+            }
+        }
+        let empty = footos_core::PhotoMetadata::default();
+        let too_small: Vec<i64> = to_check
+            .par_iter()
+            .filter(|(_, path)| {
+                let path = std::path::Path::new(path);
+                // A file that is gone is handled below, with moves in mind.
+                path.exists() && !footos_core::is_user_media(path, &empty, file_stat(path).0)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        tracing::info!(root, by_rule = by_rule.len(), too_small = too_small.len(), "Rescan: rows that are not a person's photos");
+        summary.not_photos_by_folder += by_rule.len() as u32;
+        summary.not_photos_by_size += too_small.len() as u32;
+        let strays: Vec<i64> = by_rule.into_iter().chain(too_small).collect();
+        if !strays.is_empty() && !IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            let thumbnailer = footos_core::Thumbnailer::new(std::path::PathBuf::from(thumb_dir));
+            let spec = footos_core::ThumbnailSpec::default();
+            let deleted = index.delete_by_ids(strays).map_err(|e| e.to_string())?;
+            for photo in &deleted {
+                if let Ok(Some(thumb)) =
+                    thumbnailer.get_cached_path(std::path::Path::new(&photo.path), &spec)
+                {
+                    let _ = std::fs::remove_file(thumb);
+                }
+            }
+            summary.removed += deleted.len() as u32;
+        }
+    }
+
+    let files = footos_core::scan_user_media(root_path).map_err(|e| e.to_string())?;
     let scanned: Vec<footos_core::FileStat> = files
         .par_iter()
         .map(|path| {
@@ -1290,15 +1450,33 @@ fn rescan_root(
     // "new" at its new path, and its existing row follows it there.
     if !plan.new.is_empty() {
         let paths = plan.new.iter().map(std::path::PathBuf::from).collect();
-        let r = import_files(emit, index, thumb_dir, paths, false, std::time::Instant::now())?;
+        let r = import_files(emit, index, thumb_dir, paths, false, true, std::time::Instant::now())?;
         summary.added += r.success;
         summary.moved += r.moved;
         summary.duplicates += r.duplicates;
         summary.failure += r.failure;
     }
-    if !plan.changed.is_empty() && !IMPORT_CANCELLED.load(Ordering::SeqCst) {
-        let paths = plan.changed.iter().map(std::path::PathBuf::from).collect();
-        let r = import_files(emit, index, thumb_dir, paths, true, std::time::Instant::now())?;
+    // A thumbnail that was recorded but is no longer on disk (a cleared
+    // cache) is made again, like a file that changed.
+    let mut changed: std::collections::HashSet<String> = plan.changed.iter().cloned().collect();
+    // So is one made for an older thumbnail size.
+    let spec = footos_core::ThumbnailSpec::default();
+    for (path, thumb) in index.recorded_thumbs().map_err(|e| e.to_string())? {
+        if !footos_core::is_under(root, &path) {
+            continue;
+        }
+        let source = std::path::Path::new(&path);
+        let outdated = !footos_core::is_supported_video(source)
+            && footos_core::image::thumbnail_path(std::path::Path::new(thumb_dir), source, &spec)
+                .map(|expected| expected != std::path::Path::new(&thumb))
+                .unwrap_or(false);
+        if (outdated || !std::path::Path::new(&thumb).exists()) && source.exists() {
+            changed.insert(path);
+        }
+    }
+    if !changed.is_empty() && !IMPORT_CANCELLED.load(Ordering::SeqCst) {
+        let paths = changed.iter().map(std::path::PathBuf::from).collect();
+        let r = import_files(emit, index, thumb_dir, paths, true, true, std::time::Instant::now())?;
         summary.updated += r.updated;
         summary.failure += r.failure;
     }
@@ -1474,7 +1652,7 @@ async fn import_photo_paths(
         persisted = photos.len(),
         "Import: batch paths persisted"
     );
-    run_import_pipeline(&window, index, thumb_dir, photos, std::time::Instant::now())
+    run_import_pipeline(&window, index, thumb_dir, photos, false, std::time::Instant::now())
 }
 
 #[derive(serde::Deserialize)]
@@ -1788,19 +1966,32 @@ async fn get_raw_preview(path: String, cache_dir: String) -> Result<String, Stri
     let file_name = source_path.file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("preview");
-    let hash = footos_core::compute_hash(source_path).map_err(|e| e.to_string())?;
-    let hash_prefix = &hash[..hash.len().min(16)];
+    // Cheap to compute and changes when the file does.
+    let hash = footos_core::compute_content_hash(source_path)
+        .map_err(|e| e.to_string())?
+        .replace(':', "");
+    let hash_prefix = &hash[..hash.len().min(18)];
     let preview_path = std::path::PathBuf::from(&cache_dir)
         .join("raw_previews")
-        .join(format!("{}_{}.jpg", file_name, hash_prefix));
+        // "v2": earlier versions cached the 160 px thumbnail for files
+        // without a real preview.
+        .join(format!("{}_{}_v2.jpg", file_name, hash_prefix));
 
     // Return cached preview if it exists
     if preview_path.exists() {
         return Ok(preview_path.to_string_lossy().to_string());
     }
 
-    // Extract and cache the preview
-    let preview_bytes = footos_core::extract_raw_preview(source_path).map_err(|e| e.to_string())?;
+    // The camera's own preview when it is a real one; otherwise decode the
+    // RAW with the system decoder.
+    const REAL_PREVIEW_BYTES: usize = 200_000;
+    const RENDER_PX: u32 = 3072;
+    let embedded = footos_core::extract_raw_preview(source_path);
+    let has_real_preview = embedded.as_ref().map(|b| b.len() >= REAL_PREVIEW_BYTES).unwrap_or(false);
+    if !has_real_preview && system_raw_render(source_path, RENDER_PX, &preview_path) {
+        return Ok(preview_path.to_string_lossy().to_string());
+    }
+    let preview_bytes = embedded.map_err(|e| e.to_string())?;
 
     // Ensure directory exists
     if let Some(parent) = preview_path.parent() {
@@ -2356,7 +2547,45 @@ mod import_fixture {
     use super::*;
 
     fn count_files(dir: &std::path::Path) -> usize {
-        footos_core::scan_photos(dir).map(|v| v.len()).unwrap_or(0)
+        fn walk(dir: &std::path::Path) -> usize {
+            std::fs::read_dir(dir)
+                .map(|entries| {
+                    entries
+                        .filter_map(Result::ok)
+                        .map(|e| if e.path().is_dir() { walk(&e.path()) } else { 1 })
+                        .sum()
+                })
+                .unwrap_or(0)
+        }
+        walk(dir)
+    }
+
+    /// Rehearse a rescan on a copy of a real library:
+    ///
+    ///     FOOTOS_DRYRUN_DB=/path/to/copy-of-footos.db cargo test rescan_rehearsal -- --nocapture
+    ///
+    /// Thumbnails go to (and are deleted from) a folder next to the copy, so
+    /// nothing of the real library is touched.
+    #[test]
+    fn rescan_rehearsal() {
+        let Ok(db) = std::env::var("FOOTOS_DRYRUN_DB") else {
+            return;
+        };
+        let thumbs = format!("{db}.thumbs");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        let index = PhotoIndex::open(db).unwrap();
+        let emit = |_: &str, _: serde_json::Value| {};
+        eprintln!("before: {} rows", index.count().unwrap());
+        let mut s = RescanSummary::default();
+        for (root, _) in index.list_roots().unwrap() {
+            let started = std::time::Instant::now();
+            rescan_root(&emit, &index, &thumbs, &root, &mut s).unwrap();
+            eprintln!("root {root}: {} ms, {} rows now", started.elapsed().as_millis(), index.count().unwrap());
+        }
+        eprintln!(
+            "summary: added={} moved={} removed={} (by folder {}, by size {}) duplicates={} failure={}",
+            s.added, s.moved, s.removed, s.not_photos_by_folder, s.not_photos_by_size, s.duplicates, s.failure
+        );
     }
 
     #[test]
@@ -2383,10 +2612,15 @@ mod import_fixture {
 
         // ── First import ──
         let on_disk = count_files(&lib);
-        let files = footos_core::scan_photos(&lib).unwrap();
-        let r = import_files(&emit, &index, &thumb_dir, files.clone(), false, now()).unwrap();
+        let files = footos_core::scan_user_media(&lib).unwrap();
+        for name in ["icon.png", "Tool.app", "node_modules"] {
+            assert!(!files.iter().any(|p| p.to_string_lossy().contains(name)), "{name} is not scanned");
+        }
+        let r = import_files(&emit, &index, &thumb_dir, files.clone(), false, true, now()).unwrap();
         eprintln!("first import: ok={} dup={} fail={} in {} ms", r.success, r.duplicates, r.failure, r.total_ms);
         assert_eq!(r.failure, 0, "nothing should fail");
+        assert_eq!(r.filtered, 1, "the JPEG without camera data is left out");
+        assert!(index.get_by_path(lib.join("web.jpg").to_string_lossy().to_string()).unwrap().is_none());
         assert_eq!(r.success, expected, "every distinct file is in the library");
         assert_eq!(r.duplicates, 1, "the byte-for-byte copy is the only duplicate");
         assert_eq!(count_files(&lib), on_disk, "no file was deleted from disk");
@@ -2403,7 +2637,7 @@ mod import_fixture {
         assert!(with_thumb as u32 >= expected - 1);
 
         // ── Importing the same folder again adds nothing ──
-        let r = import_files(&emit, &index, &thumb_dir, files, false, now()).unwrap();
+        let r = import_files(&emit, &index, &thumb_dir, files, false, true, now()).unwrap();
         assert_eq!((r.success, r.failure), (0, 0));
         assert_eq!(index.count().unwrap() as u32, expected);
 
@@ -2412,6 +2646,20 @@ mod import_fixture {
         let mut s = RescanSummary::default();
         rescan_root(&emit, &index, &thumb_dir, &root, &mut s).unwrap();
         assert_eq!((s.added, s.updated, s.removed, s.moved), (0, 0, 0, 0), "a second look changes nothing");
+
+        // ── Junk from before the filters existed is cleared by a rescan ──
+        let junk = vec![
+            lib.join("web.jpg"),
+            lib.join("assets").join("icon.png"),
+            lib.join("Tool.app").join("Contents").join("bg.jpg"),
+        ];
+        let r = import_files(&emit, &index, &thumb_dir, junk, false, false, now()).unwrap();
+        assert_eq!(r.success, 3, "picked one by one, anything goes in");
+        let mut s = RescanSummary::default();
+        rescan_root(&emit, &index, &thumb_dir, &root, &mut s).unwrap();
+        assert_eq!((s.added, s.removed), (0, 3), "the three are dropped from the library");
+        assert_eq!(index.count().unwrap() as u32, expected);
+        assert_eq!(count_files(&lib), on_disk, "and stay on disk");
 
         // ── Change the folder: modify, delete, add, move ──
         let modified = lib.join("photo_01.jpg");

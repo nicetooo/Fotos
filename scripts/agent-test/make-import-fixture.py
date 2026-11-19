@@ -59,6 +59,17 @@ def main():
     pair.save(os.path.join(lib, "pair.jpg"), exif=exif(39.9, 116.4, "2025:03:01 10:00:00"))
     pair.save(os.path.join(lib, "pair.dng"), format="TIFF")
 
+    # Not a person's photos: must stay out of the library.
+    os.makedirs(os.path.join(lib, "assets"))
+    os.makedirs(os.path.join(lib, "Tool.app", "Contents"))
+    os.makedirs(os.path.join(lib, "node_modules", "pkg"))
+    picture(950).save(os.path.join(lib, "assets", "icon.png"))
+    picture(951).save(os.path.join(lib, "web.jpg"))  # no EXIF
+    picture(952).save(os.path.join(lib, "Tool.app", "Contents", "bg.jpg"),
+                      exif=exif(1.0, 1.0, "2025:04:01 10:00:00"))
+    picture(953).save(os.path.join(lib, "node_modules", "pkg", "logo.jpg"),
+                      exif=exif(2.0, 2.0, "2025:04:02 10:00:00"))
+
     # Distinct files: the JPEGs, two lookalikes, pair.jpg and pair.dng. The copy is a duplicate.
     print(args.count + 2 + 2)
     return 0

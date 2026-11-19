@@ -139,6 +139,34 @@ impl PhotoIndex {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// Rows of files that carry nothing a camera writes, or videos too small
+    /// to be footage: `(id, path)`. Rows synced from a phone's photo library
+    /// are never listed.
+    pub fn rows_without_camera_data(&self, min_video_bytes: u64) -> Result<Vec<(i64, String)>, CoreError> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, path FROM photos
+             WHERE path NOT LIKE 'ios-photo://%' AND path NOT LIKE 'content://%'
+               AND ((media_type = 'photo'
+                     AND make IS NULL AND model IS NULL AND date_taken IS NULL
+                     AND lat IS NULL AND iso IS NULL AND f_number IS NULL AND exposure_time IS NULL)
+                 OR (media_type = 'video'
+                     AND COALESCE(file_size, 0) > 0 AND file_size < ?1))",
+        )?;
+        let rows = stmt.query_map(params![min_video_bytes as i64], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// `(path, thumb_path)` of rows that have a thumbnail recorded.
+    pub fn recorded_thumbs(&self) -> Result<Vec<(String, String)>, CoreError> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT path, thumb_path FROM photos WHERE thumb_path IS NOT NULL AND thumb_path != ''",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
     /// The row holding this content hash, if any: `(id, path)`.
     pub fn find_by_hash(&self, hash: &str) -> Result<Option<(i64, String)>, CoreError> {
         let conn = self.lock()?;

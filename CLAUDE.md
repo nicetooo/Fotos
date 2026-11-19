@@ -170,8 +170,11 @@ lsof -i:1420 || echo "Port 1420 is free"
 
 ## 缩略图规格
 
-- **唯一真相源**：`core/src/config.rs` 中的 `DEFAULT_THUMBNAIL_SIZE`（当前值 `256`）
+- **唯一真相源**：`core/src/config.rs` 中的 `DEFAULT_THUMBNAIL_SIZE`（当前值 `512`）
 - `ThumbnailSpec::default()` 自动使用该常量，所有调用方（Tauri `lib.rs`、`platform-ios`、`platform-android`）统一引用
+- 缩略图从原图解码缩小。❌ 不要用 EXIF 内嵌缩略图当缩略图（只有 160 像素，网格里很糊），只在格式解码不了时才退回
+- RAW 预览：先按 TIFF 目录找内嵌 JPEG（`core/src/image/raw_preview.rs`）；有些机型（如尼康 Z f）文件里没有 JPEG 预览，桌面端用 macOS 的 `sips` 解码（`system_raw_render`），缩略图和大图都走它
+- 尺寸变了以后，桌面端重新扫描会把旧尺寸的缩略图重做
 - ❌ 禁止在任何 crate 中硬编码缩略图尺寸魔数（如 `ThumbnailSpec { width: 300, height: 300 }`）
 - ⚠️ 修改 `DEFAULT_THUMBNAIL_SIZE` 会改变缓存 key（`thumbnail_key` 将 width/height 哈希进 FNV-1a），导致所有已有缩略图缓存失效，需配合缓存清除
 
@@ -188,6 +191,10 @@ iOS 相册同步的行不拷贝原片：`path` 为 `ios-photo://<PhotoKit localI
 - **分批**：`import_files` 每批 256 个：并行哈希 → 判重 → 并行元数据+缩略图 → 一个事务 → `import-progress`。前端按进度刷新，每秒最多一次
 - **记住文件夹**：导入文件夹时写入 `library_roots`；`rescan_library` 用 core 的纯函数 `plan_rescan` 比对 (路径, 大小, 修改时间)，处理新增/修改/删除/移动（内容相同且旧路径已不存在 → 行跟着走）。桌面端启动时自动跑一次，导入菜单里有「重新扫描」，设置页「照片文件夹」可移除
 - **防误删**：文件夹读不了（外接盘没插）整个跳过；扫出 0 个文件时不删记录
+- **只收用户自己拍的**（`core/src/fs/ugc.rs`）：文件夹扫描不进软件目录（系统目录、`~/Library`、`.app` 等包、`node_modules`、隐藏目录…）和代码工程目录（含 `.git`、`package.json`、`Cargo.toml` 等），不收 PNG/WebP；图片是 RAW/HEIC/带相机元数据，或尺寸够大（长边 ≥ 480、短边 ≥ 320、≥ 20KB）才收，视频 ≥ 1MB。❌ 不要要求「必须有 EXIF」：微信/QQ 转存的照片没有。逐个选文件导入不过滤。重新扫描会把库里不符合规则的旧记录移除（不动磁盘文件）
+- macOS 的 `/System/Volumes/Data/...` 和 `/...` 是同一批文件：判规则前先 `without_volume_alias`，重新扫描会把别名路径的记录改名
+- ⚠️ 会批量删库记录的改动，先在库副本上演练：`FOOTOS_DRYRUN_DB=<副本> cargo test rescan_rehearsal -- --nocapture`（在 `packages/desktop/src-tauri`）。曾经没演练直接跑，把 23 万条删到 140 条
+- EXIF 一律用 `metadata::exif::read_container`（容错，取部分结果）。❌ 不要直接 `Reader::new().read_from_container`：不规范的 EXIF 会整体失败，照片就会被上面的规则当成素材图
 - **缩略图**：先取内嵌预览，没有就解码缩小（RAW 除外）
 - 测试：`IMPORT=1 ./scripts/agent-test/run-desktop.sh`（应用内）；`FOOTOS_IMPORT_FIXTURE=<dir> FOOTOS_IMPORT_EXPECTED=<n> cargo test import_fixture`（改/删/增/移/离线，fixture 由 `scripts/agent-test/make-import-fixture.py` 生成）
 

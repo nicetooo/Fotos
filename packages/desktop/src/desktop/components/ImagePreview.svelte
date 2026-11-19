@@ -297,6 +297,16 @@
                         {/if}
                     </p>
                 </div>
+            {:else if isRaw && thumbPath && (!loaded || loading)}
+                <!-- Developing a RAW takes a moment the first time: show the
+                     thumbnail at once and swap the full picture in when ready. -->
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <img src={convertFileSrc(thumbPath)} alt="" class="max-w-full max-h-full w-full h-full object-contain" draggable="false" />
+                    <div class="absolute bottom-4 right-4 px-2.5 py-1.5 rounded bg-black/60 text-xs text-neutral-200 flex items-center gap-2">
+                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        {t.imageError.extractingRaw}
+                    </div>
+                </div>
             {:else if !loaded || loading}
                 <div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
                     <i class="fa-solid fa-spinner fa-spin text-neutral-500 text-2xl"></i>

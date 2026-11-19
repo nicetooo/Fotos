@@ -68,44 +68,53 @@ fn generate_image_file(
     // Read EXIF orientation first
     let orientation = read_exif_orientation(source);
 
-    // Step 1: Try to use embedded thumbnail from EXIF (fast path)
-    // This is required for RAW files since image crate can't decode them
-    let thumb_result = try_extract_embedded_thumbnail(source, spec);
-
-    if let Ok(embedded_thumb) = thumb_result {
-        // Apply orientation correction to embedded thumbnail
-        let corrected_thumb = if let Some(orient) = orientation {
-            if orient > 1 {
-                apply_orientation_correction(&embedded_thumb, orient)?
-            } else {
-                embedded_thumb
-            }
-        } else {
-            embedded_thumb
-        };
-
-        // Save the corrected thumbnail
-        std::fs::write(dest, corrected_thumb)
+    let write_scaled = |img: image::DynamicImage, orientation: u32| -> Result<(), ThumbnailError> {
+        let small = img.thumbnail(spec.width, spec.height);
+        let small = apply_orientation_to_image(small, orientation);
+        let mut output = Vec::new();
+        image::DynamicImage::ImageRgb8(small.to_rgb8())
+            .write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Jpeg)
             .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
-        return Ok(());
+        std::fs::write(dest, output).map_err(|e| ThumbnailError::EncodeError(e.to_string()))
+    };
+
+    if is_raw_file(source) {
+        // The camera's full-size JPEG preview, when the file has one. It
+        // comes back already turned the right way up.
+        if let Ok(preview) = extract_raw_preview(source) {
+            if let Ok(img) = image::load_from_memory(&preview) {
+                if img.width().max(img.height()) >= spec.width.max(spec.height) {
+                    return write_scaled(img, 1);
+                }
+            }
+        }
+    } else if let Ok(img) = image::open(source) {
+        // Scale the picture itself down. The thumbnail cameras embed in the
+        // EXIF is 160 px, which is blurry in a grid on any modern screen.
+        return write_scaled(img, orientation.unwrap_or(1));
     }
 
-    // Step 2: no embedded thumbnail (screenshots, exports, PNG/WebP): decode
-    // and scale down. RAW files cannot be decoded here, so they stay without.
-    if is_raw_file(source) {
-        return Err(ThumbnailError::DecodeError(
-            "No embedded thumbnail in RAW file".to_string(),
-        ));
-    }
-    let img = image::open(source).map_err(|e| ThumbnailError::DecodeError(e.to_string()))?;
-    let small = img.thumbnail(spec.width, spec.height);
-    let small = apply_orientation_to_image(small, orientation.unwrap_or(1));
-    let mut output = Vec::new();
-    image::DynamicImage::ImageRgb8(small.to_rgb8())
-        .write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Jpeg)
-        .map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
-    std::fs::write(dest, output).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
+    // What is left: formats that cannot be decoded here (HEIC) and RAW files
+    // with no usable preview. The embedded thumbnail is small but better
+    // than nothing; the caller may replace it with a better rendering.
+    let embedded_thumb = try_extract_embedded_thumbnail(source, spec)
+        .map_err(|_| ThumbnailError::DecodeError("No preview could be made".to_string()))?;
+    let corrected_thumb = match orientation {
+        Some(orient) if orient > 1 => apply_orientation_correction(&embedded_thumb, orient)?,
+        _ => embedded_thumb,
+    };
+    std::fs::write(dest, corrected_thumb).map_err(|e| ThumbnailError::EncodeError(e.to_string()))?;
     Ok(())
+}
+
+/// The longer side of an image file in pixels, read from its header.
+pub fn image_long_side(path: &Path) -> Option<u32> {
+    image::image_dimensions(path).ok().map(|(w, h)| w.max(h))
+}
+
+/// Where the thumbnail of `source` for `spec` lives under `cache_root`.
+pub fn thumbnail_path(cache_root: &Path, source: &Path, spec: &ThumbnailSpec) -> Option<PathBuf> {
+    thumbnail_key(source, spec).ok().map(|key| cache_path(cache_root, &key))
 }
 
 /// Check if file is a RAW format based on extension
@@ -129,6 +138,18 @@ pub fn extract_raw_preview(path: &Path) -> Result<Vec<u8>, ThumbnailError> {
         .map_err(|e| ThumbnailError::DecodeError(e.to_string()))?
         .len();
     let mut reader = BufReader::with_capacity(64 * 1024, file); // 64KB buffer for faster reading
+
+    // The file's own directories say where the previews are. Searching for
+    // JPEG signatures (below) is the fallback for formats that are not TIFF.
+    // For a TIFF-based file the directories are the whole truth: when they
+    // list only a small thumbnail there is no bigger preview to find, and
+    // combing through tens of megabytes for one only costs seconds.
+    if let Some(preview) = crate::image::raw_preview::largest_embedded_jpeg(&mut reader, file_size) {
+        return match orientation {
+            Some(orient) if orient > 1 => apply_orientation_correction(&preview, orient),
+            _ => Ok(preview),
+        };
+    }
 
     let scan_start = 8u64;
     let mut best_preview: Option<Vec<u8>> = None;
@@ -219,10 +240,7 @@ fn read_exif_orientation(source: &Path) -> Option<u32> {
     let mut header_buf = vec![0u8; 256 * 1024];
     let bytes_read = buf_reader.read(&mut header_buf).ok()?;
     header_buf.truncate(bytes_read);
-
-    let exif_reader = exif::Reader::new();
-    let exif = exif_reader
-        .read_from_container(&mut Cursor::new(&header_buf))
+    let exif = crate::metadata::exif::read_container(&mut Cursor::new(&header_buf))
         .ok()?;
 
     // Check PRIMARY IFD first, then THUMBNAIL IFD
@@ -297,10 +315,7 @@ fn try_extract_embedded_thumbnail(
     let mut header_buf = vec![0u8; 256 * 1024];
     let bytes_read = buf_reader.read(&mut header_buf).unwrap_or(0);
     header_buf.truncate(bytes_read);
-
-    let exif_reader = exif::Reader::new();
-    let exif = exif_reader
-        .read_from_container(&mut Cursor::new(&header_buf))
+    let exif = crate::metadata::exif::read_container(&mut Cursor::new(&header_buf))
         .map_err(|e| ThumbnailError::DecodeError(format!("No EXIF: {}", e)))?;
 
     // Try multiple IFDs to find embedded thumbnail

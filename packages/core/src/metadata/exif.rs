@@ -7,6 +7,19 @@ use std::path::Path;
 
 /// Reads comprehensive EXIF metadata from a photo.
 /// Optimized: reads first 256KB into memory to avoid slow disk seeks on external drives.
+/// Parse EXIF, keeping what could be read when part of it is malformed.
+/// Plenty of software writes EXIF that is slightly off (a stray pointer to a
+/// next directory, a bad count); the fields before the fault are still good.
+pub(crate) fn read_container<R: std::io::BufRead + std::io::Seek>(
+    reader: &mut R,
+) -> Result<exif::Exif, exif::Error> {
+    let mut parser = Reader::new();
+    parser.continue_on_error(true);
+    parser
+        .read_from_container(reader)
+        .or_else(|e| e.distill_partial_result(|_| {}))
+}
+
 pub fn read_metadata(path: &Path) -> Result<PhotoMetadata, CoreError> {
     let mut metadata = PhotoMetadata::default();
 
@@ -19,14 +32,13 @@ pub fn read_metadata(path: &Path) -> Result<PhotoMetadata, CoreError> {
     header_buf.truncate(bytes_read);
 
     // Parse EXIF from memory buffer
-    let exif_reader = Reader::new();
-    let exif = match exif_reader.read_from_container(&mut Cursor::new(&header_buf)) {
+    let exif = match crate::metadata::exif::read_container(&mut Cursor::new(&header_buf)) {
         Ok(exif) => exif,
         Err(_) => {
             // If parsing from buffer fails, try reading the whole file (fallback)
             let file = File::open(path)?;
             let mut reader = BufReader::new(file);
-            match exif_reader.read_from_container(&mut reader) {
+            match crate::metadata::exif::read_container(&mut reader) {
                 Ok(exif) => exif,
                 Err(_) => return Ok(metadata),
             }
@@ -108,9 +120,7 @@ pub fn read_metadata(path: &Path) -> Result<PhotoMetadata, CoreError> {
 pub fn read_date_taken(path: &Path) -> Result<Option<String>, CoreError> {
     let file = File::open(path)?;
     let mut buf_reader = BufReader::new(file);
-
-    let exif_reader = Reader::new();
-    let exif = match exif_reader.read_from_container(&mut buf_reader) {
+    let exif = match crate::metadata::exif::read_container(&mut buf_reader) {
         Ok(exif) => exif,
         Err(_) => return Ok(None), // EXIF 解析失败，降级返回 Ok(None)
     };
