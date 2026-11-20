@@ -358,8 +358,23 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
         [self requestAccessAndSyncPresentLimitedPicker:YES];
         return;
     }
+    if ([command isEqualToString:@"gridThumbsList"]) {
+        // Which sharp grid thumbnails are already on disk, in one answer:
+        // the page then shows those at once instead of asking for each.
+        dispatch_async(self.gridQueue, ^{
+            NSString *dir = [self gridThumbDir];
+            NSArray<NSString *> *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+            NSLog(@"[footos] grid thumbs on disk: %lu", (unsigned long)names.count);
+            NSDictionary *detail = @{@"dir": dir, @"names": names};
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self emitEvent:@"ios-grid-thumbs-list" detail:detail];
+            });
+        });
+        return;
+    }
     if ([command isEqualToString:@"gridThumbs"]) {
         NSArray *ids = [body[@"identifiers"] isKindOfClass:[NSArray class]] ? body[@"identifiers"] : @[];
+        NSLog(@"[footos] grid thumbs asked: %lu", (unsigned long)ids.count);
         [self makeGridThumbsForIdentifiers:ids];
         return;
     }
@@ -804,6 +819,7 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
                 [self emitEvent:@"ios-grid-thumbs" detail:detail];
             });
         };
+        __block CFAbsoluteTime lastFlush = CFAbsoluteTimeGetCurrent();
         for (NSString *identifier in identifiers) {
             if (self.gridGeneration != generation) {
                 break;
@@ -832,8 +848,11 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
                 }
                 ready[identifier] = path;
             }
-            if (ready.count >= 8) {
+            // Answer in a few large steps rather than a trickle: the page
+            // then changes a screenful at a time, not cell by cell.
+            if (ready.count >= 48 || (ready.count > 0 && CFAbsoluteTimeGetCurrent() - lastFlush > 0.7)) {
                 flush();
+                lastFlush = CFAbsoluteTimeGetCurrent();
             }
         }
         flush();

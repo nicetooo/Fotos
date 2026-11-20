@@ -768,6 +768,8 @@
         } : undefined}
         onShare={platformService.shareItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.shareItem!(p); } : undefined}
         onCopy={platformService.copyItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.copyItem!(p); } : undefined}
+        knownThumb={platformService.knownGridThumb ? (thumb) => platformService.knownGridThumb!(thumb) : undefined}
+        forgetThumb={platformService.forgetGridThumb ? (thumb) => platformService.forgetGridThumb!(thumb) : undefined}
         requestThumbs={platformService.requestGridThumbs ? (paths, onReady) => platformService.requestGridThumbs!(paths, onReady) : undefined}
         onClose={closeAlbum}
         {t}

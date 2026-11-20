@@ -176,7 +176,13 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         });
 
         // iOS Swift 桥接就绪事件
+        this.addListener("ios-grid-thumbs-list", (e: CustomEvent) => {
+            this.gridDir = String(e.detail?.dir ?? "");
+            this.gridNames = new Set((e.detail?.names ?? []) as string[]);
+        });
+        this.postNative({ command: "gridThumbsList" });
         this.addListener('footos-bridge-ready', () => {
+            this.postNative({ command: "gridThumbsList" });
             console.log("[iOS] Swift bridge is ready");
             this.bridgeReady = true;
         });
@@ -244,6 +250,24 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
 
     private gridThumbsReady: ((thumbs: Record<string, string>) => void) | null = null;
     private gridThumbsListening = false;
+    // Sharp grid thumbnails on disk: their folder and file names. A sharp
+    // thumbnail has the same file name as the item's stored small one.
+    private gridDir = "";
+    private gridNames = new Set<string>();
+
+    private static fileName(path: string): string {
+        return path.slice(path.lastIndexOf("/") + 1);
+    }
+
+    knownGridThumb(thumb: string): string | null {
+        if (!this.gridDir || !thumb) return null;
+        const name = IOSPlatformServiceImpl.fileName(thumb);
+        return this.gridNames.has(name) ? `${this.gridDir}/${name}` : null;
+    }
+
+    forgetGridThumb(thumb: string): void {
+        this.gridNames.delete(IOSPlatformServiceImpl.fileName(thumb));
+    }
 
     requestGridThumbs(paths: string[], onReady: (thumbs: Record<string, string>) => void): void {
         this.gridThumbsReady = onReady;
@@ -253,6 +277,8 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
                 const out: Record<string, string> = {};
                 for (const [id, file] of Object.entries((e.detail?.thumbs ?? {}) as Record<string, string>)) {
                     out["ios-photo://" + id] = file;
+                    this.gridNames.add(IOSPlatformServiceImpl.fileName(file));
+                    if (!this.gridDir) this.gridDir = file.slice(0, file.lastIndexOf("/"));
                 }
                 this.gridThumbsReady?.(out);
             });

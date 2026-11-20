@@ -9,7 +9,7 @@
      * like the system Photos app. Tapping a cell opens the viewer on that item.
      * Only the rows near the viewport are in the DOM.
      */
-    let { items, total, initialIndex = null, onOpen, onLocate, onShare = undefined, onCopy = undefined, onSystemMenu = undefined, nativeMenu = false, requestThumbs = undefined, onClose, t, locale } = $props<{
+    let { items, total, initialIndex = null, onOpen, onLocate, onShare = undefined, onCopy = undefined, onSystemMenu = undefined, nativeMenu = false, requestThumbs = undefined, knownThumb = undefined, forgetThumb = undefined, onClose, t, locale } = $props<{
         /** Share / copy the original of an item (own menu only; the native menu has its own). */
         onShare?: (index: number) => void;
         onCopy?: (index: number) => void;
@@ -17,6 +17,9 @@
         onSystemMenu?: (index: number, x: number, y: number) => void;
         /** Asks the platform for sharper thumbnails of the given item paths. */
         requestThumbs?: (paths: string[], onReady: (thumbs: Record<string, string>) => void) => void;
+        /** The sharp thumbnail that already exists for a stored thumbnail, if any. */
+        knownThumb?: (thumb: string) => string | null;
+        forgetThumb?: (thumb: string) => void;
         /** Time-ordered, oldest first. */
         items: AlbumItem[];
         /** How many matched in all (may be more than `items`). */
@@ -82,13 +85,53 @@
 
     // The stored thumbnails are small (made for the map). Once scrolling
     // settles, ask for sharp ones for what is on screen and swap them in.
+    // Those already made (the platform knows which) are shown from the
+    // start: nothing is swapped for them.
     let sharp = $state<Record<string, string>>({});
+    function sharpOf(item: AlbumItem): string | null {
+        return sharp[item.path] ?? knownThumb?.(item.thumb) ?? null;
+    }
+    function rememberSharp(thumbs: Record<string, string>) {
+        sharp = { ...sharp, ...thumbs };
+    }
+    /** The file is gone (the system clears caches): back to the small one. */
+    let gone = $state<Record<string, true>>({});
+    function forgetSharp(item: AlbumItem) {
+        if (gone[item.path] || !sharpOf(item)) return;
+        forgetThumb?.(item.thumb);
+        gone = { ...gone, [item.path]: true };
+    }
+    // The stored thumbnail is 256 px: enough until a cell is drawn larger
+    // than that, so a dense grid asks for nothing and nothing is swapped.
+    const STORED_THUMB_PX = 256;
+    let needsSharp = $derived(cell * (window.devicePixelRatio || 1) > STORED_THUMB_PX);
+    // Ask for what is on screen first, then a few screens around it, so that
+    // what is scrolled to next is already sharp when it comes into view.
+    // Asked again only when the rows on screen change, not as answers arrive
+    // (each ask cancels the one before it).
+    const SHARP_AHEAD = 240;
     $effect(() => {
-        if (!requestThumbs) return;
-        const wanted = visible.map((v) => v.item.path).filter((path) => !(path in sharp));
-        if (wanted.length === 0) return;
+        if (!requestThumbs || !needsSharp || lastRow < firstRow) return;
+        const from = firstRow * columns;
+        const to = Math.min(items.length, (lastRow + 1) * columns);
         const timer = setTimeout(() => {
-            requestThumbs(wanted, (thumbs: Record<string, string>) => { sharp = { ...sharp, ...thumbs }; });
+            const missing = (index: number) => {
+                const item = items[index];
+                return item && !gone[item.path] && !sharpOf(item) ? item.path : null;
+            };
+            const wanted: string[] = [];
+            for (let index = to - 1; index >= from; index--) {
+                const path = missing(index);
+                if (path) wanted.push(path);
+            }
+            for (let step = 1; step <= SHARP_AHEAD; step++) {
+                for (const index of [from - step, to - 1 + step]) {
+                    if (index < 0 || index >= items.length) continue;
+                    const path = missing(index);
+                    if (path) wanted.push(path);
+                }
+            }
+            if (wanted.length > 0) requestThumbs(wanted, rememberSharp);
         }, 120);
         return () => clearTimeout(timer);
     });
@@ -388,7 +431,7 @@
                     oncontextmenu={(e: Event) => { if (!nativeMenu) e.preventDefault(); }}
                 >
                     {#if item.thumb}
-                        <img src={convertFileSrc(sharp[item.path] ?? item.thumb)} alt="" loading="lazy" decoding="async" draggable="false" />
+                        <img src={convertFileSrc((gone[item.path] ? null : sharpOf(item)) ?? item.thumb)} alt="" loading="lazy" decoding="async" draggable="false" onerror={() => forgetSharp(item)} />
                     {/if}
                     {#if item.media_type === "video"}
                         <span class="badge">{duration(item.duration_ms)}</span>

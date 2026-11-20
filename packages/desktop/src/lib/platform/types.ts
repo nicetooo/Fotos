@@ -81,6 +81,13 @@ export interface PlatformService {
      * Each call replaces the previous request.
      */
     requestGridThumbs?(paths: string[], onReady: (thumbs: Record<string, string>) => void): void;
+    /**
+     * The sharp grid thumbnail that already exists for an item, given its
+     * stored (small) thumbnail; null when there is none yet.
+     */
+    knownGridThumb?(thumb: string): string | null;
+    /** A sharp grid thumbnail turned out to be gone. */
+    forgetGridThumb?(thumb: string): void;
 
     /**
      * Show the system's own menu for a library item at a point on the page
