@@ -410,10 +410,39 @@ class IOSPlatformServiceImpl implements IOSPlatformService {
         this.scanningCallbacks.forEach(cb => cb(false));
     }
 
+    // The native side registers its message handler a moment after the page
+    // starts (it has to find the web view first). A map command sent before
+    // that used to be dropped, and the map is attached only once: the app
+    // then stayed black where the map should be. So commands sent early wait
+    // here and go out, in order, as soon as the handler exists.
+    private pendingMapCommands: Record<string, unknown>[] = [];
+    private mapFlushArmed = false;
+
     nativeMapCommand(name: string, payload: Record<string, unknown> = {}): void {
         const handler = (window as any).webkit?.messageHandlers?.footosPhotos;
-        handler?.postMessage({ command: name, ...payload });
+        if (handler && this.pendingMapCommands.length === 0) {
+            handler.postMessage({ command: name, ...payload });
+            return;
+        }
+        this.pendingMapCommands.push({ command: name, ...payload });
+        if (this.pendingMapCommands.length > 500) this.pendingMapCommands.splice(1, 1);
+        this.flushMapCommands();
     }
+
+    private flushMapCommands = (): void => {
+        const handler = (window as any).webkit?.messageHandlers?.footosPhotos;
+        if (!handler) {
+            if (!this.mapFlushArmed) {
+                this.mapFlushArmed = true;
+                window.addEventListener("footos-bridge-ready", this.flushMapCommands, { once: true });
+            }
+            setTimeout(this.flushMapCommands, 50);
+            return;
+        }
+        const waiting = this.pendingMapCommands;
+        this.pendingMapCommands = [];
+        for (const message of waiting) handler.postMessage(message);
+    };
 
     setAlbumMenuContext(items: NativeViewerItem[], titles: { copy: string; share: string; locate: string }): void {
         const handler = (window as any).webkit?.messageHandlers?.footosPhotos;

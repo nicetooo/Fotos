@@ -131,7 +131,9 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
         return;
     }
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // Short steps: until this succeeds the page cannot reach the native side
+    // (the map is not shown yet).
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [weakSelf startPollingForWebView];
     });
 }
