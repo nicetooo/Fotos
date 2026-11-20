@@ -459,6 +459,7 @@
         try {
             const w = await queryAlbumIn(bbox, startMs, endMs, VIEWPORT_ALBUM_LIMIT);
             if (w.items.length === 0) return;
+            albumQuery = { bbox, startMs, endMs };
             // A new list replaces the one to go back to.
             albumReturn = null;
             showAlbum({ items: w.items, total: w.total });
@@ -467,7 +468,28 @@
         }
     }
 
+    /** What the list in the grid was asked for: the same again when its media filter changes. */
+    let albumQuery: { bbox: Bbox; startMs: number | null; endMs: number | null } | null = null;
+
+    /** The filter row of the grid: the same filter as the map's, and the list is fetched again. */
+    async function setAlbumMediaFilter(next: MediaFilter) {
+        await setMediaFilter(next);
+        const query = albumQuery;
+        if (!albumGrid || !query || mediaFilter !== next) return;
+        try {
+            const w = await queryAlbumIn(query.bbox, query.startMs, query.endMs, VIEWPORT_ALBUM_LIMIT);
+            if (albumGrid) setAlbumList({ items: w.items, total: w.total });
+        } catch (e) {
+            console.error("[App] Failed to refresh the album", e);
+        }
+    }
+
     function showAlbum(grid: { items: AlbumItem[]; total: number; initialIndex?: number }) {
+        setAlbumList(grid);
+        history.pushState({ modal: "album" }, "");
+    }
+
+    function setAlbumList(grid: { items: AlbumItem[]; total: number; initialIndex?: number }) {
         albumGrid = grid;
         if (platformService.capabilities.nativeContextMenu) {
             iosPlatformService?.setAlbumMenuContext(
@@ -475,7 +497,6 @@
                 { copy: t.map.copyPhoto, share: t.map.sharePhoto, locate: t.map.locateOnMap },
             );
         }
-        history.pushState({ modal: "album" }, "");
     }
 
     /** Back to the list the user located a photo from, at that photo. */
@@ -768,6 +789,8 @@
         } : undefined}
         onShare={platformService.shareItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.shareItem!(p); } : undefined}
         onCopy={platformService.copyItem ? (i) => { const p = albumGrid?.items[i]?.path; if (p) platformService.copyItem!(p); } : undefined}
+        mediaFilter={mediaFilter}
+        onMediaFilter={setAlbumMediaFilter}
         knownThumb={platformService.knownGridThumb ? (thumb) => platformService.knownGridThumb!(thumb) : undefined}
         forgetThumb={platformService.forgetGridThumb ? (thumb) => platformService.forgetGridThumb!(thumb) : undefined}
         requestThumbs={platformService.requestGridThumbs ? (paths, onReady) => platformService.requestGridThumbs!(paths, onReady) : undefined}

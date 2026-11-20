@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { convertFileSrc } from "@tauri-apps/api/core";
-    import type { AlbumItem } from "../../shared/query";
+    import type { AlbumItem, MediaFilter } from "../../shared/query";
     import type { Translations, Locale } from "../../shared/i18n/types";
 
     /**
@@ -9,7 +9,7 @@
      * like the system Photos app. Tapping a cell opens the viewer on that item.
      * Only the rows near the viewport are in the DOM.
      */
-    let { items, total, initialIndex = null, onOpen, onLocate, onShare = undefined, onCopy = undefined, onSystemMenu = undefined, nativeMenu = false, requestThumbs = undefined, knownThumb = undefined, forgetThumb = undefined, onClose, t, locale } = $props<{
+    let { items, total, initialIndex = null, onOpen, onLocate, onShare = undefined, onCopy = undefined, onSystemMenu = undefined, nativeMenu = false, requestThumbs = undefined, mediaFilter = "all", onMediaFilter = undefined, knownThumb = undefined, forgetThumb = undefined, onClose, t, locale } = $props<{
         /** Share / copy the original of an item (own menu only; the native menu has its own). */
         onShare?: (index: number) => void;
         onCopy?: (index: number) => void;
@@ -17,6 +17,9 @@
         onSystemMenu?: (index: number, x: number, y: number) => void;
         /** Asks the platform for sharper thumbnails of the given item paths. */
         requestThumbs?: (paths: string[], onReady: (thumbs: Record<string, string>) => void) => void;
+        /** Which media types the list holds; the row under the title changes it. */
+        mediaFilter?: MediaFilter;
+        onMediaFilter?: (filter: MediaFilter) => void;
         /** The sharp thumbnail that already exists for a stored thumbnail, if any. */
         knownThumb?: (thumb: string) => string | null;
         forgetThumb?: (thumb: string) => void;
@@ -310,6 +313,25 @@
         });
     }
 
+    const filters = $derived([
+        { value: "all" as MediaFilter, icon: "fa-layer-group", label: t.library.filterAll },
+        { value: "photo" as MediaFilter, icon: "fa-image", label: t.library.filterPhotos },
+        { value: "video" as MediaFilter, icon: "fa-video", label: t.library.filterVideos },
+        { value: "live_photo" as MediaFilter, icon: "fa-circle-dot", label: t.library.filterLivePhotos },
+    ]);
+
+    // A different list (the filter changed): start at its newest photos again.
+    let shownItems = items;
+    $effect(() => {
+        if (items === shownItems) return;
+        shownItems = items;
+        requestAnimationFrame(() => {
+            if (!scroller) return;
+            scroller.scrollTop = scroller.scrollHeight;
+            scrollTop = scroller.scrollTop;
+        });
+    });
+
     // First and last dated item give the span shown in the header.
     let span = $derived.by(() => {
         let from = "";
@@ -409,6 +431,21 @@
             </div>
         </div>
     </header>
+
+    {#if onMediaFilter}
+        <div class="filters" data-album-filters>
+            {#each filters as filter (filter.value)}
+                <button
+                    class:on={filter.value === mediaFilter}
+                    data-album-filter={filter.value}
+                    onclick={() => { if (filter.value !== mediaFilter) onMediaFilter(filter.value); }}
+                >
+                    <i class="fa-solid {filter.icon}"></i>
+                    <span>{filter.label}</span>
+                </button>
+            {/each}
+        </div>
+    {/if}
 
     <div class="scroller" bind:this={scroller} onscroll={() => { scrollTop = scroller.scrollTop; cancelPress(); }}>
         <div class="sizer" style="height: {totalHeight}px">
@@ -511,6 +548,37 @@
         justify-content: center;
         font-size: 20px;
         color: inherit;
+    }
+    .filters {
+        flex-shrink: 0;
+        display: flex;
+        gap: 6px;
+        padding: 0 12px 10px;
+    }
+    .filters button {
+        flex: 1;
+        min-width: 0;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border-radius: 17px;
+        border: 1px solid var(--border-color, rgba(148, 163, 184, 0.25));
+        background: transparent;
+        color: var(--text-secondary, #cbd5e1);
+        font-size: 13px;
+        white-space: nowrap;
+    }
+    .filters button.on {
+        background: var(--accent, #facc15);
+        border-color: transparent;
+        color: #000;
+        font-weight: 600;
+    }
+    .filters button span {
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .title {
         min-width: 0;
