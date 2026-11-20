@@ -27,6 +27,8 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
     /** Drag-to-dismiss progress, 0 (at rest) to 1. */
     var onDismissProgress: ((Float) -> Unit)? = null
     var onDismiss: (() -> Unit)? = null
+    /** Swiped up on the un-zoomed picture. */
+    var onSwipeUp: (() -> Unit)? = null
     /** When false the view only reports taps and the dismiss drag (video pages). */
     var zoomEnabled = true
     /** Called once each time the picture goes from fitted to clearly zoomed in. */
@@ -42,6 +44,7 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
     private var downX = 0f
     private var downY = 0f
     private var dismissing = false
+    private var lifting = false
     private var decided = false
     private var animator: ValueAnimator? = null
 
@@ -101,6 +104,7 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
                 downX = event.rawX
                 downY = event.rawY
                 dismissing = false
+                lifting = false
                 decided = false
                 if (isZoomed) parent?.requestDisallowInterceptTouchEvent(true)
             }
@@ -116,8 +120,10 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
                 if (!decided && (abs(dx) > slop || abs(dy) > slop)) {
                     decided = true
                     dismissing = dy > 0 && abs(dy) > abs(dx) * 1.5f
-                    if (dismissing) parent?.requestDisallowInterceptTouchEvent(true)
+                    lifting = dy < 0 && abs(dy) > abs(dx) * 1.5f
+                    if (dismissing || lifting) parent?.requestDisallowInterceptTouchEvent(true)
                 }
+                if (lifting) translationY = min(0f, dy) * 0.35f
                 if (dismissing) {
                     val progress = min(1f, max(0f, dy) / (height * 0.6f))
                     translationX = dx
@@ -132,6 +138,13 @@ class ZoomImageView(context: Context) : AppCompatImageView(context) {
                 if (dismissing) {
                     val dy = event.rawY - downY
                     settleDismiss(event.actionMasked == MotionEvent.ACTION_UP && dy > height * 0.16f)
+                }
+                if (lifting) {
+                    lifting = false
+                    animate().translationY(0f).setDuration(180).start()
+                    if (event.actionMasked == MotionEvent.ACTION_UP && event.rawY - downY < -height * 0.08f) {
+                        onSwipeUp?.invoke()
+                    }
                 }
                 parent?.requestDisallowInterceptTouchEvent(false)
             }

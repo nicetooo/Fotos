@@ -36,6 +36,8 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
 /// Items of the album grid on screen, and the titles for its menu.
 @property (nonatomic, copy) NSArray<NSDictionary *> *albumMenuItems;
 @property (nonatomic, copy) NSDictionary<NSString *, NSString *> *albumMenuTitles;
+/// Actions of our own for the next share sheet (the viewer adds "show on map").
+@property (nonatomic, copy, nullable) NSArray<UIActivity *> *pendingShareActivities;
 /// What the chosen menu item does, held until the menu has finished closing.
 @property (nonatomic, copy) void (^albumPendingAction)(void);
 @property (nonatomic, strong) dispatch_queue_t gridQueue;
@@ -1523,15 +1525,24 @@ static NSString * const kFootosAlbumScheme = @"footos-album";
     }];
 }
 
+/// The viewer's "show on map": the page moves the map to that item.
+- (void)viewerLocate:(NSNumber *)index {
+    [self eval:[NSString stringWithFormat:
+        @"(function(){if(window.__handleViewerLocate)window.__handleViewerLocate(%ld);})()",
+        (long)index.integerValue]];
+}
+
 - (void)shareAlbumItem:(NSDictionary *)item {
     __weak typeof(self) weakSelf = self;
+    NSArray<UIActivity *> *extra = self.pendingShareActivities;
+    self.pendingShareActivities = nil;
     [self originalFileForItem:item completion:^(NSURL *fileURL) {
         UIViewController *presenter = [weakSelf topViewController];
         if (!fileURL || !presenter) {
             return;
         }
         UIActivityViewController *sheet = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL]
-                                                                            applicationActivities:nil];
+                                                                            applicationActivities:extra];
         // iPad shows it as a popover and needs an anchor.
         sheet.popoverPresentationController.sourceView = presenter.view;
         sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(presenter.view.bounds),

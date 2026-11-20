@@ -106,6 +106,28 @@ static void FVLoadThumb(NSString *file, void (^done)(UIImage *_Nullable image)) 
     });
 }
 
+#pragma mark - Share sheet action
+
+/// "Show on map" in the share sheet of the viewer.
+@interface FootosLocateActivity : UIActivity
+@property (nonatomic, copy) NSString *title;
+@property (nonatomic, copy) void (^handler)(void);
+@end
+
+@implementation FootosLocateActivity
++ (UIActivityCategory)activityCategory { return UIActivityCategoryAction; }
+- (UIActivityType)activityType { return @"app.footos.locate"; }
+- (NSString *)activityTitle { return self.title; }
+- (UIImage *)activityImage { return [UIImage systemImageNamed:@"mappin.and.ellipse"]; }
+- (BOOL)canPerformWithActivityItems:(NSArray *)activityItems { return YES; }
+- (void)performActivity {
+    [self activityDidFinish:YES];
+    if (self.handler) {
+        self.handler();
+    }
+}
+@end
+
 #pragma mark - Page
 
 /// The default audio session is silenced by the ring/silent switch. Media the
@@ -735,6 +757,10 @@ static void FVActivatePlaybackAudio(void) {
 @property (nonatomic, assign) BOOL chromeVisible;
 @property (nonatomic, assign) BOOL stripDrivenByUser;
 @property (nonatomic, strong) UIPanGestureRecognizer *dismissPan;
+/// Swipe up on the photo: the system share sheet for it.
+@property (nonatomic, strong) UIPanGestureRecognizer *sharePan;
+@property (nonatomic, assign) BOOL shareFired;
+@property (nonatomic, assign) CFAbsoluteTime lastShareAt;
 @property (nonatomic, strong) NSDateFormatter *parseFormatter;
 @end
 
@@ -1080,6 +1106,10 @@ static __weak FootosPhotoViewer *sCurrentViewer;
     self.dismissPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleDismissPan:)];
     self.dismissPan.delegate = self;
     [self.pager.view addGestureRecognizer:self.dismissPan];
+
+    self.sharePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSharePan:)];
+    self.sharePan.delegate = self;
+    [self.pager.view addGestureRecognizer:self.sharePan];
 }
 
 - (void)handleSingleTap:(UITapGestureRecognizer *)tap {
@@ -1119,6 +1149,14 @@ static __weak FootosPhotoViewer *sCurrentViewer;
 
 // Swipe down to dismiss only starts on a mostly-vertical downward drag of an un-zoomed photo.
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if (gestureRecognizer == self.sharePan) {
+        // A mostly-vertical upward drag of an un-zoomed photo.
+        if ([[self currentPage] isZoomed]) {
+            return NO;
+        }
+        CGPoint velocity = [self.sharePan velocityInView:self.view];
+        return velocity.y < 0 && fabs(velocity.y) > fabs(velocity.x) * 1.2;
+    }
     if (gestureRecognizer != self.dismissPan) {
         return YES;
     }
@@ -1133,7 +1171,8 @@ static __weak FootosPhotoViewer *sCurrentViewer;
 // them instead of losing the race, and freeze horizontal paging while it is active.
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
     shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    return gestureRecognizer == self.dismissPan && [other isKindOfClass:[UIPanGestureRecognizer class]];
+    return (gestureRecognizer == self.dismissPan || gestureRecognizer == self.sharePan)
+        && [other isKindOfClass:[UIPanGestureRecognizer class]];
 }
 
 - (void)setPagingEnabled:(BOOL)enabled {
@@ -1142,6 +1181,99 @@ static __weak FootosPhotoViewer *sCurrentViewer;
             ((UIScrollView *)view).scrollEnabled = enabled;
         }
     }
+}
+
+- (void)handleSharePan:(UIPanGestureRecognizer *)pan {
+    CGFloat lift = MIN(0.0, [pan translationInView:self.view].y);
+    switch (pan.state) {
+        case UIGestureRecognizerStateBegan:
+            self.shareFired = NO;
+            [self setPagingEnabled:NO];
+            // fall through
+        case UIGestureRecognizerStateChanged:
+            // The photo follows the finger a little, so the drag is felt.
+            self.pager.view.transform = CGAffineTransformMakeTranslation(0, lift * 0.35);
+            if (!self.shareFired && lift < -70.0) {
+                self.shareFired = YES;
+                [self shareCurrentItem];
+            }
+            break;
+        case UIGestureRecognizerStateEnded:
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed: {
+            [self setPagingEnabled:YES];
+            [UIView animateWithDuration:0.28
+                                  delay:0
+                 usingSpringWithDamping:0.85
+                  initialSpringVelocity:0
+                                options:UIViewAnimationOptionAllowUserInteraction
+                             animations:^{
+                self.pager.view.transform = CGAffineTransformIdentity;
+            } completion:nil];
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+/// The share sheet for the item on screen (the original file, as from the grid's menu).
+- (void)shareCurrentItem {
+    NSInteger index = self.currentIndex;
+    if (index < 0 || index >= (NSInteger)self.items.count) {
+        return;
+    }
+    // One sheet at a time: the file for it is fetched first, so a second
+    // swipe could otherwise put a second sheet on top of the first.
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    if (self.presentedViewController || now - self.lastShareAt < 1.5) {
+        return;
+    }
+    self.lastShareAt = now;
+    [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+    Class bridgeClass = NSClassFromString(@"PhotoLibraryBridge");
+    SEL sharedSel = NSSelectorFromString(@"shared");
+    SEL shareSel = NSSelectorFromString(@"shareAlbumItem:");
+    if (![bridgeClass respondsToSelector:sharedSel]) {
+        return;
+    }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    id bridge = [bridgeClass performSelector:sharedSel];
+    if ([bridge respondsToSelector:shareSel]) {
+        // Our own action in the sheet: close the viewer and show the item on the map.
+        FootosPhotoPage *page = [self currentPage];
+        BOOL located = page.asset ? page.asset.location != nil : YES;
+        if (located && [bridge respondsToSelector:NSSelectorFromString(@"viewerLocate:")]) {
+            NSString *title = nil;
+            @try {
+                NSDictionary *titles = [bridge valueForKey:@"albumMenuTitles"];
+                title = [titles isKindOfClass:[NSDictionary class]] ? titles[@"locate"] : nil;
+            } @catch (NSException *e) {
+                title = nil;
+            }
+            if (![title isKindOfClass:[NSString class]] || title.length == 0) {
+                title = [NSLocale.preferredLanguages.firstObject hasPrefix:@"zh"] ? @"在地图上定位" : @"Show on map";
+            }
+            FootosLocateActivity *locate = [[FootosLocateActivity alloc] init];
+            locate.title = title;
+            __weak typeof(self) weakSelf = self;
+            locate.handler = ^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [weakSelf closeTapped];
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        [bridge performSelector:NSSelectorFromString(@"viewerLocate:") withObject:@(index)];
+                    });
+                });
+            };
+            @try {
+                [bridge setValue:@[locate] forKey:@"pendingShareActivities"];
+            } @catch (NSException *e) {
+            }
+        }
+        [bridge performSelector:shareSel withObject:self.items[index]];
+    }
+#pragma clang diagnostic pop
 }
 
 - (void)handleDismissPan:(UIPanGestureRecognizer *)pan {

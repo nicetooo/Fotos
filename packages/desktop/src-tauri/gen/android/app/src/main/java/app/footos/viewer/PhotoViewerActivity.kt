@@ -247,6 +247,7 @@ class PhotoViewerActivity : AppCompatActivity() {
                 liveBadge.alpha = alpha.coerceIn(0f, 1f)
             }
             image.onDismiss = { close() }
+            image.onSwipeUp = { item?.let { share(it) } }
             // Zooming in: swap in the picture at (close to) its own resolution.
             image.onZoomedIn = {
                 val shown = item
@@ -321,6 +322,7 @@ class PhotoViewerActivity : AppCompatActivity() {
             // A tap toggles playback; holding a video down plays it at twice the speed.
             if (restorePlayGlyph) {
                 var fast = false
+                var downY = 0f
                 val hold = Runnable {
                     fast = true
                     setFast(true)
@@ -330,11 +332,22 @@ class PhotoViewerActivity : AppCompatActivity() {
                     when (event.actionMasked) {
                         android.view.MotionEvent.ACTION_DOWN -> {
                             fast = false
+                            downY = event.rawY
                             v.postDelayed(hold, 300)
+                        }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            // A drag is not a hold.
+                            if (!fast && kotlin.math.abs(event.rawY - downY) > dp(12f)) v.removeCallbacks(hold)
                         }
                         android.view.MotionEvent.ACTION_UP -> {
                             v.removeCallbacks(hold)
-                            if (fast) setFast(false) else v.performClick()
+                            val swipedUp = event.rawY - downY < -v.height * 0.08f
+                            when {
+                                fast -> setFast(false)
+                                // Swiped up on the video: share it.
+                                swipedUp -> item?.let { share(it) }
+                                else -> v.performClick()
+                            }
                         }
                         android.view.MotionEvent.ACTION_CANCEL -> {
                             v.removeCallbacks(hold)
@@ -423,6 +436,23 @@ class PhotoViewerActivity : AppCompatActivity() {
                 detailed = false
                 ImageLoader.load(shown.path, fullSide, image)
             }
+        }
+    }
+
+    /** Hand the item to the system share sheet (the original). */
+    private fun share(item: Item) {
+        if (!item.path.startsWith("content://")) return
+        try {
+            val uri = android.net.Uri.parse(item.path)
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = contentResolver.getType(uri) ?: "image/*"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                clipData = android.content.ClipData.newRawUri(null, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(android.content.Intent.createChooser(send, null))
+        } catch (e: Exception) {
+            android.util.Log.w("FootosViewer", "share failed: ${e.message}")
         }
     }
 

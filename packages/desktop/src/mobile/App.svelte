@@ -184,6 +184,18 @@
         window.addEventListener('popstate', handlePopState);
         // The native viewer reports where it was closed.
         // A choice made in the system context menu of an album cell.
+        // "Show on map" chosen in the share sheet of the native viewer.
+        (window as any).__handleViewerLocate = (index: number) => {
+            const item = nativeViewerItems[index];
+            if (!item || !Number.isFinite(item.lon) || !Number.isFinite(item.lat) || (item.lon === 0 && item.lat === 0)) return;
+            const grid = albumGrid;
+            if (grid && grid.items[index]?.path === item.path) {
+                // From the grid: closes it and leaves the way back to the list.
+                locateAlbumItem(index);
+            } else {
+                mapFocus = { lon: item.lon, lat: item.lat, seq: (mapFocus?.seq ?? 0) + 1 };
+            }
+        };
         (window as any).__handleAlbumMenu = (action: string, index: number) => {
             if (action === "locate") locateAlbumItem(index);
             else if (action === "open") openAlbumItem(index);
@@ -412,6 +424,9 @@
         return viewerPhotos;
     }
 
+    /** The list the native viewer was last opened with (it reports back by index). */
+    let nativeViewerItems: AlbumItem[] = [];
+
     // Native viewer gets a bigger window: it cannot ask for more once open.
     const NATIVE_ALBUM_RADIUS = 500;
 
@@ -421,6 +436,7 @@
             if (nativeViewer) {
                 const w = await queryAlbum(item.id, NATIVE_ALBUM_RADIUS);
                 const index = w.items.findIndex((p) => p.id === item.id);
+                nativeViewerItems = w.items;
                 const opened = nativeViewer.openNativeViewer(
                     w.items.map((p) => ({
                         path: p.path,
@@ -513,6 +529,7 @@
         if (!grid) return;
         const nativeViewer = nativeViewerOf(platformService);
         if (nativeViewer) {
+            nativeViewerItems = grid.items;
             const opened = nativeViewer.openNativeViewer(
                 grid.items.map((p) => ({
                     path: p.path,
