@@ -72,6 +72,9 @@ export const zh: Translations = {
         zoomIn: '放大',
         zoomOut: '缩小',
         resetZoom: '重置缩放',
+        rotateLeft: '向左旋转',
+        rotateRight: '向右旋转',
+        speed: '播放速度',
     },
 
     photoInfo: {

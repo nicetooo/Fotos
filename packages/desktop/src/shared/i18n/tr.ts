@@ -72,6 +72,9 @@ export const tr: Translations = {
         zoomIn: 'Yakınlaştır',
         zoomOut: 'Uzaklaştır',
         resetZoom: 'Yakınlaştırmayı sıfırla',
+        rotateLeft: 'Sola döndür',
+        rotateRight: 'Sağa döndür',
+        speed: 'Oynatma hızı',
     },
 
     photoInfo: {

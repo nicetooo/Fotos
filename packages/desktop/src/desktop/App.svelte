@@ -694,6 +694,80 @@
             });
         }
 
+        // Turning a photo in the viewer; a video's playback speed.
+        {
+            const click = (selector: string) => (document.querySelector(selector) as HTMLElement | null)?.click();
+            const box = () => {
+                const el = document.querySelector("[data-preview-image]") as HTMLElement | null;
+                const r = el?.parentElement?.getBoundingClientRect();
+                return { w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), transform: el?.style.transform ?? "" };
+            };
+            showLibrary = true;
+            mediaFilter = "photo";
+            await until(() => libraryLoaded && libraryCounts.total > 0);
+            await sleep(400);
+            const photo = await pager.item(0);
+            if (photo) await openFromLibrary(photo, 0);
+            await until(() => box().w > 0, 4000);
+            const upright = box();
+            click('[data-preview-rotate="right"]');
+            await sleep(300);
+            const turned = box();
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-rotated.png") },
+            }).catch(() => {});
+            await sleep(600);
+            click('[data-preview-rotate="left"]');
+            await sleep(200);
+            const back = box();
+            closePreview();
+
+            mediaFilter = "video";
+            await sleep(600);
+            await until(() => libraryLoaded && libraryCounts.total > 0);
+            const video = await pager.item(0);
+            if (video) await openFromLibrary(video, 0);
+            await until(() => !!document.querySelector("[data-preview-video]"), 4000);
+            // The seeded rows have no video file behind them: show a real
+            // one (made by the test script) in the row's place.
+            const sample = dbPath.replace(/footos\.db$/, "sample-video.mp4");
+            if (previewPhoto) previewPhoto = { ...previewPhoto, path: sample };
+            await sleep(300);
+            const videoNow = () => document.querySelector("[data-preview-video]") as HTMLVideoElement | null;
+            await until(() => (videoNow()?.readyState ?? 0) >= 2, 5000);
+            click('[data-preview-speed="2"]');
+            await sleep(200);
+            const rate = videoNow()?.playbackRate ?? 0;
+            click('[data-preview-rotate="right"]');
+            await sleep(700);
+            const videoTransform = videoNow()?.style.transform ?? "";
+            const playable = (videoNow()?.readyState ?? 0) >= 2 && (videoNow()?.currentTime ?? 0) > 0;
+            const bar = document.querySelector("[data-preview-controls]") as HTMLElement | null;
+            const barRect = bar?.getBoundingClientRect();
+            // The bar is a wide strip under the picture, not turned with it.
+            const barUpright = !!barRect && barRect.width > barRect.height * 5
+                && !videoNow()?.hasAttribute("controls");
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-video.png") },
+            }).catch(() => {});
+            await sleep(600);
+            click('[data-preview-speed="1"]');
+            closePreview();
+            mediaFilter = "all";
+            const videos = libraryCounts.total;
+            await until(() => libraryLoaded && libraryCounts.total !== videos, 4000);
+            await sleep(300);
+            out.push({
+                name: "desktop:preview-rotate-speed",
+                ok: turned.transform.includes("rotate(90deg)") && back.transform.includes("rotate(0deg)")
+                    && back.w === upright.w && back.h === upright.h
+                    && rate === 2 && videoTransform.includes("rotate(90deg)") && barUpright && playable,
+                detail: { upright: `${upright.w}x${upright.h}`, turned: `${turned.w}x${turned.h}`, rate, videoTransform, barUpright, playable },
+            });
+        }
+
         // Position filter in the drawer: with, without, and back to everything.
         {
             closePreview();

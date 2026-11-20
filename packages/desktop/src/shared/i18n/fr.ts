@@ -72,6 +72,9 @@ export const fr: Translations = {
         zoomIn: 'Zoom avant',
         zoomOut: 'Zoom arrière',
         resetZoom: 'Réinitialiser le zoom',
+        rotateLeft: 'Pivoter à gauche',
+        rotateRight: 'Pivoter à droite',
+        speed: 'Vitesse de lecture',
     },
 
     photoInfo: {

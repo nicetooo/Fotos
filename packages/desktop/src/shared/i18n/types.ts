@@ -99,6 +99,9 @@ export interface Translations {
         zoomIn: string;
         zoomOut: string;
         resetZoom: string;
+        rotateLeft: string;
+        rotateRight: string;
+        speed: string;
     };
 
     // Photo info

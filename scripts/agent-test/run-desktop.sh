@@ -38,6 +38,13 @@ if [ -n "${FRESH:-}" ] || [ ! -f "$DATA_DIR/footos.db" ]; then
 fi
 rm -f "$REPORT"
 
+# A real, wide video for the viewer steps (the seeded rows have no files).
+if [ ! -f "$DATA_DIR/sample-video.mp4" ] && command -v ffmpeg >/dev/null 2>&1; then
+    ffmpeg -loglevel error -y -f lavfi -i "testsrc=size=640x360:rate=30:duration=6" \
+        -f lavfi -i "sine=frequency=440:duration=6" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest \
+        "$DATA_DIR/sample-video.mp4" || true
+fi
+
 IMPORT_DIR=""
 if [ -n "${IMPORT:-}" ]; then
     python3 "$HERE/make-import-fixture.py" "$OUT/import-fixture" >/dev/null

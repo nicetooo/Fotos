@@ -72,6 +72,9 @@ export const nl: Translations = {
         zoomIn: 'Inzoomen',
         zoomOut: 'Uitzoomen',
         resetZoom: 'Zoom resetten',
+        rotateLeft: 'Linksom draaien',
+        rotateRight: 'Rechtsom draaien',
+        speed: 'Afspeelsnelheid',
     },
 
     photoInfo: {

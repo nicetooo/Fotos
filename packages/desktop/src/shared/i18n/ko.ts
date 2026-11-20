@@ -72,6 +72,9 @@ export const ko: Translations = {
         zoomIn: '확대',
         zoomOut: '축소',
         resetZoom: '확대/축소 초기화',
+        rotateLeft: '왼쪽으로 회전',
+        rotateRight: '오른쪽으로 회전',
+        speed: '재생 속도',
     },
 
     photoInfo: {

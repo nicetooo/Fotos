@@ -1,3 +1,9 @@
+<script module lang="ts">
+    // The playback speed chosen last: the next video starts at it (the
+    // viewer makes a new preview for every item).
+    let rememberedSpeed = 1;
+</script>
+
 <script lang="ts">
     import { onDestroy } from "svelte";
     import { convertFileSrc } from "@tauri-apps/api/core";
@@ -27,6 +33,39 @@
     let loading = $state(false);
     let lastSrc = "";
     let liveVideoPlaying = $state(false);
+
+    // ── Rotation (of the view only: the file is not touched) ──
+    // In quarter turns clockwise. A new item starts upright.
+    let rotation = $state(0);
+    let sideways = $derived(rotation % 180 !== 0);
+    function rotate(by: number) {
+        rotation = (rotation + by + 360) % 360;
+        zoom = 1;
+        if (container) {
+            container.scrollLeft = 0;
+            container.scrollTop = 0;
+        }
+    }
+
+    // ── Playback speed ──
+    const SPEEDS = [0.5, 1, 1.5, 2, 3];
+    let speed = $state(rememberedSpeed);
+    let videoEl: HTMLVideoElement | undefined = $state();
+    function applySpeed() {
+        if (!videoEl) return;
+        // Loading a video puts the rate back to the default one.
+        videoEl.defaultPlaybackRate = speed;
+        videoEl.playbackRate = speed;
+    }
+    function setSpeed(value: number) {
+        speed = value;
+        rememberedSpeed = value;
+        applySpeed();
+    }
+    $effect(() => {
+        void speed;
+        applySpeed();
+    });
 
     // Video helper: open in system player
     async function openInSystemPlayer() {
@@ -148,16 +187,58 @@
         if (!naturalWidth || !naturalHeight || !containerWidth || !containerHeight) {
             return { width: 0, height: 0 };
         }
-        const ratio = Math.min(containerWidth / naturalWidth, containerHeight / naturalHeight);
+        // Turned on its side, the picture is as wide as it was tall.
+        const w = sideways ? naturalHeight : naturalWidth;
+        const h = sideways ? naturalWidth : naturalHeight;
+        const ratio = Math.min(containerWidth / w, containerHeight / h);
         return {
-            width: naturalWidth * ratio,
-            height: naturalHeight * ratio
+            width: w * ratio,
+            height: h * ratio
         };
     });
 
     // Zoomed dimensions
     let zoomedWidth = $derived(baseSize.width * zoom);
     let zoomedHeight = $derived(baseSize.height * zoom);
+    // The picture sits in a box of the size it takes on screen and is turned
+    // inside it; its own width and height are those before the turn.
+    let boxStyle = $derived(`position: relative; flex: none; width: ${zoomedWidth}px; height: ${zoomedHeight}px;`);
+    let turnedStyle = $derived(
+        `position: absolute; left: 50%; top: 50%; max-width: none; max-height: none;`
+        + ` width: ${sideways ? zoomedHeight : zoomedWidth}px; height: ${sideways ? zoomedWidth : zoomedHeight}px;`
+        + ` transform: translate(-50%, -50%) rotate(${rotation}deg);`,
+    );
+    // A video fills the area it is given, turned or not. Only the picture
+    // turns: the controls are drawn by this component (below), because the
+    // system's own are part of the video element and would turn with it.
+    let videoStyle = $derived(
+        `position: absolute; left: 50%; top: 50%; max-width: none; max-height: none; object-fit: contain;`
+        + ` width: ${sideways ? containerHeight : containerWidth}px; height: ${sideways ? containerWidth : containerHeight}px;`
+        + ` transform: translate(-50%, -50%) rotate(${rotation}deg);`,
+    );
+
+    // ── Video controls ──
+    let paused = $state(true);
+    let currentTime = $state(0);
+    let duration = $state(0);
+    let muted = $state(false);
+    function togglePlay() {
+        if (!videoEl) return;
+        if (videoEl.paused) videoEl.play().catch(() => {});
+        else videoEl.pause();
+    }
+    function clock(seconds: number): string {
+        if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+        const s = Math.floor(seconds);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const rest = String(s % 60).padStart(2, "0");
+        return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${rest}` : `${m}:${rest}`;
+    }
+    function seek(e: Event) {
+        if (!videoEl) return;
+        videoEl.currentTime = Number((e.target as HTMLInputElement).value);
+    }
 
     function handleWheel(e: WheelEvent) {
         if (!(e.ctrlKey || e.metaKey)) return;
@@ -218,15 +299,54 @@
 
 {#if mediaType === 'video'}
     <!-- Video preview: inline playback -->
-    <div class="relative w-full h-full flex items-center justify-center bg-black">
-        <video
-            src={convertFileSrc(src)}
-            controls
-            autoplay
-            loop
-            class="max-w-full max-h-full object-contain"
-            poster={thumbPath ? convertFileSrc(thumbPath) : undefined}
-        ></video>
+    <div class="w-full h-full flex flex-col bg-black">
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div bind:this={container} class="relative flex-1 min-h-0 overflow-hidden" onclick={togglePlay}>
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video
+                bind:this={videoEl}
+                bind:paused
+                bind:currentTime
+                bind:duration
+                bind:muted
+                src={convertFileSrc(src)}
+                autoplay
+                loop
+                playsinline
+                style={videoStyle}
+                poster={thumbPath ? convertFileSrc(thumbPath) : undefined}
+                onloadedmetadata={applySpeed}
+                onplay={applySpeed}
+                data-preview-video
+            ></video>
+        </div>
+        <!-- The controls stay put whichever way the picture is turned. -->
+        <div class="flex-none flex items-center gap-3 px-4 py-2 theme-bg-card" data-preview-controls>
+            <button
+                class="w-8 h-8 flex-none rounded-full hover:theme-bg-secondary theme-text-primary flex items-center justify-center"
+                onclick={togglePlay}
+                data-preview-play
+                aria-label={paused ? "Play" : "Pause"}
+            ><i class="fa-solid {paused ? 'fa-play' : 'fa-pause'} text-sm"></i></button>
+            <span class="flex-none text-xs tabular-nums theme-text-secondary" data-preview-time>{clock(currentTime)}</span>
+            <input
+                type="range"
+                class="seek flex-1 min-w-0"
+                style="--played: {duration > 0 ? (currentTime / duration) * 100 : 0}%"
+                min="0"
+                max={duration || 0}
+                step="0.05"
+                value={currentTime}
+                oninput={seek}
+                data-preview-seek
+            />
+            <span class="flex-none text-xs tabular-nums theme-text-secondary">{clock(duration)}</span>
+            <button
+                class="w-8 h-8 flex-none rounded-full hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary flex items-center justify-center"
+                onclick={() => muted = !muted}
+                aria-label={muted ? "Unmute" : "Mute"}
+            ><i class="fa-solid {muted ? 'fa-volume-xmark' : 'fa-volume-high'} text-sm"></i></button>
+        </div>
     </div>
 
 {:else if mediaType === 'live_photo'}
@@ -241,15 +361,15 @@
         onmouseleave={() => liveVideoPlaying = false}
     >
         {#if liveVideoPlaying && videoPath}
-            <div class="absolute inset-0 flex items-center justify-center">
+            <div class="absolute inset-0 overflow-hidden">
                 <video
                     src={convertFileSrc(videoPath)}
                     autoplay
                     loop
                     muted
                     playsinline
-                    class="max-w-full max-h-full object-contain"
-                />
+                    style={videoStyle}
+                ></video>
             </div>
         {:else}
             <div
@@ -257,15 +377,18 @@
                 style="min-width: {Math.max(containerWidth, zoomedWidth)}px; min-height: {Math.max(containerHeight, zoomedHeight)}px;"
             >
                 {#if imageSrc}
-                    <img
-                        src={imageSrc}
-                        {alt}
-                        class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
-                        style="width: {zoomedWidth}px; height: {zoomedHeight}px;"
-                        onload={handleLoad}
-                        onerror={handleError}
-                        draggable="false"
-                    />
+                    <div style={boxStyle}>
+                        <img
+                            src={imageSrc}
+                            {alt}
+                            class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
+                            style={turnedStyle}
+                            onload={handleLoad}
+                            onerror={handleError}
+                            draggable="false"
+                            data-preview-image
+                        />
+                    </div>
                 {/if}
             </div>
         {/if}
@@ -308,7 +431,7 @@
                 <!-- Developing a RAW takes a moment the first time: show the
                      thumbnail at once and swap the full picture in when ready. -->
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <img src={convertFileSrc(thumbPath)} alt="" class="max-w-full max-h-full w-full h-full object-contain" draggable="false" />
+                    <img src={convertFileSrc(thumbPath)} alt="" class="max-w-full max-h-full w-full h-full object-contain" style="transform: rotate({rotation}deg);" draggable="false" />
                     <div class="absolute bottom-4 right-4 px-2.5 py-1.5 rounded bg-black/60 text-xs text-neutral-200 flex items-center gap-2">
                         <i class="fa-solid fa-spinner fa-spin"></i>
                         {t.imageError.extractingRaw}
@@ -323,15 +446,18 @@
                 </div>
             {/if}
             {#if imageSrc}
-            <img
-                src={imageSrc}
-                {alt}
-                class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
-                style="width: {zoomedWidth}px; height: {zoomedHeight}px;"
-                onload={handleLoad}
-                onerror={handleError}
-                draggable="false"
-            />
+            <div style={boxStyle}>
+                <img
+                    src={imageSrc}
+                    {alt}
+                    class="{loaded ? '' : 'opacity-0'} {error ? 'hidden' : ''}"
+                    style={turnedStyle}
+                    onload={handleLoad}
+                    onerror={handleError}
+                    draggable="false"
+                    data-preview-image
+                />
+            </div>
             {/if}
         </div>
     </div>
@@ -349,3 +475,53 @@
         </div>
     {/if}
 {/if}
+
+<!-- Turn the view; for a video, how fast it plays. -->
+<div class="absolute top-3 right-3 z-10 flex items-center gap-2" data-preview-tools>
+    {#if mediaType === 'video'}
+        <div class="flex items-center rounded-full theme-bg-card overflow-hidden" title={t.preview.speed}>
+            {#each SPEEDS as value}
+                <button
+                    class="px-2.5 py-1.5 text-xs tabular-nums {speed === value ? 'bg-amber-500 text-black font-medium' : 'theme-text-secondary hover:theme-text-primary hover:theme-bg-secondary'}"
+                    onclick={() => setSpeed(value)}
+                    data-preview-speed={value}
+                >{value}×</button>
+            {/each}
+        </div>
+    {/if}
+    <button
+        class="w-8 h-8 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary flex items-center justify-center"
+        title={t.preview.rotateLeft}
+        aria-label={t.preview.rotateLeft}
+        onclick={() => rotate(-90)}
+        data-preview-rotate="left"
+    ><i class="fa-solid fa-rotate-left text-sm"></i></button>
+    <button
+        class="w-8 h-8 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary flex items-center justify-center"
+        title={t.preview.rotateRight}
+        aria-label={t.preview.rotateRight}
+        onclick={() => rotate(90)}
+        data-preview-rotate="right"
+    ><i class="fa-solid fa-rotate-right text-sm"></i></button>
+</div>
+
+<style>
+    /* The seek bar: a thin track, the played part in the accent colour. */
+    .seek {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 4px;
+        border-radius: 2px;
+        background: linear-gradient(to right, #f59e0b var(--played), rgba(255, 255, 255, 0.25) var(--played));
+        cursor: pointer;
+    }
+    .seek::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #f59e0b;
+        border: none;
+    }
+</style>

@@ -72,6 +72,9 @@ export const id: Translations = {
         zoomIn: 'Perbesar',
         zoomOut: 'Perkecil',
         resetZoom: 'Atur ulang zoom',
+        rotateLeft: 'Putar ke kiri',
+        rotateRight: 'Putar ke kanan',
+        speed: 'Kecepatan pemutaran',
     },
 
     photoInfo: {

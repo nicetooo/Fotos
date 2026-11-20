@@ -72,6 +72,9 @@ export const ja: Translations = {
         zoomIn: '拡大',
         zoomOut: '縮小',
         resetZoom: 'ズームをリセット',
+        rotateLeft: '左に回転',
+        rotateRight: '右に回転',
+        speed: '再生速度',
     },
 
     photoInfo: {

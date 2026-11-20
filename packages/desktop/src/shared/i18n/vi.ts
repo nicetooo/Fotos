@@ -72,6 +72,9 @@ export const vi: Translations = {
         zoomIn: 'Phóng to',
         zoomOut: 'Thu nhỏ',
         resetZoom: 'Đặt lại zoom',
+        rotateLeft: 'Xoay trái',
+        rotateRight: 'Xoay phải',
+        speed: 'Tốc độ phát',
     },
 
     photoInfo: {

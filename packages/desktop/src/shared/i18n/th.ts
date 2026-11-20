@@ -72,6 +72,9 @@ export const th: Translations = {
         zoomIn: 'ซูมเข้า',
         zoomOut: 'ซูมออก',
         resetZoom: 'รีเซ็ตซูม',
+        rotateLeft: 'หมุนซ้าย',
+        rotateRight: 'หมุนขวา',
+        speed: 'ความเร็วในการเล่น',
     },
 
     photoInfo: {

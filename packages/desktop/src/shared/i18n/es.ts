@@ -72,6 +72,9 @@ export const es: Translations = {
         zoomIn: 'Acercar',
         zoomOut: 'Alejar',
         resetZoom: 'Restablecer zoom',
+        rotateLeft: 'Girar a la izquierda',
+        rotateRight: 'Girar a la derecha',
+        speed: 'Velocidad de reproducción',
     },
 
     photoInfo: {

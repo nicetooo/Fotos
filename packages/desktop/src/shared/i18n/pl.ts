@@ -72,6 +72,9 @@ export const pl: Translations = {
         zoomIn: 'Powiększ',
         zoomOut: 'Pomniejsz',
         resetZoom: 'Resetuj powiększenie',
+        rotateLeft: 'Obróć w lewo',
+        rotateRight: 'Obróć w prawo',
+        speed: 'Szybkość odtwarzania',
     },
 
     photoInfo: {

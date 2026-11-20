@@ -72,6 +72,9 @@ export const ar: Translations = {
         zoomIn: 'تكبير',
         zoomOut: 'تصغير',
         resetZoom: 'إعادة ضبط التكبير',
+        rotateLeft: 'تدوير لليسار',
+        rotateRight: 'تدوير لليمين',
+        speed: 'سرعة التشغيل',
     },
 
     photoInfo: {

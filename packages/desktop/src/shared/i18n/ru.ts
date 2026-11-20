@@ -72,6 +72,9 @@ export const ru: Translations = {
         zoomIn: 'Увеличить',
         zoomOut: 'Уменьшить',
         resetZoom: 'Сбросить масштаб',
+        rotateLeft: 'Повернуть влево',
+        rotateRight: 'Повернуть вправо',
+        speed: 'Скорость воспроизведения',
     },
 
     photoInfo: {
