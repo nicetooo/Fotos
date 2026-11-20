@@ -124,6 +124,9 @@ class PhotoViewerActivity : AppCompatActivity() {
         val start = savedInstanceState?.getInt("index") ?: pendingIndex
         pager.setCurrentItem(start, false)
         showPage(start)
+        // The page the viewer opens on (no page change is reported for it
+        // when it is the first item). `enter` does nothing if already playing.
+        pager.post { pager.post { pageAt(start)?.enter() } }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -145,6 +148,8 @@ class PhotoViewerActivity : AppCompatActivity() {
                 if (last >= 0 && last != position) pageAt(last)?.leave()
                 last = position
                 showPage(position)
+                // Once the page is bound: a video starts, a motion photo plays once.
+                pager.post { if (pager.currentItem == position) pageAt(position)?.enter() }
             }
         })
         root.addView(pager, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -182,6 +187,8 @@ class PhotoViewerActivity : AppCompatActivity() {
         private val playGlyph = TextView(frame.context)
         private val liveBadge = TextView(frame.context)
         private var video: VideoView? = null
+        private var player: android.media.MediaPlayer? = null
+        private val speedBadge = TextView(frame.context)
         private var item: Item? = null
 
         init {
@@ -214,6 +221,23 @@ class PhotoViewerActivity : AppCompatActivity() {
                 },
             )
 
+            speedBadge.text = "2×"
+            speedBadge.setTextColor(Color.WHITE)
+            speedBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            speedBadge.typeface = Typeface.DEFAULT_BOLD
+            speedBadge.setPadding(dp(10f), dp(3f), dp(10f), dp(3f))
+            speedBadge.background = GradientDrawable().apply {
+                cornerRadius = dp(11f).toFloat()
+                setColor(0x80000000.toInt())
+            }
+            speedBadge.visibility = View.GONE
+            frame.addView(
+                speedBadge,
+                FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                    topMargin = dp(104f)
+                },
+            )
+
             image.onTap = { onPageTapped(this) }
             image.onDismissProgress = { progress ->
                 background.alpha = ((1f - progress) * 255).toInt()
@@ -239,7 +263,7 @@ class PhotoViewerActivity : AppCompatActivity() {
         /** The full-resolution picture is loaded (the user zoomed in). */
         private var detailed = false
 
-        private fun playMotionClip() {
+        private fun playMotionClip(muted: Boolean = false) {
             val shown = item ?: return
             if (video != null) {
                 stopVideo()
@@ -248,17 +272,78 @@ class PhotoViewerActivity : AppCompatActivity() {
             Thread {
                 val clip = MotionPhoto.clipFor(frame.context.applicationContext, shown.path)
                 frame.post {
-                    if (item === shown && clip != null && video == null) startVideo(clip, loop = false, restorePlayGlyph = false)
+                    if (item === shown && clip != null && video == null) {
+                        startVideo(clip, loop = false, restorePlayGlyph = false, muted = muted)
+                    }
                 }
             }.start()
         }
 
-        private fun startVideo(source: String, loop: Boolean, restorePlayGlyph: Boolean) {
+        /** The page has become the one on display: a video starts, a motion photo plays once. */
+        fun enter() {
+            val shown = item ?: return
+            if (video != null) return
+            when (shown.mediaType) {
+                "video" -> {
+                    startVideo(shown.path, loop = false, restorePlayGlyph = true)
+                    setChrome(false)
+                }
+                "live_photo" -> playMotionClip()
+            }
+        }
+
+        /** Twice the speed while the video is held down. */
+        private fun setFast(fast: Boolean) {
+            speedBadge.visibility = if (fast) View.VISIBLE else View.GONE
+            val view = video ?: return
+            if (fast && !view.isPlaying) {
+                view.start()
+                playGlyph.visibility = View.GONE
+            }
+            try {
+                val mp = player ?: return
+                mp.playbackParams = mp.playbackParams.setSpeed(if (fast) 2f else 1f)
+            } catch (_: Exception) {
+                // The player is not in a state that takes a speed; it plays at normal speed.
+            }
+        }
+
+        private fun startVideo(source: String, loop: Boolean, restorePlayGlyph: Boolean, muted: Boolean = false) {
             val view = VideoView(frame.context)
             video = view
             frame.addView(view, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.CENTER))
             playGlyph.visibility = View.GONE
-            view.setOnPreparedListener { it.isLooping = loop }
+            view.setOnPreparedListener {
+                it.isLooping = loop
+                if (muted) it.setVolume(0f, 0f)
+                if (video === view) player = it
+            }
+            // A tap toggles playback; holding a video down plays it at twice the speed.
+            if (restorePlayGlyph) {
+                var fast = false
+                val hold = Runnable {
+                    fast = true
+                    setFast(true)
+                    setChrome(false)
+                }
+                view.setOnTouchListener { v, event ->
+                    when (event.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> {
+                            fast = false
+                            v.postDelayed(hold, 300)
+                        }
+                        android.view.MotionEvent.ACTION_UP -> {
+                            v.removeCallbacks(hold)
+                            if (fast) setFast(false) else v.performClick()
+                        }
+                        android.view.MotionEvent.ACTION_CANCEL -> {
+                            v.removeCallbacks(hold)
+                            if (fast) setFast(false)
+                        }
+                    }
+                    true
+                }
+            }
             view.setOnCompletionListener {
                 if (restorePlayGlyph) {
                     playGlyph.visibility = View.VISIBLE
@@ -286,7 +371,9 @@ class PhotoViewerActivity : AppCompatActivity() {
             detailed = false
             this.item = item
             image.zoomEnabled = item.mediaType != "video"
-            playGlyph.visibility = if (isVideo) View.VISIBLE else View.GONE
+            // No play button on a video before it has played: it starts by
+            // itself when it comes on screen. Shown once paused or ended.
+            playGlyph.visibility = View.GONE
             liveBadge.visibility = if (item.mediaType == "live_photo") View.VISIBLE else View.GONE
 
             image.setImageDrawable(null)
@@ -318,6 +405,8 @@ class PhotoViewerActivity : AppCompatActivity() {
         private fun stopVideo() {
             val view = video ?: return
             video = null
+            player = null
+            speedBadge.visibility = View.GONE
             view.stopPlayback()
             frame.removeView(view)
             playGlyph.visibility = if (isVideo) View.VISIBLE else View.GONE
@@ -326,6 +415,7 @@ class PhotoViewerActivity : AppCompatActivity() {
         /** The page is no longer the one on display. */
         fun leave() {
             stopVideo()
+            playGlyph.visibility = View.GONE
             image.reset()
             // Off screen: do not keep a full-resolution bitmap around.
             val shown = item

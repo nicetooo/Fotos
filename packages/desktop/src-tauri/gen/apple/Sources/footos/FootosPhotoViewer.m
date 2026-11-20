@@ -140,7 +140,16 @@ static void FVActivatePlaybackAudio(void) {
 @property (nonatomic, assign) BOOL hasOriginal;
 @property (nonatomic, assign) PHImageRequestID originalRequest;
 @property (nonatomic, assign) BOOL livePressed;
+/// The Live Photo plays once by itself (the page has just come on screen).
+@property (nonatomic, assign) BOOL liveAuto;
+@property (nonatomic, strong, nullable) id liveEndObserver;
 @property (nonatomic, strong, nullable) id playbackObserver;
+/// The speed the video should play at: 2 while it is held down, else 1.
+@property (nonatomic, assign) float wantedRate;
+/// The video should be playing (it may still be getting ready).
+@property (nonatomic, assign) BOOL wantsPlay;
+@property (nonatomic, assign) BOOL videoLoading;
+@property (nonatomic, strong) UILabel *speedBadge;
 @end
 
 @implementation FootosPhotoPage
@@ -197,12 +206,24 @@ static void FVActivatePlaybackAudio(void) {
     UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:56 weight:UIImageSymbolWeightRegular];
     self.playGlyph = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"play.circle.fill" withConfiguration:config]];
     self.playGlyph.tintColor = [UIColor colorWithWhite:1 alpha:0.92];
-    self.playGlyph.hidden = ![self isVideo];
+    self.playGlyph.hidden = YES;
     self.playGlyph.layer.shadowColor = UIColor.blackColor.CGColor;
     self.playGlyph.layer.shadowOpacity = 0.35;
     self.playGlyph.layer.shadowRadius = 8;
     self.playGlyph.layer.shadowOffset = CGSizeZero;
     [self.view addSubview:self.playGlyph];
+
+    self.wantedRate = 1.0;
+    [self prepareVideo];
+    self.speedBadge = [[UILabel alloc] init];
+    self.speedBadge.text = @"  2×  ";
+    self.speedBadge.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    self.speedBadge.textColor = UIColor.whiteColor;
+    self.speedBadge.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
+    self.speedBadge.layer.cornerRadius = 11;
+    self.speedBadge.layer.masksToBounds = YES;
+    self.speedBadge.hidden = YES;
+    [self.view addSubview:self.speedBadge];
 
     self.liveBadge = [[UILabel alloc] init];
     self.liveBadge.text = @"  LIVE  ";
@@ -231,6 +252,8 @@ static void FVActivatePlaybackAudio(void) {
     self.playGlyph.center = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
     CGSize badge = [self.liveBadge sizeThatFits:CGSizeMake(200, 18)];
     self.liveBadge.frame = CGRectMake(16, self.view.safeAreaInsets.top + 56, badge.width, 18);
+    CGSize speed = [self.speedBadge sizeThatFits:CGSizeMake(200, 22)];
+    self.speedBadge.frame = CGRectMake(CGRectGetMidX(bounds) - speed.width / 2, self.view.safeAreaInsets.top + 56, speed.width, 22);
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -250,6 +273,9 @@ static void FVActivatePlaybackAudio(void) {
     }
     if (_playbackObserver) {
         [[NSNotificationCenter defaultCenter] removeObserver:_playbackObserver];
+    }
+    if (_liveEndObserver) {
+        [[NSNotificationCenter defaultCenter] removeObserver:_liveEndObserver];
     }
 }
 
@@ -433,43 +459,93 @@ static void FVActivatePlaybackAudio(void) {
         return NO;
     }
     if ([self isPlaying]) {
+        self.wantsPlay = NO;
         [self.player pause];
         self.playGlyph.hidden = NO;
         return NO;
     }
+    self.wantsPlay = YES;
     self.videoView.hidden = NO;
     self.playGlyph.hidden = YES;
     FVActivatePlaybackAudio();
     if (self.player) {
-        [self.player play];
-        return YES;
-    }
-    __weak typeof(self) weakSelf = self;
-    if (self.asset) {
-        PHVideoRequestOptions *options = [[PHVideoRequestOptions alloc] init];
-        options.networkAccessAllowed = YES;
-        options.deliveryMode = PHVideoRequestOptionsDeliveryModeAutomatic;
-        [[PHImageManager defaultManager] requestPlayerItemForVideo:self.asset
-                                                           options:options
-                                                     resultHandler:^(AVPlayerItem *item, NSDictionary *info) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [weakSelf attachPlayerItem:item];
-                [weakSelf.player play];
-            });
-        }];
+        self.player.rate = self.wantedRate;
     } else {
-        NSURL *url = [NSURL fileURLWithPath:FVString(self.item, @"path")];
-        [self attachPlayerItem:[AVPlayerItem playerItemWithURL:url]];
-        [self.player play];
+        [self prepareVideo];
     }
     return YES;
 }
 
+/// Get the player ready without playing. Done as soon as the page exists
+/// (the neighbours of the page on screen too), so that a video swiped to
+/// starts at once rather than after its item has been fetched.
+- (void)prepareVideo {
+    if (![self isVideo] || self.player || self.videoLoading) {
+        return;
+    }
+    if (!self.asset) {
+        NSURL *url = [NSURL fileURLWithPath:FVString(self.item, @"path")];
+        [self attachPlayerItem:[AVPlayerItem playerItemWithURL:url]];
+        if (self.wantsPlay) {
+            self.player.rate = self.wantedRate;
+        }
+        return;
+    }
+    self.videoLoading = YES;
+    __weak typeof(self) weakSelf = self;
+    PHVideoRequestOptions *options = [[PHVideoRequestOptions alloc] init];
+    options.networkAccessAllowed = YES;
+    options.deliveryMode = PHVideoRequestOptionsDeliveryModeAutomatic;
+    [[PHImageManager defaultManager] requestPlayerItemForVideo:self.asset
+                                                       options:options
+                                                 resultHandler:^(AVPlayerItem *item, NSDictionary *info) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            weakSelf.videoLoading = NO;
+            [weakSelf attachPlayerItem:item];
+            if (weakSelf.wantsPlay) {
+                weakSelf.player.rate = weakSelf.wantedRate;
+            }
+        });
+    }];
+}
+
+/// Held down: twice the speed for as long as the finger stays (starting the
+/// video if it was not playing). Released: back to normal speed.
+- (void)setFastPlayback:(BOOL)fast {
+    if (![self isVideo]) {
+        return;
+    }
+    self.wantedRate = fast ? 2.0 : 1.0;
+    self.speedBadge.hidden = !fast;
+    if (fast && ![self isPlaying]) {
+        [self togglePlayback];
+    } else if ([self isPlaying]) {
+        self.player.rate = self.wantedRate;
+    }
+}
+
+/// The page has become the one on screen: a video starts playing, a Live
+/// Photo plays once.
+- (void)becomeCurrent {
+    if ([self isVideo]) {
+        if (![self isPlaying]) {
+            [self togglePlayback];
+        }
+    } else if ([self isLivePhoto]) {
+        [self startLivePhotoHeld:NO];
+    }
+}
+
 - (void)stopPlayback {
+    self.wantedRate = 1.0;
+    self.speedBadge.hidden = YES;
+    self.wantsPlay = NO;
     [self.player pause];
     [self.player seekToTime:kCMTimeZero];
     self.videoView.hidden = YES;
-    self.playGlyph.hidden = ![self isVideo];
+    // No play button on a video that is not on screen: it starts by itself
+    // when swiped to. The button shows once it is paused or has ended.
+    self.playGlyph.hidden = YES;
 }
 
 #pragma mark Live Photo
@@ -492,6 +568,22 @@ static void FVActivatePlaybackAudio(void) {
     }
     self.livePlayer = [AVPlayer playerWithURL:[NSURL fileURLWithPath:path]];
     self.livePlayer.actionAtItemEnd = AVPlayerActionAtItemEndPause;
+    // Played by itself, it ends on the still again; held down, it stays on
+    // its last frame until the finger lifts (as before).
+    __weak typeof(self) weakSelf = self;
+    self.liveEndObserver = [[NSNotificationCenter defaultCenter]
+        addObserverForName:AVPlayerItemDidPlayToEndTimeNotification
+                    object:self.livePlayer.currentItem
+                     queue:NSOperationQueue.mainQueue
+                usingBlock:^(NSNotification *note) {
+        weakSelf.liveAuto = NO;
+        if (!weakSelf.livePressed) {
+            UIView *view = weakSelf.liveView;
+            [UIView animateWithDuration:0.2 animations:^{
+                view.alpha = 0;
+            }];
+        }
+    }];
     self.liveView = [[UIView alloc] initWithFrame:self.view.bounds];
     self.liveView.userInteractionEnabled = NO;
     self.liveView.backgroundColor = UIColor.clearColor;
@@ -504,7 +596,7 @@ static void FVActivatePlaybackAudio(void) {
 }
 
 - (void)playLiveVideo {
-    if (!self.livePlayer || !self.livePressed) {
+    if (!self.livePlayer || !(self.livePressed || self.liveAuto)) {
         return;
     }
     FVActivatePlaybackAudio();
@@ -516,10 +608,18 @@ static void FVActivatePlaybackAudio(void) {
 }
 
 - (void)startLivePhoto {
+    [self startLivePhotoHeld:YES];
+}
+
+- (void)startLivePhotoHeld:(BOOL)held {
     if (![self isLivePhoto] || [self isZoomed]) {
         return;
     }
-    self.livePressed = YES;
+    if (held) {
+        self.livePressed = YES;
+    } else {
+        self.liveAuto = YES;
+    }
     if (self.livePlayer) {
         [self playLiveVideo];
         return;
@@ -574,6 +674,7 @@ static void FVActivatePlaybackAudio(void) {
 
 - (void)stopLivePhoto {
     self.livePressed = NO;
+    self.liveAuto = NO;
     [self.livePlayer pause];
     UIView *view = self.liveView;
     [UIView animateWithDuration:0.15 animations:^{
@@ -706,6 +807,7 @@ static __weak FootosPhotoViewer *sCurrentViewer;
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self centerStripOnIndex:self.currentIndex animated:NO];
+    [[self currentPage] becomeCurrent];
 }
 
 #pragma mark Chrome
@@ -857,6 +959,13 @@ static __weak FootosPhotoViewer *sCurrentViewer;
     self.currentIndex = [self currentPage].index;
     [self updateTitle];
     [self centerStripOnIndex:self.currentIndex animated:YES];
+    for (UIViewController *previous in previousViewControllers) {
+        if (previous != [self currentPage] && [previous isKindOfClass:[FootosPhotoPage class]]) {
+            [(FootosPhotoPage *)previous stopPlayback];
+            [(FootosPhotoPage *)previous stopLivePhoto];
+        }
+    }
+    [[self currentPage] becomeCurrent];
 }
 
 /// Jump straight to a page (used by the scrubber).
@@ -991,11 +1100,20 @@ static __weak FootosPhotoViewer *sCurrentViewer;
 - (void)handleLongPress:(UILongPressGestureRecognizer *)press {
     FootosPhotoPage *page = [self currentPage];
     if (press.state == UIGestureRecognizerStateBegan) {
-        [page startLivePhoto];
+        if ([page isVideo]) {
+            [page setFastPlayback:YES];
+            [self setChromeVisible:NO animated:YES];
+        } else {
+            [page startLivePhoto];
+        }
     } else if (press.state == UIGestureRecognizerStateEnded
                || press.state == UIGestureRecognizerStateCancelled
                || press.state == UIGestureRecognizerStateFailed) {
-        [page stopLivePhoto];
+        if ([page isVideo]) {
+            [page setFastPlayback:NO];
+        } else {
+            [page stopLivePhoto];
+        }
     }
 }
 
