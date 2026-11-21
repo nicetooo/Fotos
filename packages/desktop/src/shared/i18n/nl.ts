@@ -66,6 +66,7 @@ export const nl: Translations = {
 
     preview: {
         showInFinder: 'Tonen in Finder',
+        info: 'Info',
         showInExplorer: 'Tonen in Verkenner',
         previous: 'Vorige',
         next: 'Volgende',

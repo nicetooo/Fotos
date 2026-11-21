@@ -509,6 +509,8 @@
     let pagerEl: HTMLDivElement | undefined = $state();
     let pagerWidth = 0;
     let previewZoomed = $state(false);
+    // The details column beside the large view: folded away until asked for.
+    let previewInfoOpen = $state(false);
 
     function placePager() {
         const el = pagerEl;
@@ -882,6 +884,16 @@
             const index = Math.floor(libraryCounts.total / 2);
             const item = await pager.item(index);
             if (item) await openFromLibrary(item, index);
+            // The details start folded away; the button in the top bar opens them.
+            await until(() => !!document.querySelector("[data-preview-info-toggle]"), 3000);
+            await sleep(200);
+            const area = () => document.querySelector("[data-preview-area]")?.getBoundingClientRect().right ?? 0;
+            const foldedAtStart = !document.querySelector("[data-preview-info]") && Math.abs(area() - window.innerWidth) < 1;
+            await invoke("mac_map_command", {
+                command: "mapDebugSnapshot",
+                body: { path: dbPath.replace(/footos\.db$/, "window-detail-folded.png") },
+            }).catch(() => {});
+            (document.querySelector("[data-preview-info-toggle]") as HTMLElement | null)?.click();
             await until(() => !!document.querySelector("[data-show-in-finder]"), 3000);
             await sleep(400);
             const time = document.querySelector("[data-detail-time]")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
@@ -892,11 +904,13 @@
                 body: { path: dbPath.replace(/footos\.db$/, "window-detail.png") },
             }).catch(() => {});
             await sleep(600);
+            const areaWithDetails = Math.round(window.innerWidth - area());
             closePreview();
+            previewInfoOpen = false;
             out.push({
                 name: "desktop:photo-details",
-                ok: time !== "" && folderButton && !deleteOriginal,
-                detail: { time, folderButtonInPanel: folderButton, deleteOriginalButton: deleteOriginal },
+                ok: time !== "" && folderButton && !deleteOriginal && foldedAtStart && areaWithDetails === 256,
+                detail: { time, folderButtonInPanel: folderButton, deleteOriginalButton: deleteOriginal, foldedAtStart, areaWithDetails },
             });
         }
 
@@ -1906,11 +1920,11 @@
 {#if previewPhoto}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
-        class="fixed inset-0 z-50 bg-black/90"
+        class="fixed inset-0 z-50 bg-black/95"
         onclick={closePreview}
     >
         <!-- Top bar -->
-        <div class="absolute top-0 left-0 right-64 h-12 flex items-center justify-between px-4 z-20 theme-bg-overlay">
+        <div class="absolute top-0 left-0 {previewInfoOpen ? 'right-64' : 'right-0'} h-12 flex items-center justify-between px-4 z-20 theme-bg-overlay">
             <div class="flex items-center gap-3">
                 <span class="text-xs theme-text-muted">{previewPosition.index + 1} / {previewPosition.total}</span>
                 <span class="text-sm theme-text-secondary truncate">
@@ -1918,6 +1932,15 @@
                 </span>
             </div>
             <div class="flex items-center gap-2">
+                <button
+                    onclick={(e) => { e.stopPropagation(); previewInfoOpen = !previewInfoOpen; }}
+                    class="p-2 rounded hover:theme-bg-secondary {previewInfoOpen ? 'theme-text-primary' : 'theme-text-muted'} hover:theme-text-primary"
+                    title={t.preview.info}
+                    aria-pressed={previewInfoOpen}
+                    data-preview-info-toggle
+                >
+                    <i class="fa-solid fa-circle-info text-sm"></i>
+                </button>
                 <button
                     onclick={closePreview}
                     class="p-2 rounded hover:theme-bg-secondary theme-text-muted hover:theme-text-primary"
@@ -1937,7 +1960,7 @@
         </button>
         <button
             onclick={(e) => { e.stopPropagation(); navigatePreview("next"); }}
-            class="absolute right-72 top-1/2 -translate-y-1/2 p-3 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary z-20"
+            class="absolute {previewInfoOpen ? 'right-72' : 'right-4'} top-1/2 -translate-y-1/2 p-3 rounded-full theme-bg-card hover:theme-bg-secondary theme-text-secondary hover:theme-text-primary z-20"
             title={t.preview.next}
         >
             <i class="fa-solid fa-chevron-right"></i>
@@ -1946,7 +1969,7 @@
         <!-- Image area -->
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
-            class="absolute top-12 left-0 right-64 bottom-0"
+            class="absolute top-12 left-0 {previewInfoOpen ? 'right-64' : 'right-0'} bottom-0"
             onclick={(e) => e.stopPropagation()}
             data-preview-area
         >
@@ -1991,10 +2014,12 @@
         </div>
 
         <!-- Info Panel -->
+        {#if previewInfoOpen}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
             class="absolute top-0 right-0 bottom-0 w-64 theme-bg-secondary border-l theme-border pt-12 px-4 py-4 overflow-y-auto text-sm"
             onclick={(e) => e.stopPropagation()}
+            data-preview-info
         >
             <div class="space-y-3">
                 {#if previewPhoto.metadata.date_taken}
@@ -2137,6 +2162,7 @@
                 </div>
             </div>
         </div>
+        {/if}
     </div>
 
     <!-- Delete Confirmation Modal -->

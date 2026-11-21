@@ -93,6 +93,7 @@ export interface Translations {
     // Preview
     preview: {
         showInFinder: string;
+        info: string;
         showInExplorer: string;
         previous: string;
         next: string;

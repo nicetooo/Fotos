@@ -66,6 +66,7 @@ export const tr: Translations = {
 
     preview: {
         showInFinder: 'Finder\'da göster',
+        info: 'Info',
         showInExplorer: 'Gezgin\'de göster',
         previous: 'Önceki',
         next: 'Sonraki',

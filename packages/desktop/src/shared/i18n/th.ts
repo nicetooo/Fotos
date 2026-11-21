@@ -66,6 +66,7 @@ export const th: Translations = {
 
     preview: {
         showInFinder: 'แสดงใน Finder',
+        info: 'Info',
         showInExplorer: 'แสดงใน Explorer',
         previous: 'ก่อนหน้า',
         next: 'ถัดไป',

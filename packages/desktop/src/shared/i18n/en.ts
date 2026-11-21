@@ -66,6 +66,7 @@ export const en: Translations = {
 
     preview: {
         showInFinder: 'Show in Finder',
+        info: 'Info',
         showInExplorer: 'Show in Explorer',
         previous: 'Previous',
         next: 'Next',

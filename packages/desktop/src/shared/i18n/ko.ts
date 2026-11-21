@@ -66,6 +66,7 @@ export const ko: Translations = {
 
     preview: {
         showInFinder: 'Finder에서 보기',
+        info: '정보',
         showInExplorer: '탐색기에서 보기',
         previous: '이전',
         next: '다음',

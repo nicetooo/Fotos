@@ -66,6 +66,7 @@ export const ja: Translations = {
 
     preview: {
         showInFinder: 'Finderで表示',
+        info: '情報',
         showInExplorer: 'エクスプローラーで表示',
         previous: '前へ',
         next: '次へ',

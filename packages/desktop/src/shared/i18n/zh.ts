@@ -66,6 +66,7 @@ export const zh: Translations = {
 
     preview: {
         showInFinder: '在访达中显示',
+        info: '详情',
         showInExplorer: '在资源管理器中显示',
         previous: '上一张',
         next: '下一张',

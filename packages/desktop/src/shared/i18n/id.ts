@@ -66,6 +66,7 @@ export const id: Translations = {
 
     preview: {
         showInFinder: 'Tampilkan di Finder',
+        info: 'Info',
         showInExplorer: 'Tampilkan di Explorer',
         previous: 'Sebelumnya',
         next: 'Berikutnya',

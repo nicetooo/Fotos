@@ -66,6 +66,7 @@ export const vi: Translations = {
 
     preview: {
         showInFinder: 'Hiển thị trong Finder',
+        info: 'Info',
         showInExplorer: 'Hiển thị trong Explorer',
         previous: 'Trước',
         next: 'Sau',

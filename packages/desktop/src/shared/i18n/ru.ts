@@ -66,6 +66,7 @@ export const ru: Translations = {
 
     preview: {
         showInFinder: 'Показать в Finder',
+        info: 'Info',
         showInExplorer: 'Показать в Проводнике',
         previous: 'Назад',
         next: 'Далее',
