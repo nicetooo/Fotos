@@ -407,6 +407,15 @@ static NSView *FMWebViewHitTest(NSView *self, SEL _cmd, NSPoint point) {
         NSLog(@"[footos] hit %@ -> %@", body[@"label"] ?: @"?", page ? @"page" : @"map");
     } else if ([command isEqualToString:@"mapDebugMouseMove"]) {
         [self debugMouseMoveToPageX:[body[@"x"] doubleValue] y:[body[@"y"] doubleValue]];
+    } else if ([command isEqualToString:@"mapDebugFront"]) {
+        // The self-test measures frames, and a window behind another gets
+        // none: keep it above the others for the length of the run.
+        NSWindow *window = self.webView.window;
+        window.level = NSFloatingWindowLevel;
+        [window orderFrontRegardless];
+    } else if ([command isEqualToString:@"mapDebugLog"]) {
+        // A page error, into the app's log where the self-test can read it.
+        NSLog(@"[footos] page: %@", body[@"text"]);
     } else if ([command isEqualToString:@"mapDebugSnapshot"]) {
         [self snapshotWindowTo:[body[@"path"] isKindOfClass:[NSString class]] ? body[@"path"] : nil];
     }

@@ -11,7 +11,12 @@
     import { appDataDir } from "@tauri-apps/api/path";
     import type { Translations } from "../../shared/i18n/types";
 
-    let { src, alt = "Preview", thumbPath = "", t, mediaType = "photo", videoPath = "" } = $props<{
+    let { src, alt = "Preview", thumbPath = "", t, mediaType = "photo", videoPath = "", onZoomed, active = true } = $props<{
+        /** The one on display. The neighbours beside it in the viewer are
+            loaded and ready but do nothing: no playing, no keys, no tools. */
+        active?: boolean;
+        /** Told when the photo becomes zoomed in, and when it no longer is. */
+        onZoomed?: (zoomed: boolean) => void;
         src: string;
         alt?: string;
         thumbPath?: string;
@@ -22,6 +27,9 @@
 
     let container: HTMLDivElement | undefined = $state();
     let zoom = $state(1);
+    $effect(() => {
+        if (active) onZoomed?.(zoom > 1.001);
+    });
     let loaded = $state(false);
     let error = $state(false);
     let naturalWidth = $state(0);
@@ -240,22 +248,15 @@
         videoEl.currentTime = Number((e.target as HTMLInputElement).value);
     }
 
-    function handleWheel(e: WheelEvent) {
-        if (!(e.ctrlKey || e.metaKey)) return;
-        e.preventDefault();
-        e.stopPropagation();
-
+    function zoomAt(newZoom: number, clientX: number, clientY: number) {
         if (!container) return;
-
         const oldZoom = zoom;
-        const delta = -e.deltaY * 0.002;
-        const newZoom = Math.max(1, Math.min(10, oldZoom * (1 + delta)));
-
+        newZoom = Math.max(1, Math.min(10, newZoom));
         if (Math.abs(newZoom - oldZoom) < 0.001) return;
 
         const rect = container.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
+        const mouseX = clientX - rect.left;
+        const mouseY = clientY - rect.top;
 
         const contentX = container.scrollLeft + mouseX;
         const contentY = container.scrollTop + mouseY;
@@ -272,6 +273,47 @@
         });
     }
 
+    function handleWheel(e: WheelEvent) {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        zoomAt(zoom * (1 - e.deltaY * 0.002), e.clientX, e.clientY);
+    }
+
+    // A trackpad pinch arrives in WebKit as gesture events, not as a wheel
+    // event with the control key.
+    let pinchBase = 1;
+    $effect(() => {
+        const el = container;
+        if (!el) return;
+        const point = (e: Event): [number, number] => {
+            const { clientX: x, clientY: y } = e as MouseEvent;
+            if (typeof x === "number" && typeof y === "number" && (x !== 0 || y !== 0)) return [x, y];
+            const r = el.getBoundingClientRect();
+            return [r.left + r.width / 2, r.top + r.height / 2];
+        };
+        const start = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+            pinchBase = zoom;
+        };
+        const change = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const scale = (e as Event & { scale?: number }).scale ?? 1;
+            zoomAt(pinchBase * scale, ...point(e));
+        };
+        const options = { passive: false } as const;
+        el.addEventListener("gesturestart", start, options);
+        el.addEventListener("gesturechange", change, options);
+        el.addEventListener("gestureend", start, options);
+        return () => {
+            el.removeEventListener("gesturestart", start);
+            el.removeEventListener("gesturechange", change);
+            el.removeEventListener("gestureend", start);
+        };
+    });
+
     function handleDoubleClick() {
         zoom = 1;
         if (container) {
@@ -280,7 +322,21 @@
         }
     }
 
+    // Out of sight, a view goes back to how it started: upright, not zoomed,
+    // not playing. Back on display, a video plays.
+    $effect(() => {
+        if (active) {
+            videoEl?.play().catch(() => {});
+            return;
+        }
+        zoom = 1;
+        rotation = 0;
+        liveVideoPlaying = false;
+        videoEl?.pause();
+    });
+
     function handleKeydown(e: KeyboardEvent) {
+        if (!active) return;
         if (e.key === "0") {
             zoom = 1;
             if (container) {
@@ -310,25 +366,25 @@
                 bind:duration
                 bind:muted
                 src={convertFileSrc(src)}
-                autoplay
+                autoplay={active}
                 loop
                 playsinline
                 style={videoStyle}
                 poster={thumbPath ? convertFileSrc(thumbPath) : undefined}
                 onloadedmetadata={applySpeed}
                 onplay={applySpeed}
-                data-preview-video
+                data-preview-video={active ? "" : undefined}
             ></video>
         </div>
         <!-- The controls stay put whichever way the picture is turned. -->
-        <div class="flex-none flex items-center gap-3 px-4 py-2 theme-bg-card" data-preview-controls>
+        <div class="flex-none flex items-center gap-3 px-4 py-2 theme-bg-card" data-preview-controls={active ? "" : undefined}>
             <button
                 class="w-8 h-8 flex-none rounded-full hover:theme-bg-secondary theme-text-primary flex items-center justify-center"
                 onclick={togglePlay}
-                data-preview-play
+                data-preview-play={active ? "" : undefined}
                 aria-label={paused ? "Play" : "Pause"}
             ><i class="fa-solid {paused ? 'fa-play' : 'fa-pause'} text-sm"></i></button>
-            <span class="flex-none text-xs tabular-nums theme-text-secondary" data-preview-time>{clock(currentTime)}</span>
+            <span class="flex-none text-xs tabular-nums theme-text-secondary" data-preview-time={active ? "" : undefined}>{clock(currentTime)}</span>
             <input
                 type="range"
                 class="seek flex-1 min-w-0"
@@ -338,7 +394,7 @@
                 step="0.05"
                 value={currentTime}
                 oninput={seek}
-                data-preview-seek
+                data-preview-seek={active ? "" : undefined}
             />
             <span class="flex-none text-xs tabular-nums theme-text-secondary">{clock(duration)}</span>
             <button
@@ -357,7 +413,7 @@
         class="w-full h-full overflow-auto bg-transparent relative"
         onwheel={handleWheel}
         ondblclick={handleDoubleClick}
-        onmouseenter={() => { if (videoPath) liveVideoPlaying = true; }}
+        onmouseenter={() => { if (videoPath && active) liveVideoPlaying = true; }}
         onmouseleave={() => liveVideoPlaying = false}
     >
         {#if liveVideoPlaying && videoPath}
@@ -386,7 +442,7 @@
                             onload={handleLoad}
                             onerror={handleError}
                             draggable="false"
-                            data-preview-image
+                            data-preview-image={active ? "" : undefined}
                         />
                     </div>
                 {/if}
@@ -427,15 +483,18 @@
                         {/if}
                     </p>
                 </div>
-            {:else if isRaw && thumbPath && (!loaded || loading)}
-                <!-- Developing a RAW takes a moment the first time: show the
-                     thumbnail at once and swap the full picture in when ready. -->
+            {:else if thumbPath && (!loaded || loading)}
+                <!-- The full picture takes a moment (a RAW has to be developed,
+                     a large JPEG decoded): show the thumbnail at once and swap
+                     the full picture in when ready. -->
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <img src={convertFileSrc(thumbPath)} alt="" class="max-w-full max-h-full w-full h-full object-contain" style="transform: rotate({rotation}deg);" draggable="false" />
+                    {#if isRaw}
                     <div class="absolute bottom-4 right-4 px-2.5 py-1.5 rounded bg-black/60 text-xs text-neutral-200 flex items-center gap-2">
                         <i class="fa-solid fa-spinner fa-spin"></i>
                         {t.imageError.extractingRaw}
                     </div>
+                    {/if}
                 </div>
             {:else if !loaded || loading}
                 <div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
@@ -455,7 +514,8 @@
                     onload={handleLoad}
                     onerror={handleError}
                     draggable="false"
-                    data-preview-image
+                    decoding="async"
+                    data-preview-image={active ? "" : undefined}
                 />
             </div>
             {/if}
@@ -477,6 +537,7 @@
 {/if}
 
 <!-- Turn the view; for a video, how fast it plays. -->
+{#if active}
 <div class="absolute top-3 right-3 z-10 flex items-center gap-2" data-preview-tools>
     {#if mediaType === 'video'}
         <div class="flex items-center rounded-full theme-bg-card overflow-hidden" title={t.preview.speed}>
@@ -504,6 +565,7 @@
         data-preview-rotate="right"
     ><i class="fa-solid fa-rotate-right text-sm"></i></button>
 </div>
+{/if}
 
 <style>
     /* The seek bar: a thin track, the played part in the accent colour. */

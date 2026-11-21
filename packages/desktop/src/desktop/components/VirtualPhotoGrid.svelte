@@ -112,10 +112,12 @@
         if (!scrollContainer) return false;
         const { clientX: x, clientY: y } = e as MouseEvent;
         if (typeof x !== "number" || typeof y !== "number" || (x === 0 && y === 0)) {
-            return scrollContainer.matches(":hover") || scrollContainer.contains(e.target as Node);
+            return scrollContainer.contains(e.target as Node);
         }
-        const r = scrollContainer.getBoundingClientRect();
-        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        // Whatever is on top at that point decides: with the large view (or
+        // anything else) covering the list, the pinch belongs to it.
+        const top = document.elementFromPoint(x, y);
+        return !!top && scrollContainer.contains(top);
     }
     function handleGestureStart(e: Event) {
         if (!overList(e)) return;

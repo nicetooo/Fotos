@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import { invoke } from "@tauri-apps/api/core";
+    import { onMount, untrack } from "svelte";
+    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
     import { revealItemInDir } from "@tauri-apps/plugin-opener";
     import { appDataDir, join } from "@tauri-apps/api/path";
@@ -269,6 +269,14 @@
     }
     let lastSharpenRefresh = 0;
 
+    // Development builds write page errors to the app's log: a self-test that
+    // stops with no report otherwise says nothing about why.
+    if (import.meta.env.DEV) {
+        const tell = (text: string) => invoke("mac_map_command", { command: "mapDebugLog", body: { text } }).catch(() => {});
+        window.addEventListener("error", (e) => tell(`${e.message} @ ${e.filename}:${e.lineno}`));
+        window.addEventListener("unhandledrejection", (e) => tell(`rejection: ${e.reason?.stack ?? e.reason}`));
+    }
+
     onMount(async () => {
         try {
             version = await invoke("get_core_version");
@@ -329,6 +337,7 @@
             if (!scenario) void handleRescan();
             if (scenario) {
                 const { runAgentTest } = await import("../shared/agent-test");
+                await invoke("mac_map_command", { command: "mapDebugFront", body: {} }).catch(() => {});
                 void runAgentTest(scenario, {
                     getMap: () => (window as any).__footosMap ?? null,
                     getMapStats: () => (window as any).__footosMapStats?.() ?? {},
@@ -431,55 +440,252 @@
         return { index: src.window.start + src.pos, total: src.window.total };
     });
 
-    async function navigatePreview(direction: "prev" | "next") {
-        const src = previewSource;
-        if (!previewPhoto || !src) return;
-        const step = direction === "prev" ? -1 : 1;
-        const seq = ++previewSeq;
-
+    /** The item one step away from the one on display, and where it sits. */
+    async function previewNeighbour(
+        shown: LibraryItem, src: PreviewSource, step: number,
+    ): Promise<{ photo: LibraryItem; source: PreviewSource } | null> {
         if (src.kind === 'library') {
             const total = libraryCounts.total;
-            if (total === 0) return;
+            if (total < 2) return null;
             const index = (src.index + step + total) % total;
             const item = await pager.item(index);
-            if (seq !== previewSeq || !item) return;
-            previewPhoto = item;
-            previewSource = { kind: 'library', index };
-            return;
+            return item ? { photo: item, source: { kind: 'library', index } } : null;
         }
-
-        let { window, pos } = src;
-        const shownId = previewPhoto.id.id;
+        const { window } = src;
+        let pos = src.pos;
         // A RAW next to its JPEG is two rows in the album but one photo: step over it.
         for (;;) {
             pos += step;
             const item = window.items[pos];
-            if (!item) return;
+            if (!item) return null;
             const detail = await photoDetail(item.id).catch(() => null);
-            if (seq !== previewSeq) return;
             const photo = detail ?? albumItemToPhoto(item);
-            if (photo.id.id === shownId) continue;
-            previewPhoto = photo;
-            previewSource = { kind: 'album', window, pos };
-            break;
+            if (photo.id.id === shown.id.id) continue;
+            return { photo, source: { kind: 'album', window, pos } };
         }
+    }
 
-        // Near the edge of the window: fetch a new one centred on this photo.
+    /** Near the edge of the album window: fetch a new one centred on this photo. */
+    async function refreshAlbumWindow(window: AlbumWindow, pos: number, seq: number) {
         const end = window.start + window.items.length;
         const nearStart = pos < ALBUM_EDGE && window.start > 0;
         const nearEnd = pos >= window.items.length - ALBUM_EDGE && end < window.total;
-        if (nearStart || nearEnd) {
-            const centerId = window.items[pos].id;
-            const next = await queryAlbum(centerId, ALBUM_RADIUS).catch(() => null);
-            if (!next || seq !== previewSeq) return;
-            const nextPos = next.items.findIndex((p) => p.id === centerId);
-            if (nextPos >= 0) previewSource = { kind: 'album', window: next, pos: nextPos };
+        if (!nearStart && !nearEnd) return;
+        const centerId = window.items[pos].id;
+        const next = await queryAlbum(centerId, ALBUM_RADIUS).catch(() => null);
+        if (!next || seq !== previewSeq) return;
+        const nextPos = next.items.findIndex((p) => p.id === centerId);
+        if (nextPos >= 0) previewSource = { kind: 'album', window: next, pos: nextPos };
+    }
+
+    // ── The large view's strip ──
+    // Two fingers sideways in the large view. The area is a real sideways
+    // scroller with one stop per photo, and the system does all the moving
+    // (following the fingers, coasting, settling on a photo). The photos sit
+    // in numbered places along one long strip: the one opened first at 0,
+    // the next at 1, the one before at -1, and so on. A photo never changes
+    // place and the code never moves the scroller during a swipe, so however
+    // fast the swipes come there is nothing to get out of step: the photo on
+    // display is simply the one whose place the scroller is nearest to.
+    // The places next to it hold full views, loaded ahead; the ones after
+    // those, thumbnails. A zoomed-in photo pans instead.
+    type StripSlot = { photo: LibraryItem; source: PreviewSource };
+    // Places run from -STRIP_BASE to STRIP_BASE. Wide enough never to reach
+    // the end in one sitting, small enough for the scroller's width.
+    const STRIP_BASE = 1500;
+    // The scroller's stops, one per place, all of them there from the start
+    // and never changed. (Stops that come and go with the photos laid out
+    // make the system move the scroller to keep "the third stop" the third.)
+    const stripStops = Array.from({ length: 2 * STRIP_BASE + 1 }, (_, i) => i);
+    // `undefined`: not looked up yet; `null`: nothing there (the album ends).
+    let strip = $state.raw<Record<number, StripSlot | null | undefined>>({});
+    let stripAt = $state(0);
+    // What the strip last put on display. Anything else on display was put
+    // there from outside (a photo opened, one deleted): the strip starts
+    // again around it.
+    let stripShown: LibraryItem | null = null;
+    let stripSource: PreviewSource | null = null;
+    let stripRun = 0;
+    let pagerEl: HTMLDivElement | undefined = $state();
+    let pagerWidth = 0;
+    let previewZoomed = $state(false);
+
+    function placePager() {
+        const el = pagerEl;
+        if (!el || !el.clientWidth) return;
+        pagerWidth = el.clientWidth;
+        el.scrollLeft = (STRIP_BASE + stripAt) * pagerWidth;
+    }
+    function syncStrip() {
+        const shown = previewPhoto;
+        const src = previewSource;
+        if (!shown || !src) {
+            stripShown = null;
+            stripSource = null;
+            return;
         }
+        if (shown === stripShown && src === stripSource) return;
+        const samePhoto = shown === stripShown;
+        stripShown = shown;
+        stripSource = src;
+        const run = ++stripRun;
+        if (samePhoto) {
+            // Same photo, described anew (the album window around it was
+            // fetched again): its neighbours are looked up from there and
+            // swapped in together, so their views stay as they are.
+            void (async () => {
+                const next: Record<number, StripSlot | null | undefined> = { [stripAt]: { photo: shown, source: src } };
+                const at = stripAt;
+                for (const dir of [1, -1]) {
+                    for (let k = at + dir; Math.abs(k - at) <= 4; k += dir) {
+                        const from = next[k - dir];
+                        if (!from) break;
+                        next[k] = await previewNeighbour(from.photo, from.source, dir);
+                        if (run !== stripRun || at !== stripAt) return;
+                    }
+                }
+                strip = next;
+            })();
+            return;
+        }
+        stripAt = 0;
+        strip = { 0: { photo: shown, source: src } };
+        placePager();
+        void fillStrip();
+    }
+    $effect(() => {
+        void previewPhoto;
+        void previewSource;
+        untrack(syncStrip);
+    });
+
+    /** Looks up the places on either side of the photo on display. */
+    async function fillStrip() {
+        const run = stripRun;
+        let found = false;
+        for (const d of [1, 2, 3, 4]) {
+            for (const dir of [1, -1]) {
+                const k = stripAt + dir * d;
+                if (strip[k] !== undefined) continue;
+                const from = strip[k - dir];
+                if (!from) continue;
+                const hit = await previewNeighbour(from.photo, from.source, dir);
+                if (run !== stripRun) return;
+                if (strip[k] === undefined) strip = { ...strip, [k]: hit };
+                found = true;
+            }
+        }
+        // The scroller may have come to rest on a place before its photo was known.
+        if (found && !pagerRestTimer) pagerAtRest();
+    }
+
+    /** Puts the photo at a place on display. */
+    function showStripAt(k: number, place = false): boolean {
+        const slot = strip[k];
+        if (!slot) return false;
+        if (k === stripAt) return true;
+        stripAt = k;
+        // Not arrived at by scrolling: the scroller goes there first.
+        if (place) placePager();
+        const seq = ++previewSeq;
+        previewPhoto = slot.photo;
+        previewSource = slot.source;
+        stripShown = previewPhoto;
+        stripSource = slot.source;
+        // Places far behind are let go.
+        const kept: Record<number, StripSlot | null | undefined> = {};
+        for (const key of Object.keys(strip)) {
+            const n = Number(key);
+            if (Math.abs(n - k) <= 8) kept[n] = strip[n];
+        }
+        strip = kept;
+        if (slot.source.kind === 'album') void refreshAlbumWindow(slot.source.window, slot.source.pos, seq);
+        void fillStrip();
+        return true;
+    }
+
+    // The photo on display changes once the scroller has come to rest on a
+    // place, not while it moves: laying the places out again under a moving
+    // scroller makes the system drop its animation and jump to the nearest
+    // stop. At rest means no scroll event for a moment and exactly on a
+    // stop (fingers holding the photo halfway are not at rest).
+    let pagerRestTimer: ReturnType<typeof setTimeout> | null = null;
+    function handlePagerScroll() {
+        const el = pagerEl;
+        if (!el || !el.clientWidth || !previewPhoto) return;
+        // The area changed size: the same photo, at its place in the new size.
+        if (el.clientWidth !== pagerWidth) {
+            placePager();
+            return;
+        }
+        if (pagerRestTimer) clearTimeout(pagerRestTimer);
+        pagerRestTimer = setTimeout(pagerAtRest, 100);
+    }
+    function pagerAtRest() {
+        pagerRestTimer = null;
+        const el = pagerEl;
+        if (!el || !pagerWidth || el.clientWidth !== pagerWidth || !previewPhoto) return;
+        const place = el.scrollLeft / pagerWidth;
+        const k = Math.round(place);
+        if (Math.abs(place - k) * pagerWidth > 1) return;
+        let at = k - STRIP_BASE;
+        if (at === stripAt) return;
+        if (strip[at] === undefined) return;
+        // Past the end of the album: back to the last photo before it.
+        const back = at > stripAt ? -1 : 1;
+        while (at !== stripAt && !strip[at]) at += back;
+        if (at !== stripAt) showStripAt(at);
+        if (at !== k - STRIP_BASE) el.scrollTo({ left: (STRIP_BASE + at) * pagerWidth, behavior: "smooth" });
+    }
+    $effect(() => {
+        const el = pagerEl;
+        if (!el) return;
+        placePager();
+        const observer = new ResizeObserver(() => {
+            if (el.clientWidth !== pagerWidth) placePager();
+        });
+        observer.observe(el);
+        return () => observer.disconnect();
+    });
+
+    // What is laid out: the photo on display, a full view on either side,
+    // and thumbnails for the three beyond each, which is how far swipes can
+    // run on without the scroller coming to rest in between.
+    let stripPages = $derived.by(() => {
+        const pages: { k: number; photo: LibraryItem | null; full: boolean }[] = [];
+        if (!previewPhoto) return pages;
+        pages.push({ k: stripAt, photo: previewPhoto, full: true });
+        for (const dir of [1, -1]) {
+            for (let d = 1; d <= 4; d++) {
+                const slot = strip[stripAt + dir * d];
+                if (slot === null) break;
+                pages.push({ k: stripAt + dir * d, photo: slot?.photo ?? null, full: d === 1 });
+            }
+        }
+        return pages;
+    });
+
+    /** The arrow keys and the buttons: straight to the next place. */
+    async function navigatePreview(direction: "prev" | "next") {
+        if (!previewPhoto) return;
+        syncStrip();
+        const k = stripAt + (direction === "prev" ? -1 : 1);
+        if (strip[k] === undefined) await fillStrip();
+        showStripAt(k, true);
     }
 
     /** Desktop-only checks for the agent self-test: timeline, drawer paging, viewer. */
     async function agentDesktopSteps() {
         const out: { name: string; ok: boolean; detail?: unknown }[] = [];
+        // Each step is named in the app's log as it finishes: a run that
+        // stops with no report shows how far it got.
+        const said = (text: string) => invoke("mac_map_command", { command: "mapDebugLog", body: { text } }).catch(() => {});
+        const push = out.push.bind(out);
+        out.push = (...items) => {
+            for (const item of items) said(`step ${item.name}: ${item.ok ? "ok" : "NO"}`);
+            return push(...items);
+        };
+        said("desktop steps begin");
         let restoreFilter = () => {};
         const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
         const until = async (check: () => boolean, ms = 5000) => {
@@ -721,6 +927,139 @@
             click('[data-preview-rotate="left"]');
             await sleep(200);
             const back = box();
+
+            // A trackpad pinch over the large view zooms the photo, and the
+            // list underneath keeps its cell size.
+            const cellWidth = () => Math.round(
+                (document.querySelector("[data-hover-text]") as HTMLElement | null)?.getBoundingClientRect().width ?? 0);
+            const cellBefore = cellWidth();
+            {
+                const image = document.querySelector("[data-preview-image]") as HTMLElement | null;
+                const r = image?.getBoundingClientRect();
+                const x = (r?.left ?? 0) + (r?.width ?? 0) / 2;
+                const y = (r?.top ?? 0) + (r?.height ?? 0) / 2;
+                const pinch = (type: string, scale: number) => {
+                    const e = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+                    Object.defineProperty(e, "scale", { value: scale });
+                    (document.elementFromPoint(x, y) ?? image)?.dispatchEvent(e);
+                };
+                pinch("gesturestart", 1);
+                pinch("gesturechange", 2);
+                pinch("gestureend", 2);
+            }
+            await sleep(300);
+            const pinched = box();
+            const cellAfter = cellWidth();
+            out.push({
+                name: "desktop:preview-pinch-zooms-photo",
+                ok: pinched.w > back.w * 1.5 && cellAfter === cellBefore,
+                detail: { before: `${back.w}x${back.h}`, pinched: `${pinched.w}x${pinched.h}`, cellBefore, cellAfter },
+            });
+
+            // Two fingers sideways. The large view is one long sideways
+            // scroller; the photos never change place in it and the code
+            // never moves it during a swipe. Sliding along it, the middle of
+            // the screen only ever shows the photos passed, in order, each
+            // with a picture; where it comes to rest is the photo on
+            // display. Slides started before the last one finished (fast
+            // swiping) end on the right photo too. Zoomed in, the scroller
+            // does not move. (What moves the scroller here is the page:
+            // scripted wheel events do not scroll, and the app may not post
+            // real ones.)
+            {
+                const pagerNow = () => document.querySelector("[data-preview-pager]") as HTMLElement | null;
+                const zoomedLocked = getComputedStyle(pagerNow()!).overflowX === "hidden";
+                closePreview();
+                await sleep(200);
+                if (photo) await openFromLibrary(photo, 0);
+                await until(() => box().w > 0, 4000);
+                const el = pagerNow()!;
+                const pictureOf = (page: Element | null | undefined) =>
+                    (page?.querySelector("img[alt]:not([alt=''])") ?? null) as HTMLImageElement | null;
+                // Something to look at in the place: the picture itself, or
+                // the thumbnail standing in while the picture loads.
+                const drawn = (img: HTMLImageElement | null) => !!img && [...(img.closest("[data-preview-page]")?.querySelectorAll("img") ?? [])]
+                    .some((i) => i.complete && i.naturalWidth > 0 && !i.classList.contains("opacity-0") && !i.classList.contains("hidden"));
+                const pagesNow = () => [...el.querySelectorAll("[data-preview-page]")];
+                const allDrawn = () => pagesNow().length === 9 && pagesNow().every((p) => drawn(pictureOf(p)));
+                const neighboursLoaded = await until(allDrawn, 4000);
+                const w = el.clientWidth;
+                const r = el.getBoundingClientRect();
+                const start = previewPosition.index;
+                const home = el.scrollLeft;
+                const snap = getComputedStyle(el).scrollSnapType;
+                const names: string[] = [];
+                for (let i = 0; i < 6; i++) names.push(((await pager.item(i))?.path ?? "").split("/").pop() ?? "");
+                const middle = () => document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest("[data-preview-page]");
+                // Watches the middle of the screen frame by frame.
+                const watch = async (ms: number) => {
+                    const seen: string[] = [];
+                    const trace: number[] = [];
+                    let blank = 0;
+                    let jumps = 0;
+                    let last = el.scrollLeft;
+                    const t0 = performance.now();
+                    while (performance.now() - t0 < ms) {
+                        await new Promise((f) => requestAnimationFrame(f));
+                        const img = pictureOf(middle());
+                        const name = img?.alt ?? "";
+                        if (seen[seen.length - 1] !== name) seen.push(name);
+                        if (!drawn(img)) blank++;
+                        // The scroller only ever glides: a frame-to-frame
+                        // move of half a page or more is a jump.
+                        if (Math.abs(el.scrollLeft - last) > w / 2) jumps++;
+                        if (trace.length < 40 && trace[trace.length - 1] !== Math.round(el.scrollLeft - home)) trace.push(Math.round(el.scrollLeft - home));
+                        last = el.scrollLeft;
+                    }
+                    return { order: seen.join(">"), blank, jumps, index: previewPosition.index, left: el.scrollLeft - home, trace: trace.join(","), w, home, cw: el.clientWidth };
+                };
+                const to = (place: number) => el.scrollTo({ left: home + place * w, behavior: "smooth" });
+
+                // One slide to the next photo, with a picture on the way.
+                to(1);
+                setTimeout(() => invoke("mac_map_command", {
+                    command: "mapDebugSnapshot",
+                    body: { path: dbPath.replace(/footos\.db$/, "window-swipe.png") },
+                }).catch(() => {}), 130);
+                const one = await watch(1200);
+                // Fast: the next slide starts while the last still moves.
+                const fastWatch = watch(1800);
+                to(2);
+                await sleep(120);
+                to(3);
+                await sleep(120);
+                to(4);
+                const fast = await fastWatch;
+                // And back two.
+                const backWatch = watch(1800);
+                to(3);
+                await sleep(100);
+                to(2);
+                const back = await backWatch;
+                // The arrow key from here: straight to the next.
+                await navigatePreview("next");
+                await sleep(300);
+                const key = { index: previewPosition.index, left: el.scrollLeft - home };
+
+                const inOrder = (order: string, from: number, end: number) => {
+                    const step = end > from ? 1 : -1;
+                    const want: string[] = [];
+                    for (let i = from; i !== end + step; i += step) want.push(names[i]);
+                    return order === want.join(">");
+                };
+                const oneOk = inOrder(one.order, 0, 1) && one.blank === 0 && one.jumps === 0 && one.index === start + 1 && one.left === w;
+                const fastOk = inOrder(fast.order, 1, 4) && fast.blank === 0 && fast.jumps === 0 && fast.index === start + 4 && fast.left === 4 * w;
+                const backOk = inOrder(back.order, 4, 2) && back.blank === 0 && back.jumps === 0 && back.index === start + 2 && back.left === 2 * w;
+                const keyOk = key.index === start + 3 && key.left === 3 * w;
+                said(`swipe one ${JSON.stringify(one)}`);
+                said(`swipe fast ${JSON.stringify(fast)}`);
+                said(`swipe back ${JSON.stringify(back)}`);
+                out.push({
+                    name: "desktop:preview-swipe",
+                    ok: zoomedLocked && neighboursLoaded && snap.includes("mandatory") && oneOk && fastOk && backOk && keyOk,
+                    detail: { zoomedLocked, neighboursLoaded, width: w, oneOk, fastOk, backOk, keyOk, key: `${key.index}@${key.left}`, blankFrames: one.blank + fast.blank + back.blank, jumps: one.jumps + fast.jumps + back.jumps },
+                });
+            }
             closePreview();
 
             mediaFilter = "video";
@@ -1609,17 +1948,46 @@
         <div
             class="absolute top-12 left-0 right-64 bottom-0"
             onclick={(e) => e.stopPropagation()}
+            data-preview-area
         >
-            {#key previewPhoto.path}
-                <ImagePreview
-                    src={previewPhoto.path}
-                    alt={previewPhoto.path.split("/").pop() || "Preview"}
-                    thumbPath={previewPhoto.thumb_path || ""}
-                    {t}
-                    mediaType={previewPhoto.media_type || 'photo'}
-                    videoPath={previewPhoto.video_path || ''}
-                />
-            {/key}
+            <div
+                bind:this={pagerEl}
+                class="preview-pager absolute inset-0"
+                style="overflow-x: {previewZoomed ? 'hidden' : 'auto'};"
+                onscroll={handlePagerScroll}
+                data-preview-pager
+            >
+                {#each stripStops as i (i)}
+                    <div class="preview-stop" style="left: {i * 100}%;"></div>
+                {/each}
+                {#each stripPages as page (page.k)}
+                    <div
+                        class="preview-page"
+                        style="left: {(STRIP_BASE + page.k) * 100}%;"
+                        data-preview-page={page.k - stripAt}
+                    >
+                        {#if page.photo && page.full}
+                            <ImagePreview
+                                src={page.photo.path}
+                                alt={page.photo.path.split("/").pop() || "Preview"}
+                                thumbPath={page.photo.thumb_path || ""}
+                                {t}
+                                mediaType={page.photo.media_type || 'photo'}
+                                videoPath={page.photo.video_path || ''}
+                                active={page.k === stripAt}
+                                onZoomed={(zoomed: boolean) => (previewZoomed = zoomed)}
+                            />
+                        {:else if page.photo?.thumb_path}
+                            <img
+                                src={convertFileSrc(page.photo.thumb_path)}
+                                alt={page.photo.path.split("/").pop() || "Preview"}
+                                class="absolute inset-0 w-full h-full object-contain"
+                                draggable="false"
+                            />
+                        {/if}
+                    </div>
+                {/each}
+            </div>
         </div>
 
         <!-- Info Panel -->
@@ -1854,5 +2222,29 @@
 <style>
     :global(body) {
         overflow: hidden;
+    }
+    /* The large view's sideways scroller: one stop per photo. */
+    .preview-pager {
+        overflow-y: hidden;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+    }
+    .preview-pager::-webkit-scrollbar {
+        display: none;
+    }
+    .preview-pager > :global(.preview-page) {
+        position: absolute;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+    }
+    .preview-pager > :global(.preview-stop) {
+        position: absolute;
+        top: 0;
+        width: 100%;
+        height: 1px;
+        scroll-snap-align: start;
+        scroll-snap-stop: always;
     }
 </style>
